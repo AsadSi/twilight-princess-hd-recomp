@@ -863,13 +863,16 @@ static void write_back_linear_copy(Surface* img,uint32_t layer,GX2Surface* d,uin
     auto dtm=static_cast<Latte::E_HWTILEMODE>(di.hwTileMode);
     if(!linear_tile_mode(dtm)||dstSlice>=di.depth||!can_write_back(img))return;
     const uint32_t bytes=img->fmt.bytesPerBlock;
+    const uint64_t r0=rprof::now_ns();
     auto texels=read_guest_texels(img,layer,w,h);
     for(uint32_t y=0;y<h;++y)for(uint32_t x=0;x<w;++x)
         memcpy(mem::ptr(dbase+element_offset(di,dtm,x,y,dstSlice,bytes*8,d->swizzle,nullptr,false)),texels.data()+(size_t(y)*w+x)*bytes,bytes);
     img->writtenBackSeq=img->writeSeq;
+    rprof::add_write_back(0,1,texels.size(),rprof::now_ns()-r0);
 }
 // GX2DrawDone: linear render targets drawn since their last write-back
 void write_back_linear_targets() {
+    const uint64_t t0=rprof::now_ns();uint64_t readNs=0,bytesDone=0;uint32_t count=0;
     for(auto& [addr,surface]:R.surfaces) {
         Surface* s=surface.get();
         if(!s->gpuWritten||s->isDepth||s->writtenBackSeq==s->writeSeq||!s->image)continue;
@@ -877,10 +880,13 @@ void write_back_linear_targets() {
         s->writtenBackSeq=s->writeSeq;
         if(static_cast<Latte::E_HWTILEMODE>(s->tileMode)!=Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED||s->arrayLayers!=1||!can_write_back(s))continue;
         const uint32_t bytes=s->fmt.bytesPerBlock,pitch=std::max(s->pitch,s->width);
+        const uint64_t r0=rprof::now_ns();
         auto texels=read_guest_texels(s,0,s->width,s->height);
         for(uint32_t y=0;y<s->height;++y)
             memcpy(mem::ptr(addr+y*pitch*bytes),texels.data()+size_t(y)*s->width*bytes,size_t(s->width)*bytes);
+        readNs+=rprof::now_ns()-r0;bytesDone+=texels.size();++count;
     }
+    rprof::add_write_back(std::max<uint64_t>(1,rprof::now_ns()-t0-readNs),count,bytesDone,readNs);
 }
 void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32_t dstAddr,uint32_t dstMip,uint32_t dstSlice) {
     auto* s=reinterpret_cast<GX2Surface*>(mem::ptr(srcAddr));auto* d=reinterpret_cast<GX2Surface*>(mem::ptr(dstAddr));
