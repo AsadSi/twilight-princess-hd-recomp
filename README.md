@@ -10,8 +10,14 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
-### Next update
+### v0.2.5
 
+- **Fixed: much lower frame rate on Windows and Linux PCs with a dedicated graphics card (Vulkan)**
+  (issue #44). Three renderer shortcuts that v0.2.4 turned on for all platforms compared new vertex
+  and uniform data against the previous copy in the GPU's upload memory; reading that memory back is
+  very slow on AMD and NVIDIA cards (one report went from 30 fps in v0.2.1 to 12 fps). The renderer
+  now keeps those comparison copies in normal memory and never reads GPU upload memory, which also
+  speeds up an older index-data path when the buffer cache is off.
 - **Gyro aiming** (issue #45; settings overlay → **Controls** → **Gyro…**): aim the bow, hookshot,
   boomerang, telescope, Picto Box and grappling hook in first person by moving your controller, as
   with the Wii U GamePad. Sources: the gyro of a **DualSense, DualShock 4, Switch Pro, Joy-Con or
