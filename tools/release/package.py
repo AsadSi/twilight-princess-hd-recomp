@@ -230,7 +230,11 @@ def build_link_recipe(build, pkg, linkonly):
             if name in ("libgamecode.a", "gamecode.lib"):
                 recipe.append("{gamecode}")
                 continue
-            if a.lower().endswith(OBJ_EXT):
+            # the game's Windows resources (VERSIONINFO + manifest) from our own generated .rc
+            # (cmake/WindowsResources.cmake; windres writes a COFF object named .rc.res)
+            own_res = re.fullmatch(r"CMakeFiles/wwhd\.dir/generated/wwhd\.rc\.res",
+                                   os.path.relpath(path, build).replace("\\", "/"))
+            if a.lower().endswith(OBJ_EXT) or own_res:
                 # flatten CMakeFiles/wwhd.dir/runtime/src/x.cpp.o -> obj/runtime_src_x.cpp.o
                 rel = os.path.relpath(path, build).replace("\\", "/")
                 rel = re.sub(r"^CMakeFiles/[^/]+\.dir/", "", rel)
