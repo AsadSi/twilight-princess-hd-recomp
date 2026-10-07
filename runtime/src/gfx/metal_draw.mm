@@ -229,7 +229,35 @@ struct Shader {
     LatteDecompilerShader* dec = nullptr;
     id<MTLFunction> fn = nil;                 // valid once state == CS_READY
     std::atomic<int> state{CS_PENDING};
+    int attempts = 0;                         // Metal compiles started (render thread)
+    uint64_t retryFrame = 0;                  // a failed compile is retried from this frame on (0: not scheduled)
 };
+
+// A Metal compile or pipeline build can fail for reasons that have nothing to do with the source:
+// the compiler service (MTLCompilerService) being interrupted or out of memory, which is more likely
+// during the startup burst of cache replay and background builds. A failure used to be final for
+// the whole session, so one unlucky compile could drop a pass for good (issue #47: the ambient
+// occlusion pass missing left every shadowed area black until the next launch). Failed compiles are
+// retried a few times on later frames (backoff kRetryFrames * attempts); translation errors (no
+// MSL at all) still fail at once.
+// test aid: WWHD_TEST_FAIL_COMPILES=n fails the first n attempts of every shader and pipeline compile
+constexpr int kCompileAttempts = 4;
+constexpr uint64_t kRetryFrames = 30;
+static const int g_test_fail_compiles = getenv("WWHD_TEST_FAIL_COMPILES") ? atoi(getenv("WWHD_TEST_FAIL_COMPILES")) : 0;
+
+// render thread: true when a failed compile with attempts left is due for its retry (schedules the
+// retry on the first call after the failure)
+template <class T>
+static bool retry_due(T* x) {
+    if (x->attempts >= kCompileAttempts) return false;
+    if (!x->retryFrame) {
+        x->retryFrame = R.frame + kRetryFrames * (uint64_t)x->attempts;
+        return false;
+    }
+    if (R.frame < x->retryFrame) return false;
+    x->retryFrame = 0;
+    return true;
+}
 static std::unordered_map<uint64_t, Shader*> g_shaders;
 // Metal compiles (shaders and pipelines) started and not finished yet; background work holds back while it's high
 static std::atomic<int> g_compiles_in_flight{0};
@@ -237,8 +265,10 @@ static std::atomic<int> g_compiles_in_flight{0};
 static double g_t_decompile, g_t_msl, g_t_pipeline;
 static double now_ms() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
-static void report_compile_error(const char* src, uint64_t key, NSError* err) {
-    LOG("[gfx] shader %016llx failed to compile: %s", (unsigned long long)key, err.localizedDescription.UTF8String);
+static void report_compile_error(const char* src, uint64_t key, NSError* err, int attempt, bool libraryBuilt) {
+    const char* why = libraryBuilt ? "entry point missing" : err ? err.localizedDescription.UTF8String : "no error given";
+    LOG("[gfx] shader %016llx failed to compile (attempt %d of %d%s): %s", (unsigned long long)key, attempt, kCompileAttempts,
+        attempt < kCompileAttempts ? ", will retry" : "", why ? why : "?");
     static std::atomic<int> dumped{0};
     if (dumped++ < 3) {
         FILE* f = fopen([NSString stringWithFormat:@"failed_shader_%016llx.metal", (unsigned long long)key].UTF8String, "w");
@@ -306,6 +336,8 @@ static std::string snap_texcoords(const char* src) {
 }
 
 static void compile_msl(Shader* sh, const char* rawSrc, uint64_t key) {
+    const int attempt = ++sh->attempts;
+    const bool injectFailure = attempt <= g_test_fail_compiles;
     MTLCompileOptions* opt = [MTLCompileOptions new];
     if (@available(macOS 15.0, *)) {
         opt.mathMode = MTLMathModeSafe;
@@ -332,19 +364,22 @@ static void compile_msl(Shader* sh, const char* rawSrc, uint64_t key) {
     }
     if (g_sync_shaders) {
         NSError* err = nil;
-        id<MTLLibrary> lib = [R.device newLibraryWithSource:source options:opt error:&err];
-        if (!lib) { report_compile_error(src, key, err); sh->state = CS_FAILED; return; }
-        sh->fn = [lib newFunctionWithName:entry];
-        sh->state = sh->fn ? CS_READY : CS_FAILED;
+        id<MTLLibrary> lib = injectFailure ? nil : [R.device newLibraryWithSource:source options:opt error:&err];
+        id<MTLFunction> fn = lib ? [lib newFunctionWithName:entry] : nil;
+        if (!fn) { report_compile_error(src, key, err, attempt, lib != nil); sh->state = CS_FAILED; return; }
+        sh->fn = fn;
+        sh->state = CS_READY;
         return;
     }
     std::string copy = src;
     g_compiles_in_flight++;
     [R.device newLibraryWithSource:source options:opt completionHandler:^(id<MTLLibrary> lib, NSError* err) {
         g_compiles_in_flight--;
-        if (!lib) { report_compile_error(copy.c_str(), key, err); compile_done(sh->state, CS_FAILED); return; }
-        sh->fn = [lib newFunctionWithName:entry];
-        compile_done(sh->state, sh->fn ? CS_READY : CS_FAILED);
+        if (injectFailure) lib = nil;
+        id<MTLFunction> fn = lib ? [lib newFunctionWithName:entry] : nil;
+        if (!fn) { report_compile_error(copy.c_str(), key, err, attempt, lib != nil); compile_done(sh->state, CS_FAILED); return; }
+        sh->fn = fn;
+        compile_done(sh->state, CS_READY);
     }];
 }
 
@@ -421,6 +456,15 @@ static std::vector<Shader*> g_deferred_shaders;
 
 static void compile_deferred(Shader* s) {
     if (s->state != CS_DEFERRED) return;
+    s->state = CS_PENDING;
+    compile_msl(s, s->dec->strBuf_shaderSource->c_str(), s->key);
+}
+
+// render thread: start the retry of a failed Metal compile when it is due (see kCompileAttempts).
+// Shaders that failed to translate (no dec) never compiled and are not retried.
+static void retry_failed_compile(Shader* s) {
+    if (!s || !s->dec || s->state.load(std::memory_order_acquire) != CS_FAILED || !retry_due(s)) return;
+    LOG("[gfx] retrying shader %016llx compile (attempt %d of %d)", (unsigned long long)s->key, s->attempts + 1, kCompileAttempts);
     s->state = CS_PENDING;
     compile_msl(s, s->dec->strBuf_shaderSource->c_str(), s->key);
 }
@@ -526,6 +570,8 @@ static MTLStencilOperation stencil_op(uint32_t f) {
 struct Pipeline {
     id<MTLRenderPipelineState> state = nil;   // valid once status == CS_READY
     std::atomic<int> status{CS_PENDING};
+    int attempts = 0;                         // builds started (render thread)
+    uint64_t retryFrame = 0;                  // a failed build is retried from this frame on (0: not scheduled)
 };
 static std::unordered_map<uint64_t, Pipeline*> g_pipelines;
 
@@ -590,11 +636,26 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
     h = hash_regs(regs, REGADDR::CB_COLOR_CONTROL, 1, h);
     h = hash_regs(regs, REGADDR::CB_TARGET_MASK, 1, h);
     auto it = g_pipelines.find(h);
-    if (it != g_pipelines.end())
-        return wait_compiled(it->second->status) ? it->second->state : nil;
-    auto* pl = new Pipeline();
-    g_pipelines[h] = pl;
-    cache_record_pipeline(regs, vs, ps, fsKey, tf);
+    Pipeline* pl;
+    if (it != g_pipelines.end()) {
+        pl = it->second;
+        // a failed build is retried a few times on later frames (see kCompileAttempts)
+        if (pl->status.load(std::memory_order_acquire) != CS_FAILED || !retry_due(pl))
+            return wait_compiled(pl->status) ? pl->state : nil;
+        LOG("[gfx] retrying pipeline %016llx (attempt %d of %d)", (unsigned long long)h, pl->attempts + 1, kCompileAttempts);
+        pl->status = CS_PENDING;
+    } else {
+        pl = new Pipeline();
+        g_pipelines[h] = pl;
+        cache_record_pipeline(regs, vs, ps, fsKey, tf);
+    }
+    const int attempt = ++pl->attempts;
+    const bool injectFailure = attempt <= g_test_fail_compiles;
+    auto pipelineFailed = [h, attempt](NSError* err) {
+        const char* why = err ? err.localizedDescription.UTF8String : "no error given";
+        LOG("[gfx] pipeline %016llx creation failed (attempt %d of %d%s): %s", (unsigned long long)h, attempt, kCompileAttempts,
+            attempt < kCompileAttempts ? ", will retry" : "", why ? why : "?");
+    };
 
     MTLRenderPipelineDescriptor* d = [MTLRenderPipelineDescriptor new];
     d.vertexFunction = vs->fn;
@@ -662,16 +723,17 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
     if (g_sync_shaders) {
         NSError* err = nil;
         double t0 = now_ms();
-        pl->state = [R.device newRenderPipelineStateWithDescriptor:d error:&err];
+        pl->state = injectFailure ? nil : [R.device newRenderPipelineStateWithDescriptor:d error:&err];
         g_t_pipeline += now_ms() - t0;
-        if (!pl->state) LOG("[gfx] pipeline creation failed: %s", err.localizedDescription.UTF8String);
+        if (!pl->state) pipelineFailed(err);
         pl->status = pl->state ? CS_READY : CS_FAILED;
         return pl->state;
     }
     g_compiles_in_flight++;
     [R.device newRenderPipelineStateWithDescriptor:d completionHandler:^(id<MTLRenderPipelineState> p, NSError* err) {
         g_compiles_in_flight--;
-        if (!p) LOG("[gfx] pipeline creation failed: %s", err.localizedDescription.UTF8String);
+        if (injectFailure) p = nil;
+        if (!p) pipelineFailed(err);
         pl->state = p;
         compile_done(pl->status, p ? CS_READY : CS_FAILED);
     }];
@@ -1379,13 +1441,16 @@ static void build_pending_pipelines(int budget, int maxInFlight) {
         PipelineRecipe& r = g_pending_pipelines[i];
         auto vi = g_shaders.find(r.vsKey), pi = g_shaders.find(r.psKey);
         auto fi = g_fetch.find(r.fsKey);
+        auto finallyFailed = [](Shader* sh) { return sh->state == CS_FAILED && (!sh->dec || sh->attempts >= kCompileAttempts); };
         if (vi == g_shaders.end() || pi == g_shaders.end() || fi == g_fetch.end() || !fi->second ||
-            vi->second->state == CS_FAILED || pi->second->state == CS_FAILED) {
+            finallyFailed(vi->second) || finallyFailed(pi->second)) {
             g_pending_pipelines[i] = g_pending_pipelines.back();  // unusable recipe
             g_pending_pipelines.pop_back();
             g_recipes_dropped++;
             continue;
         }
+        retry_failed_compile(vi->second);
+        retry_failed_compile(pi->second);
         if (vi->second->state != CS_READY || pi->second->state != CS_READY) { i++; continue; }
         for (int k = 0; k < 8; k++) regs[REGADDR::CB_BLEND0_CONTROL + k] = r.blend[k];
         regs[REGADDR::CB_COLOR_CONTROL] = r.colorControl;
@@ -1476,6 +1541,8 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     }
     Shader* vs = get_shader(regs, true, fs, fsKey);
     Shader* ps = get_shader(regs, false, fs, fsKey);
+    retry_failed_compile(vs);
+    retry_failed_compile(ps);
     if (!vs || !ps || vs->state == CS_FAILED || ps->state == CS_FAILED) { g_skip[SK_NO_SHADER]++; return; }
     compile_deferred(vs);
     compile_deferred(ps);
