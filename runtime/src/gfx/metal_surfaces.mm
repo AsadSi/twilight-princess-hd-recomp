@@ -329,7 +329,8 @@ static Surface* adopt_newer_alias(Surface* s) {
     return s;
 }
 
-Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
+// the existing surface a lookup resolves to, or nullptr
+static Surface* find_surface(const SurfaceDesc& d, bool forRendering) {
     auto range = R.surfaces.equal_range(d.addr);
     Surface* exact = nullptr;
     // sampling a GPU-written surface: several can alias one address (mip chains rendered into the same
@@ -363,8 +364,11 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     }
     if (exact && (exact->gpuWritten || !rendered || exact->writeSeq > rendered->writeSeq)) return exact->gpuWritten ? adopt_newer_alias(exact) : exact;
     if (rendered) return rendered;
-    if (exact) return exact;
+    return exact;
+}
 
+Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
+    if (Surface* found = find_surface(d, forRendering)) return found;
     auto s = std::make_unique<Surface>();
     s->addr = d.addr;
     s->mipAddr = d.mipAddr;
@@ -543,6 +547,17 @@ Surface* sampled_texture(const uint32_t* w, bool isDepthSampler) {
     d.tileMode = (uint32_t)tileMode;
     d.swizzle = swizzle;
     d.isDepth = false;
+    // a depth-compare fetch (shadow maps) reads the depth buffer the game rendered at this address.
+    // Look among depth surfaces first, like the Vulkan renderer: the generic lookup below also
+    // accepts colour surfaces, and a GPU-written colour surface of the same size and format at that
+    // address (memory the game used for something else earlier in the session) would win over it,
+    // which makes the result depend on what was rendered before. No depth surface there yet (the
+    // map isn't rendered): the generic lookup as before, no CPU-uploaded depth texture.
+    if (isDepthSampler) {
+        SurfaceDesc dd = d;
+        dd.isDepth = true;
+        if (Surface* s = find_surface(dd, false); s && s->gpuWritten) return s;
+    }
     Surface* s = find_or_create_surface(d, false);
     if (s && !s->gpuWritten && s->lastCheckedFrame != R.frame) {
         s->lastCheckedFrame = R.frame;
