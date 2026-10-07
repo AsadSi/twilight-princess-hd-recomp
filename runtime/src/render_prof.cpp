@@ -107,7 +107,10 @@ void mark_slow(Phase p) {
 uint64_t op_begin(Op op) {
     if (!enabled()) return 0;
     W.opCount[op]++;
-    if ((op == kOpDraw || op == kOpRegs) && (++sampleCounter[op] & kSampleMask)) return 0;
+    if ((op == kOpDraw || op == kOpRegs) && (++sampleCounter[op] & kSampleMask)) {
+        if (op == kOpDraw) g_draw_sampled = false;  // also after a sampled draw that threw
+        return 0;
+    }
     uint64_t t = now_ns();
     if (op == kOpDraw) {
         g_draw_sampled = true;
