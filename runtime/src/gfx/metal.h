@@ -26,6 +26,7 @@ struct Surface {
     bool isDepth = false;
     bool gpuWritten = false;   // contents produced by the GPU; never reload from guest memory
     uint64_t writeSeq = 0;     // when the GPU last wrote it (several surfaces can alias one address)
+    uint64_t writtenBackSeq = 0;  // writeSeq when last written back to guest memory (linear surfaces)
     uint64_t contentHash = 0;  // hash of all guest bytes (every level) at the last check
     uint64_t lastCheckedFrame = ~0ull;
     uint64_t sparseHash = 0;   // fallback without write tracking: cheap per-frame sampled check
@@ -61,6 +62,7 @@ struct Renderer {
 
     id<MTLCommandBuffer> cmd = nil;
     id<MTLRenderCommandEncoder> enc = nil;
+    bool binding = false;  // a draw is binding its textures to the open encoder (no blits now)
     // attachments of the open render encoder
     Surface* passColor[8] = {};
     Surface* passDepth = nullptr;

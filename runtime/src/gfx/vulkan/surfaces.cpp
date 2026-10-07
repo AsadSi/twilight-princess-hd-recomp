@@ -629,6 +629,38 @@ static Surface* rescale(Surface* s) {
     s->extent=replacement.extent;s->layout=replacement.layout;s->usage=replacement.usage;s->createFlags=replacement.createFlags;s->scale=replacement.scale;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
     forget_texture_views();return s;
 }
+// One guest surface can be rendered and sampled through views of different formats with the same
+// texel bits, e.g. RGBA8 and RGBA8 sRGB: the Picto Box draws its picture through the sRGB view and
+// then through the plain one (issue #53). Each format gets its own image here, so before one is
+// used, take over the texels of a more recent compatible one (a raw copy, as the memory is shared).
+static Surface* adopt_newer_alias(Surface* s) {
+    if(!s||!s->image||s->isDepth||s->fmt.compressed||s->fmt.convert!=Convert::NONE)return s;
+    Surface* newest=nullptr;
+    auto range=R.surfaces.equal_range(s->addr);
+    for(auto it=range.first;it!=range.second;++it) {
+        Surface* o=it->second.get();
+        if(o==s||!o->gpuWritten||!o->image||o->isDepth||o->fmt.compressed||o->fmt.convert!=Convert::NONE)continue;
+        if(s->gpuWritten&&o->writeSeq<=s->writeSeq)continue;
+        if((o->format&0x3F)!=(s->format&0x3F)||o->fmt.hostBytesPerBlock!=s->fmt.hostBytesPerBlock)continue;
+        if(o->imageType!=s->imageType||o->arrayLayers!=s->arrayLayers||o->extent.width!=s->extent.width||
+           o->extent.height!=s->extent.height||o->extent.depth!=s->extent.depth)continue;
+        if(!newest||o->writeSeq>newest->writeSeq)newest=o;
+    }
+    if(!newest)return s;
+    end_encoder();
+    transition_image(newest,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+    transition_image(s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+    std::vector<VkImageCopy> regions;
+    for(uint32_t mip=0;mip<std::min(s->mips,newest->mips);++mip) {
+        VkImageCopy region{};region.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,mip,0,s->arrayLayers};region.dstSubresource=region.srcSubresource;
+        region.extent={std::max(1u,s->extent.width>>mip),std::max(1u,s->extent.height>>mip),std::max(1u,s->extent.depth>>mip)};
+        regions.push_back(region);
+    }
+    vkCmdCopyImage(command_buffer(),newest->image,newest->layout,s->image,s->layout,uint32_t(regions.size()),regions.data());
+    transition_image(newest,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);transition_image(s,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    mark_gpu_written(s);
+    return s;
+}
 Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     if(!d.addr)return nullptr;
     auto range=R.surfaces.equal_range(d.addr);
@@ -649,18 +681,19 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
         bool sameVolume=(s->imageType==VK_IMAGE_TYPE_3D)==(dimType(d.dim)==VK_IMAGE_TYPE_3D);
         if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&sameVolume&&
            (forRendering||s->mips>=d.mips||s->gpuWritten)) {
-            if(forRendering)return rescale(s);
+            if(forRendering)return adopt_newer_alias(rescale(s));
             if(!exact||s->writeSeq>exact->writeSeq)exact=s;
         } else if(!forRendering&&s->gpuWritten&&(s->format&0x3f)==(d.format&0x3f))consider(s);
     }
-    if(exact&&(exact->gpuWritten||!rendered||exact->writeSeq>rendered->writeSeq))return exact;
+    if(exact&&(exact->gpuWritten||!rendered||exact->writeSeq>rendered->writeSeq))return exact->gpuWritten?adopt_newer_alias(exact):exact;
     if(rendered)return rendered;if(exact)return exact;
     auto s=std::make_unique<Surface>();
     s->addr=d.addr;s->mipAddr=d.mipAddr;s->width=std::max(d.width,1u);s->height=std::max(d.height,1u);
     s->slices=std::max(d.slices,1u);s->pitch=d.pitch;s->mips=forRendering?1:std::max(d.mips,1u);
     s->format=d.format;s->dim=d.dim;s->tileMode=d.tileMode;s->swizzle=d.swizzle;s->isDepth=d.isDepth;
     s->fmt=format_info(d.format,d.isDepth);create_surface_image(s.get(),forRendering);
-    auto* raw=s.get();R.surfaces.emplace(d.addr,std::move(s));return raw;
+    auto* raw=s.get();R.surfaces.emplace(d.addr,std::move(s));
+    return forRendering?adopt_newer_alias(raw):raw;
 }
 static uint32_t mip_base(Surface* s,uint32_t level) {
     if(!level)return s->addr;
@@ -778,6 +811,77 @@ void clear_depth_stencil(const uint32_t*,uint32_t db,float depth,uint32_t stenci
     VkClearDepthStencilValue value{depth,stencil};VkImageSubresourceRange range{aspects,0,1,first,num};
     vkCmdClearDepthStencilImage(command_buffer(),s->image,s->layout,&value,1,&range);mark_gpu_written(s);
 }
+// ---------------------------------------------------------------- write-back to guest memory
+// Render results stay on the GPU, except where the game reads them with the CPU: render targets and
+// GX2CopySurface destinations with a linear tile mode (as Cemu reads back linear surfaces). The Picto
+// Box renders its picture into a linear-aligned target and JPEG-encodes it from guest memory (issue
+// #53). Texels are written at the guest size; only formats whose host texels are the guest's bytes.
+static bool linear_tile_mode(Latte::E_HWTILEMODE tm) {
+    return tm==Latte::E_HWTILEMODE::TM_LINEAR_GENERAL||tm==Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED;
+}
+static bool can_write_back(const Surface* img) {
+    const FormatInfo& f=img->fmt;
+    bool ok=!f.compressed&&!f.depth&&f.convert==Convert::NONE&&f.hostBytesPerBlock==f.bytesPerBlock&&img->imageType==VK_IMAGE_TYPE_2D;
+    if(!ok) {
+        static bool logged=false;
+        if(!logged)LOG("[gfx] Vulkan: linear surface %08X (format %X) is not written back to guest memory",img->addr,img->format);
+        logged=true;
+    }
+    return ok;
+}
+// the texels of one layer of img at the guest size w x h, read from the GPU (waits for it)
+static std::vector<uint8_t> read_guest_texels(Surface* img,uint32_t layer,uint32_t w,uint32_t h) {
+    const uint32_t bytes=img->fmt.bytesPerBlock;
+    Surface temp;Surface* src=img;
+    if(img->extent.width!=img->width||img->extent.height!=img->height) {
+        // a render target at the internal resolution: filter it down to the guest size first
+        temp.width=img->width;temp.height=img->height;temp.slices=std::max(img->slices,1u);temp.dim=img->dim;temp.format=img->format;temp.fmt=img->fmt;
+        create_surface_image(&temp,false);
+        src=&temp;
+    }
+    Buffer b=create_readback_buffer(VkDeviceSize(w)*h*bytes);
+    try {
+        if(src==&temp)resample(img,&temp,temp.arrayLayers,1,1,0,0);
+        transition_image(src,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+        VkBufferImageCopy region{};region.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,layer,1};region.imageExtent={w,h,1};
+        auto cmd=command_buffer();vkCmdCopyImageToBuffer(cmd,src->image,src->layout,b.buffer,1,&region);
+        VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
+        barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.buffer=b.buffer;barrier.size=VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&barrier,0,nullptr);
+        transition_image(src,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        flush();  // waits for the GPU
+        const auto* raw=static_cast<const uint8_t*>(b.mapped);
+        std::vector<uint8_t> texels(raw,raw+size_t(w)*h*bytes);
+        defer_buffer(b);if(src==&temp)destroy_surface_image(&temp);
+        return texels;
+    } catch(...) { defer_buffer(b);if(src==&temp)destroy_surface_image(&temp);throw; }
+}
+// GX2CopySurface done on the GPU into a linear destination: the game reads it once the call returns
+static void write_back_linear_copy(Surface* img,uint32_t layer,GX2Surface* d,uint32_t dbase,uint32_t dstMip,uint32_t dstSlice,uint32_t w,uint32_t h) {
+    LatteAddrLib::AddrSurfaceInfo_OUT di{};
+    LatteAddrLib::GX2CalculateSurfaceInfo(d->format,d->width,d->height,d->depth,d->dim,d->tileMode,d->aa,dstMip,&di);
+    auto dtm=static_cast<Latte::E_HWTILEMODE>(di.hwTileMode);
+    if(!linear_tile_mode(dtm)||dstSlice>=di.depth||!can_write_back(img))return;
+    const uint32_t bytes=img->fmt.bytesPerBlock;
+    auto texels=read_guest_texels(img,layer,w,h);
+    for(uint32_t y=0;y<h;++y)for(uint32_t x=0;x<w;++x)
+        memcpy(mem::ptr(dbase+element_offset(di,dtm,x,y,dstSlice,bytes*8,d->swizzle,nullptr,false)),texels.data()+(size_t(y)*w+x)*bytes,bytes);
+    img->writtenBackSeq=img->writeSeq;
+}
+// GX2DrawDone: linear render targets drawn since their last write-back
+void write_back_linear_targets() {
+    for(auto& [addr,surface]:R.surfaces) {
+        Surface* s=surface.get();
+        if(!s->gpuWritten||s->isDepth||s->writtenBackSeq==s->writeSeq||!s->image)continue;
+        // linear aligned only: a tile mode of 0 can also be GX2's "default" (a tiled copy destination)
+        s->writtenBackSeq=s->writeSeq;
+        if(static_cast<Latte::E_HWTILEMODE>(s->tileMode)!=Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED||s->arrayLayers!=1||!can_write_back(s))continue;
+        const uint32_t bytes=s->fmt.bytesPerBlock,pitch=std::max(s->pitch,s->width);
+        auto texels=read_guest_texels(s,0,s->width,s->height);
+        for(uint32_t y=0;y<s->height;++y)
+            memcpy(mem::ptr(addr+y*pitch*bytes),texels.data()+size_t(y)*s->width*bytes,size_t(s->width)*bytes);
+    }
+}
 void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32_t dstAddr,uint32_t dstMip,uint32_t dstSlice) {
     auto* s=reinterpret_cast<GX2Surface*>(mem::ptr(srcAddr));auto* d=reinterpret_cast<GX2Surface*>(mem::ptr(dstAddr));
     if(srcMip>=uint32_t(s->numLevels)||dstMip>=uint32_t(d->numLevels))throw std::runtime_error("GX2CopySurface mip is out of range");
@@ -786,12 +890,17 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
     uint32_t dw=std::max<uint32_t>(uint32_t(d->width)>>dstMip,1),dh=std::max<uint32_t>(uint32_t(d->height)>>dstMip,1);
     uint32_t cw=std::min(w,dw),ch=std::min(h,dh);
     Surface* gpuSrc=nullptr;uint32_t gpuLevel=0;
+    // the most recent GPU image of the source; of its format views, the one in the source's format
+    // (a newer view in another format is copied into it first, adopt_newer_alias)
+    const uint32_t srcFormat=uint32_t(s->format.value());
+    auto better=[&](Surface* image){return !gpuSrc||std::make_pair(image->format==srcFormat,image->writeSeq)>std::make_pair(gpuSrc->format==srcFormat,gpuSrc->writeSeq);};
     for(auto& [addr,image]:R.surfaces) {
         if(!image->gpuWritten)continue;
-        if(addr==sbase&&image->width==w&&image->height==h) {if(!gpuSrc||image->writeSeq>gpuSrc->writeSeq){gpuSrc=image.get();gpuLevel=0;}}
+        if(addr==sbase&&image->width==w&&image->height==h) {if(better(image.get())){gpuSrc=image.get();gpuLevel=0;}}
         else if(addr==uint32_t(s->imagePtr)&&image->mips>srcMip&&std::max(image->width>>srcMip,1u)==w&&std::max(image->height>>srcMip,1u)==h)
-            if(!gpuSrc||image->writeSeq>gpuSrc->writeSeq){gpuSrc=image.get();gpuLevel=srcMip;}
+            if(better(image.get())){gpuSrc=image.get();gpuLevel=srcMip;}
     }
+    if(gpuSrc&&gpuLevel==0)gpuSrc=adopt_newer_alias(gpuSrc);
     if(gpuSrc) {
         if(gpuSrc->imageType==VK_IMAGE_TYPE_3D)throw std::runtime_error("Vulkan GPU GX2CopySurface volume slices are unsupported");
         SurfaceDesc dd;dd.addr=dbase;dd.width=dw;dd.height=dh;dd.pitch=d->pitch;dd.format=uint32_t(d->format.value());
@@ -824,7 +933,9 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
             }
         }
         transition_image(gpuSrc,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);if(!self)transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        mark_gpu_written(dst);return;
+        mark_gpu_written(dst);
+        write_back_linear_copy(dst,dstSlice,d,dbase,dstMip,dstSlice,cw,ch);
+        return;
     }
     auto sf=format_info(uint32_t(s->format.value()),bool(uint32_t(s->format.value())&0x800));
     auto df=format_info(uint32_t(d->format.value()),bool(uint32_t(d->format.value())&0x800));

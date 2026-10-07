@@ -291,6 +291,43 @@ void resample(id<MTLTexture> src, id<MTLTexture> dst, const FormatInfo& fmt, uin
     }
 }
 
+// One guest surface can be rendered and sampled through views of different formats with the same
+// texel bits, e.g. RGBA8 and RGBA8 sRGB: the Picto Box draws its picture through the sRGB view and
+// then through the plain one (issue #53). Each format gets its own texture here, so before one is
+// used, take over the texels of a more recent compatible one (a raw copy, as the memory is shared).
+static Surface* adopt_newer_alias(Surface* s) {
+    if (!s || !s->tex || s->isDepth || s->fmt.compressed || s->fmt.convert != Convert::NONE) return s;
+    if (R.binding) return s;  // a texture looked up again while binding to the open encoder: no blits now
+    Surface* newest = nullptr;
+    auto range = R.surfaces.equal_range(s->addr);
+    for (auto it = range.first; it != range.second; ++it) {
+        Surface* o = it->second.get();
+        if (o == s || !o->gpuWritten || !o->tex || o->isDepth || o->fmt.compressed || o->fmt.convert != Convert::NONE) continue;
+        if (s->gpuWritten && o->writeSeq <= s->writeSeq) continue;
+        if ((o->format & 0x3F) != (s->format & 0x3F) || o->fmt.hostBytesPerBlock != s->fmt.hostBytesPerBlock) continue;
+        if (o->tex.textureType != s->tex.textureType || o->tex.width != s->tex.width || o->tex.height != s->tex.height ||
+            o->tex.depth != s->tex.depth || o->tex.arrayLength != s->tex.arrayLength)
+            continue;
+        if (!newest || o->writeSeq > newest->writeSeq) newest = o;
+    }
+    if (!newest) return s;
+    id<MTLTexture> src = newest->tex.pixelFormat == s->tex.pixelFormat ? newest->tex : [newest->tex newTextureViewWithPixelFormat:s->tex.pixelFormat];
+    if (!src) return s;
+    end_encoder();
+    id<MTLBlitCommandEncoder> b = [command_buffer() blitCommandEncoder];
+    NSUInteger layers = s->tex.textureType == MTLTextureType3D ? 1 : std::max<NSUInteger>(s->tex.arrayLength, 1);
+    if (s->tex.textureType == MTLTextureTypeCube) layers = 6;
+    for (NSUInteger level = 0; level < std::min(s->tex.mipmapLevelCount, newest->tex.mipmapLevelCount); level++)
+        for (NSUInteger slice = 0; slice < layers; slice++)
+            [b copyFromTexture:src sourceSlice:slice sourceLevel:level sourceOrigin:MTLOriginMake(0, 0, 0)
+                    sourceSize:MTLSizeMake(std::max<NSUInteger>(s->tex.width >> level, 1), std::max<NSUInteger>(s->tex.height >> level, 1),
+                                           std::max<NSUInteger>(s->tex.depth >> level, 1))
+                     toTexture:s->tex destinationSlice:slice destinationLevel:level destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [b endEncoding];
+    mark_gpu_written(s);
+    return s;
+}
+
 Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     auto range = R.surfaces.equal_range(d.addr);
     Surface* exact = nullptr;
@@ -316,14 +353,14 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
         // a volume and a 2D array of the same size are different textures
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
             volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
-            if (forRendering) return rescale(s);
+            if (forRendering) return adopt_newer_alias(rescale(s));
             if (!exact || s->writeSeq > exact->writeSeq) exact = s;
             continue;
         }
         // render target being sampled with a compatible format but different view parameters
         if (!forRendering && s->gpuWritten && (s->format & 0x3F) == (d.format & 0x3F)) consider(s);
     }
-    if (exact && (exact->gpuWritten || !rendered || exact->writeSeq > rendered->writeSeq)) return exact;
+    if (exact && (exact->gpuWritten || !rendered || exact->writeSeq > rendered->writeSeq)) return exact->gpuWritten ? adopt_newer_alias(exact) : exact;
     if (rendered) return rendered;
     if (exact) return exact;
 
@@ -354,7 +391,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
             s->isDepth ? " depth" : "", (unsigned long)s->tex.width, (unsigned long)s->tex.height);
     Surface* raw = s.get();
     R.surfaces.emplace(d.addr, std::move(s));
-    return raw;
+    return forRendering ? adopt_newer_alias(raw) : raw;
 }
 
 // ---------------------------------------------------------------- render targets
@@ -697,6 +734,78 @@ static uint32_t element_offset(const LatteAddrLib::AddrSurfaceInfo_OUT& info, La
     return LatteAddrLib::ComputeSurfaceAddrFromCoordMacroTiledCached(x, y, ci);
 }
 
+// ---------------------------------------------------------------- write-back to guest memory
+// Render results stay on the GPU, except where the game reads them with the CPU: render targets and
+// GX2CopySurface destinations with a linear tile mode (as Cemu reads back linear surfaces). The Picto
+// Box renders its picture into a linear-aligned target and JPEG-encodes it from guest memory (issue
+// #53). Texels are written at the guest size; only formats whose host texels are the guest's bytes.
+static bool can_write_back(const Surface* img) {
+    const FormatInfo& f = img->fmt;
+    bool ok = img->tex && !f.compressed && !f.depth && f.convert == Convert::NONE && f.hostBytesPerBlock == f.bytesPerBlock &&
+              img->tex.textureType == MTLTextureType2D;
+    if (!ok) {
+        static bool logged = false;
+        if (!logged) LOG("[gfx] linear surface %08X (format %X) is not written back to guest memory", img->addr, img->format);
+        logged = true;
+    }
+    return ok;
+}
+// the texels of img at the guest size w x h (its top-left), read from the GPU (waits for it)
+static std::vector<uint8_t> read_guest_texels(Surface* img, uint32_t w, uint32_t h) {
+    const uint32_t bytes = img->fmt.bytesPerBlock;
+    id<MTLTexture> src = img->tex;
+    if (src.width != img->width || src.height != img->height) {
+        // a render target at the internal resolution: filter it down to the guest size first
+        MTLTextureDescriptor* td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:src.pixelFormat width:img->width
+                                                                                     height:img->height mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
+        td.storageMode = MTLStorageModePrivate;
+        id<MTLTexture> small = [R.device newTextureWithDescriptor:td];
+        end_encoder();
+        resample(src, small, img->fmt, 1);
+        src = small;
+    }
+    id<MTLBuffer> buf = [R.device newBufferWithLength:(NSUInteger)w * h * bytes options:MTLResourceStorageModeShared];
+    end_encoder();
+    id<MTLBlitCommandEncoder> b = [command_buffer() blitCommandEncoder];
+    [b copyFromTexture:src sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1)
+              toBuffer:buf destinationOffset:0 destinationBytesPerRow:(NSUInteger)w * bytes destinationBytesPerImage:(NSUInteger)w * h * bytes];
+    [b endEncoding];
+    wait_idle();
+    const uint8_t* raw = (const uint8_t*)buf.contents;
+    return std::vector<uint8_t>(raw, raw + (size_t)w * h * bytes);
+}
+// GX2CopySurface done on the GPU into a linear destination: the game reads it once the call returns
+static void write_back_linear_copy(Surface* img, GX2Surface* d, uint32_t dbase, uint32_t dstMip, uint32_t dstSlice, uint32_t w, uint32_t h) {
+    LatteAddrLib::AddrSurfaceInfo_OUT di{};
+    LatteAddrLib::GX2CalculateSurfaceInfo(d->format, d->width, d->height, d->depth, d->dim, d->tileMode, d->aa, dstMip, &di);
+    auto dtm = (Latte::E_HWTILEMODE)di.hwTileMode;
+    if ((dtm != Latte::E_HWTILEMODE::TM_LINEAR_GENERAL && dtm != Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED) || dstSlice >= di.depth ||
+        !can_write_back(img))
+        return;
+    const uint32_t bytes = img->fmt.bytesPerBlock;
+    auto texels = read_guest_texels(img, w, h);
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++)
+            memcpy(mem::ptr(dbase + element_offset(di, dtm, x, y, dstSlice, bytes * 8, d->swizzle, nullptr)),
+                   texels.data() + ((size_t)y * w + x) * bytes, bytes);
+    img->writtenBackSeq = img->writeSeq;
+}
+// GX2DrawDone: linear render targets drawn since their last write-back
+void write_back_linear_targets() {
+    for (auto& [addr, surface] : R.surfaces) {
+        Surface* s = surface.get();
+        if (!s->gpuWritten || s->isDepth || s->writtenBackSeq == s->writeSeq || !s->tex) continue;
+        s->writtenBackSeq = s->writeSeq;
+        // linear aligned only: a tile mode of 0 can also be GX2's "default" (a tiled copy destination)
+        if ((Latte::E_HWTILEMODE)s->tileMode != Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED || s->slices != 1 || !can_write_back(s)) continue;
+        const uint32_t bytes = s->fmt.bytesPerBlock, pitch = std::max(s->pitch, s->width);
+        auto texels = read_guest_texels(s, s->width, s->height);
+        for (uint32_t y = 0; y < s->height; y++)
+            memcpy(mem::ptr(addr + y * pitch * bytes), texels.data() + (size_t)y * s->width * bytes, (size_t)s->width * bytes);
+    }
+}
+
 void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uint32_t dstAddr, uint32_t dstMip, uint32_t dstSlice) {
     auto* s = (GX2Surface*)mem::ptr(srcAddr);
     auto* d = (GX2Surface*)mem::ptr(dstAddr);
@@ -704,11 +813,18 @@ void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uin
     uint32_t w = std::max<uint32_t>(s->width >> srcMip, 1), h = std::max<uint32_t>(s->height >> srcMip, 1);
     FormatInfo f = format_info((uint32_t)s->format.value(), false);
 
-    // GPU-produced source: copy texture to texture
+    // GPU-produced source: copy texture to texture. Of the source's GPU images (format views), the
+    // one in the source's format, else the most recent; a newer view is copied into it first.
+    Surface* gpuSrc = nullptr;
     auto range = R.surfaces.equal_range(sbase);
     for (auto it = range.first; it != range.second; ++it) {
-        Surface* src = it->second.get();
-        if (!src->gpuWritten || src->width != w || src->height != h) continue;
+        Surface* c = it->second.get();
+        if (!c->gpuWritten || c->width != w || c->height != h) continue;
+        auto key = [&](Surface* x) { return std::make_pair(x->format == (uint32_t)s->format.value(), x->writeSeq); };
+        if (!gpuSrc || key(c) > key(gpuSrc)) gpuSrc = c;
+    }
+    if (gpuSrc) {
+        Surface* src = adopt_newer_alias(gpuSrc);
         SurfaceDesc dd;
         dd.addr = dbase;
         dd.width = std::max<uint32_t>(d->width >> dstMip, 1);
@@ -735,6 +851,7 @@ void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uin
             resample(src->tex, dst->tex, dst->fmt, 1, (float)spw / src->tex.width, (float)sph / src->tex.height, dpw, dph);
         }
         mark_gpu_written(dst);
+        write_back_linear_copy(dst, d, dbase, dstMip, dstSlice, cw, ch);
         return;
     }
 

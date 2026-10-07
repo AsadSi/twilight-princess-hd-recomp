@@ -1593,8 +1593,10 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     rprof::mark(rprof::kVertex);
     {
         rprof::UploadKind uploads(rprof::kUpUbo);  // Metal: uniform snapshots and bindings of both stages
+        R.binding = true;
         bind_stage(enc, regs, vs, true, colors);
         bind_stage(enc, regs, ps, false, colors);
+        R.binding = false;
     }
     rprof::mark(rprof::kUniforms);
 

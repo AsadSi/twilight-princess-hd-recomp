@@ -58,6 +58,7 @@ const Backend& vulkan_backend() {
         b.invalidate = gfxvk::invalidate;
         b.guest_flush = gfxvk::flush_async;
         b.wait_idle = gfxvk::wait_idle;
+        b.write_back = gfxvk::write_back_linear_targets;
         b.ss_reset = [] {
             gfxvk::ss_reset_surfaces();
             gfxvk::buffer_cache_invalidate_all();  // restored memory: every cached range is re-read

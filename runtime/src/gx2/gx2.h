@@ -46,6 +46,7 @@ void clear_color(const uint32_t* regs, uint32_t colorBuffer, const float rgba[4]
 void clear_depth_stencil(const uint32_t* regs, uint32_t depthBuffer, float depth, uint32_t stencil, uint32_t flags);
 void copy_surface(uint32_t src, uint32_t srcMip, uint32_t srcSlice, uint32_t dst, uint32_t dstMip, uint32_t dstSlice);
 void copy_to_scan(uint32_t colorBuffer, uint32_t target);  // target: 1 = TV, 4 = DRC (GamePad)
+void write_back_linear_targets();  // GX2DrawDone: linear render targets the CPU reads, to guest memory
 void swap();                     // present the TV scan buffer
 void set_frame_aspect(float a);  // aspect ratio of the TV picture from the next frame on (aspect.cpp)
 // render thread: a target of this guest size is made wider/taller this frame (kx, ky != 1)
