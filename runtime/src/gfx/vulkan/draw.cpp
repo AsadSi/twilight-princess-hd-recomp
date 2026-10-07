@@ -534,8 +534,8 @@ PipelineKey pipeline_key(const uint32_t* r, const vk::Shader* vs, const vk::Shad
                          const LatteFetchShader* fs, VkPrimitiveTopology topology,
                          const std::array<Surface*, 8>& colors, const Surface* depth) {
   PipelineKey key;
-  key.vs = vs->key;
-  key.ps = ps->key;
+  key.vs = vs->pipelineId;
+  key.ps = ps->pipelineId;
   key.fetch = fs->vkPipelineHashFragment;
   key.topology = uint32_t(topology);
   uint32_t ncolor = 0;

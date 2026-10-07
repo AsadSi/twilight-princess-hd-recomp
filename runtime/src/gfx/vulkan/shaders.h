@@ -22,6 +22,7 @@ DescriptorRankPlan make_descriptor_rank_plan(const LatteDecompilerShaderResource
 // created by the draw backend; this cache owns only translation and SPIR-V.
 struct Shader {
     uint64_t key = 0;
+    uint64_t pipelineId = 0;  // equal for shaders with identical SPIR-V and resource mapping
     bool vertex = false;
     LatteDecompilerShader* dec = nullptr;
     LatteDecompilerShaderResourceMapping mapping;
@@ -52,7 +53,7 @@ struct ShaderStats {
     // keys (several can share a shader: variantAliases). Verify mode (WWHD_VK_SHADER_KEY_VERIFY):
     // pre-narrowing keys checked, violations (a shared shader that would have translated
     // differently), and pre-narrowing keys that the narrow key splits.
-    uint64_t programs = 0, shaders = 0, variantKeys = 0, variantAliases = 0;
+    uint64_t programs = 0, shaders = 0, variantKeys = 0, variantAliases = 0, moduleAliases = 0;
     uint64_t verifyChecks = 0, verifyViolations = 0, verifySplitKeys = 0, verifyNs = 0;
 };
 ShaderStats shader_stats();

@@ -180,28 +180,45 @@ uint64_t program_hash(uint32_t address, uint32_t size, uint64_t frame) {
 // Shader keys (two levels, as Cemu's LatteShader.cpp base and auxiliary hashes, but exact about
 // what our GLSL path reads; docs/vulkan.md, "Shader keys"):
 // - linkage: the program, the fetch shader and the registers the decompiler reads for every
-//   program of the stage (PS input table, VS input semantics, viewport-transform/half-Z/points/
-//   streamout for vertex shaders; output mask, alpha test and front-face import for pixel shaders);
-// - variant: per used texture unit its dimension and integer format, the semantic ids of the
-//   parameters the vertex shader exports, the streamout strides of buffers it writes. The units and
-//   exports come from the program, so they are known once its first variant has been translated.
+//   program of the stage: for vertex shaders the input location each fetch attribute resolves to
+//   (not the 32 raw SQ_VTX_SEMANTIC words), viewport-transform/half-Z/points/streamout; for pixel
+//   shaders the PS input table, output mask, alpha test and front-face import;
+// - variant: per used texture unit its dimension and integer format; for vertex shaders, per
+//   exported parameter, its semantic id and the PS input it resolves to (location, flat,
+//   noperspective) instead of the whole PS input table and SPI_VS_OUT_ID; streamout strides of
+//   buffers it writes. The units and exports come from the program, so they are known once its
+//   first variant has been translated.
 // Render-target formats, buffer addresses, samplers and units the program does not sample are not
 // read by the GLSL translation (the Metal-only render-target-texture check is the one that does)
 // and are not in the key; the pipeline key has the attachment formats.
 constexpr size_t kLinkageWords = 3 + GPU7_PS_MAX_INPUTS + 32 + 4;
-size_t gather_linkage(const uint32_t* regs, bool vertex, uint32_t* out) {
+size_t gather_linkage(const uint32_t* regs, bool vertex, const LatteFetchShader* fetch, uint32_t* out) {
     size_t count = 0;
-    // PS input table (latte_support.cpp LatteShader_CreatePSInputTable): input count, position
-    // import, parameter generation (pixel only), and per input its semantic, flat and
-    // noperspective bits. Vertex shaders declare their exports from the same table.
-    const uint32_t control0 = regs[mmSPI_PS_IN_CONTROL_0];
-    out[count++] = control0 & (vertex ? 0x00007D3Fu : 0x03FFFD3Fu);
-    const uint32_t inputs = std::min<uint32_t>(control0 & 0x3F, GPU7_PS_MAX_INPUTS);
-    for (uint32_t i = 0; i < inputs; ++i) out[count++] = regs[mmSPI_PS_INPUT_CNTL_0 + i] & 0x14FFu;
     uint32_t flags = (regs[REGADDR::VGT_GS_MODE] & 3) != 0 ? 1u : 0u;
     if (vertex) {
-        std::memcpy(out + count, regs + mmSQ_VTX_SEMANTIC_0, 32 * sizeof(uint32_t));
-        count += 32;
+        // Each fetch attribute is imported into the register after the first SQ_VTX_SEMANTIC slot
+        // holding its semantic id (LatteDecompiler_emitAttributeImport, analyzer relative reads);
+        // the other slots are never read. One byte per attribute, 0xFF when unmapped.
+        uint32_t attributes = 0;
+        if (fetch)
+            for (const auto& group : fetch->bufferGroups) attributes += group.attribCount;
+        if (attributes <= 4 * 32) {
+            uint32_t packed = 0, bytes = 0;
+            if (fetch)
+                for (const auto& group : fetch->bufferGroups)
+                    for (int i = 0; i < group.attribCount; ++i) {
+                        uint32_t location = 0xFF;
+                        for (uint32_t f = 0; f < 32; ++f)
+                            if (regs[mmSQ_VTX_SEMANTIC_0 + f] == group.attrib[i].semanticId) { location = f; break; }
+                        packed |= location << (8 * (bytes++ & 3));
+                        if ((bytes & 3) == 0) { out[count++] = packed; packed = 0; }
+                    }
+            if (bytes & 3) out[count++] = packed;
+            out[count++] = attributes;
+        } else {
+            std::memcpy(out + count, regs + mmSQ_VTX_SEMANTIC_0, 32 * sizeof(uint32_t));
+            count += 32;
+        }
         const uint32_t vte = regs[REGADDR::PA_CL_VTE_CNTL];
         const uint32_t primitive = regs[REGADDR::VGT_PRIMITIVE_TYPE] & 0x3F;
         flags |= (primitive == 1 ? 2u : 0u) | (regs[mmVGT_STRMOUT_EN] ? 4u : 0u) |
@@ -213,6 +230,13 @@ size_t gather_linkage(const uint32_t* regs, bool vertex, uint32_t* out) {
             out[count++] = primitive == 0x11 ? 1u : 0u;
         }
     } else {
+        // PS input table (latte_support.cpp LatteShader_CreatePSInputTable): input count, position
+        // import, parameter generation, and per input its semantic, flat and noperspective bits;
+        // every input is declared. Vertex shaders only need where their exports land (variant_hash).
+        const uint32_t control0 = regs[mmSPI_PS_IN_CONTROL_0];
+        out[count++] = control0 & 0x03FFFD3Fu;
+        const uint32_t inputs = std::min<uint32_t>(control0 & 0x3F, GPU7_PS_MAX_INPUTS);
+        for (uint32_t i = 0; i < inputs; ++i) out[count++] = regs[mmSPI_PS_INPUT_CNTL_0 + i] & 0x14FFu;
         out[count++] = regs[mmSPI_PS_IN_CONTROL_1] & 0x1FF00u;  // front-face import
         out[count++] = regs[mmCB_SHADER_MASK];
         const uint32_t alpha = regs[REGADDR::SX_ALPHA_TEST_CONTROL];
@@ -234,8 +258,9 @@ struct ProgramUse {
 std::unordered_map<uint64_t, ProgramUse> programUses;  // linkage key -> use
 std::unordered_map<uint64_t, Shader*> variants;         // full key -> shader (may be shared)
 std::unordered_multimap<uint64_t, Shader*> shadersByOutput;
+std::unordered_multimap<uint64_t, Shader*> shadersByModule;  // SPIR-V + resource mapping
 uint64_t variant_hash(const uint32_t* regs, bool vertex, const ProgramUse& use, uint64_t linkage) {
-    std::array<uint32_t, LATTE_NUM_MAX_TEX_UNITS + 10 + 4> words;
+    std::array<uint32_t, LATTE_NUM_MAX_TEX_UNITS + 32 + 4> words;
     size_t count = 0;
     const uint32_t base = vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
     for (uint32_t i = 0; i < use.unitCount; ++i) {
@@ -244,14 +269,27 @@ uint64_t variant_hash(const uint32_t* regs, bool vertex, const ProgramUse& use, 
         words[count++] = (w[0] & 7) | (((w[4] >> 8) & 3) == 1 ? 8u : 0u);
     }
     if (vertex) {
-        // the semantic id each exported parameter is written to (_emitVSExports, export code)
-        for (uint32_t word = 0; word < 8; ++word) {
-            const uint32_t mask = (use.exports >> (word * 4)) & 0xF;
-            if (!mask) continue;
-            uint32_t bytes = 0;
-            for (uint32_t b = 0; b < 4; ++b)
-                if (mask & (1u << b)) bytes |= 0xFFu << (b * 8);
-            words[count++] = regs[mmSPI_VS_OUT_ID_0 + word] & bytes;
+        // Per exported parameter: its semantic id (SPI_VS_OUT_ID) and the PS input it lands in,
+        // as _getVertexShaderOutParamSemanticId and _emitVSExports resolve it against the PS input
+        // table; an export without a PS input is skipped whatever its semantic.
+        if (use.exports) {
+            const uint32_t control0 = regs[mmSPI_PS_IN_CONTROL_0];
+            const uint32_t inputs = std::min<uint32_t>(control0 & 0x3F, GPU7_PS_MAX_INPUTS);
+            const uint32_t position = (control0 >> 8) & 1 ? (control0 >> 10) & 0x1F : 0xFFFFFFFFu;
+            for (uint32_t i = 0; i < 32; ++i) {
+                if (!(use.exports & (1u << i))) continue;
+                const uint32_t semantic = (regs[mmSPI_VS_OUT_ID_0 + i / 4] >> (8 * (i % 4))) & 0xFF;
+                uint32_t word = 0x7FFFFFFFu;
+                for (uint32_t f = 0; f < inputs; ++f) {
+                    if (f == position) continue;  // LATTE_ANALYZER_IMPORT_INDEX_SPIPOSITION never matches
+                    const uint32_t control = regs[mmSPI_PS_INPUT_CNTL_0 + f];
+                    if ((control & 0xFF) != semantic) continue;
+                    word = 0x80000000u | semantic | (f << 8) | (control & (1u << 10) ? 1u << 16 : 0) |
+                           (control & (1u << 12) ? 1u << 17 : 0);
+                    break;
+                }
+                words[count++] = word;
+            }
         }
         if (use.streamout)
             for (uint32_t buffer = 0; buffer < 4; ++buffer)
@@ -667,7 +705,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     uint64_t base = program_hash(address, size, frame) ^ (vertex ? 0x1111 : 0x2222);
     // Level 1: program, fetch shader and linkage.
     std::array<uint32_t, kLinkageWords> words;
-    const size_t count = gather_linkage(regs, vertex, words.data());
+    const size_t count = gather_linkage(regs, vertex, fetch, words.data());
     const uint64_t seed = base ^ (vertex ? fsKey * 31 : 0);
     ++stats.stateHashLookups;
     static const bool memoEnabled = [] {
@@ -707,7 +745,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
     shader->vertex = vertex;
     if (!decompile(*shader, regs, vertex, fetch, address, size, base, true)) {
         // Failures are per linkage: the variant words need the program's analysis.
-        shader->key = linkage ^ 0xFA17EDull;
+        shader->key = shader->pipelineId = linkage ^ 0xFA17EDull;
         use.failed = shader;
         shaders.emplace(shader->key, std::move(owned));
         fprintf(stderr, "[vulkan] shader %08X: %s\n", address, shader->error.c_str());
@@ -776,6 +814,24 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
                 diskChangedFrame=frame;
             }
         }
+    }
+    // Pipelines need only the module and its resource mapping: shaders whose SPIR-V and mapping
+    // are identical (their GLSL can still differ, e.g. in comments) share pipelines; their
+    // draw-time metadata (uniform remapping, samplers) stays their own.
+    shader->pipelineId = shader->key;
+    if (!shader->spirv.empty()) {
+        uint64_t module = hash_bytes(shader->spirv.data(), shader->spirv.size() * 4, vertex ? 0x77 : 0x88);
+        module = hash_bytes(&shader->mapping, sizeof shader->mapping, module);
+        bool shared = false;
+        for (auto [it, end] = shadersByModule.equal_range(module); it != end; ++it)
+            if (it->second->spirv == shader->spirv &&
+                !std::memcmp(&it->second->mapping, &shader->mapping, sizeof shader->mapping)) {
+                shader->pipelineId = it->second->pipelineId;
+                ++stats.moduleAliases;
+                shared = true;
+                break;
+            }
+        if (!shared) shadersByModule.emplace(module, shader);
     }
     if (!shader->error.empty()) fprintf(stderr, "[vulkan] shader %08X: %s\n", address, shader->error.c_str());
     return shader;
@@ -959,6 +1015,7 @@ void clear_shader_cache() {
     variants.clear();
     programUses.clear();
     shadersByOutput.clear();
+    shadersByModule.clear();
     verifiedKeys.clear();
     reset_shader_memoization();
     // Fetch parsing allocations have shared interior pointers and no owning
