@@ -147,7 +147,11 @@ void reset_pipeline_lookup_cache();
 uint64_t draw_batch_submissions();
 void vk_check(VkResult result,const char* operation);
 uint32_t memory_type(uint32_t bits,VkMemoryPropertyFlags properties);
-Buffer create_buffer(VkDeviceSize size,VkBufferUsageFlags usage,VkMemoryPropertyFlags properties);
+// preferred: extra property flags used when a memory type has them (else the required ones only)
+Buffer create_buffer(VkDeviceSize size,VkBufferUsageFlags usage,VkMemoryPropertyFlags properties,
+                     VkMemoryPropertyFlags preferred=0);
+// host-visible TRANSFER_DST buffer the CPU reads back, host-cached where available
+Buffer create_readback_buffer(VkDeviceSize size);
 UploadSlice allocate_upload(VkDeviceSize size,VkDeviceSize alignment);
 // Renderer smoke tests exercise the production snapshot helper with host data.
 UploadSlice vertex_window_smoke_snapshot(uint32_t binding,uint32_t address,

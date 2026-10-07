@@ -371,6 +371,31 @@ printed LR/SP values do not establish that deeper guest stack frames match. Load
 later can succeed if the worker threads reach compatible waits. Failed loads do not
 bypass these checks or establish a valid benchmark starting point.
 
+## The CPU never reads mapped upload memory
+
+The upload arena (`allocate_upload`) and the buffer cache's blocks are host-visible memory the CPU
+writes and the GPU reads. On discrete GPUs that memory is uncached or write-combined (plain
+host-visible system memory, or device-local BAR / resizable-BAR memory), and CPU reads from it are
+about 100 times slower than cached reads. On Apple silicon (MoltenVK) all memory is cached, so such
+reads do not show up there. Issue #44: v0.2.4 turned the vertex snapshot reuse paths on everywhere,
+and their comparisons against `slice.mapped` cost an RX 6700 XT 57 ms per frame.
+
+Rule: mapped upload memory is only written. Every reuse check or scan uses a CPU copy in ordinary heap
+memory, kept next to the slice and filled before the slice is written from it (so both hold the same
+bytes even when the game writes the range meanwhile):
+
+- vertex snapshots and vertex windows (`WWHD_VK_REUSE_VERTEX_SNAPSHOTS`, `WWHD_VK_VERTEX_HISTORY_REUSE`):
+  `vertex_snapshot_history.h`;
+- uniform snapshots (`WWHD_VK_REUSE_UNIFORM_SNAPSHOTS`): `uniform_snapshot.h`;
+- native index extents: the buffer cache entry's shadow, or a CPU copy the arena slice is written from;
+- converted indices are built in a CPU vector and scanned there.
+
+`runtime/tools/snapshot_cache_test.cpp` (CTest `snapshot_caches`) poisons every mapped byte right after
+it is written and checks that the caches still find exactly the expected reuse hits. The only read of
+mapped GPU-input memory left is the buffer cache's opt-in diagnostic `WWHD_VK_BUFFER_CACHE_VERIFY=1`.
+Buffers the CPU is meant to read (captures, the GamePad overlay signatures) come from
+`create_readback_buffer`, which prefers host-cached memory.
+
 ## CPU/GPU overlap: lazy DrawDone and asynchronous presentation (all platforms)
 
 Since 2026-10-07 every platform uses the two paths that were Android defaults before:

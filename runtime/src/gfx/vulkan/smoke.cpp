@@ -32,7 +32,7 @@ struct Image {
 };
 std::vector<uint8_t> read_image(Surface& s,VkImageAspectFlags aspect,uint32_t bytes,uint32_t mip=0,uint32_t layer=0) {
  uint32_t w=std::max(1u,s.extent.width>>mip),h=std::max(1u,s.extent.height>>mip);
- Buffer b=create_buffer(size_t(w)*h*bytes,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+ Buffer b=create_readback_buffer(size_t(w)*h*bytes);
  transition_image(&s,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
  VkBufferImageCopy copy{};copy.imageSubresource={aspect,mip,layer,1};copy.imageExtent={w,h,1};
  auto cmd=command_buffer();vkCmdCopyImageToBuffer(cmd,s.image,s.layout,b.buffer,1,&copy);
@@ -55,7 +55,7 @@ void upload_arena_check() {
  require(a.buffer==b.buffer&&a.offset!=b.offset,"arena slices alias or fail pooling");
  require(a.offset%256==0&&b.offset%256==0,"arena alignment failed");
  memset(a.mapped,0x31,16);memset(b.mapped,0x72,16);
- Buffer out=create_buffer(32,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+ Buffer out=create_readback_buffer(32);
  VkBufferCopy ca{a.offset,0,16},cb{b.offset,16,16};
  auto cmd=command_buffer();vkCmdCopyBuffer(cmd,a.buffer,out.buffer,1,&ca);vkCmdCopyBuffer(cmd,b.buffer,out.buffer,1,&cb);
  VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.buffer=out.buffer;barrier.size=VK_WHOLE_SIZE;
@@ -66,7 +66,7 @@ void upload_arena_check() {
  fprintf(stderr,"[renderer smoke] immutable upload arena GPU snapshots and fence reuse passed\n");
 }
 std::vector<uint8_t> read_buffer(VkBuffer source,VkDeviceSize offset,uint32_t size) {
- Buffer out=create_buffer(size,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+ Buffer out=create_readback_buffer(size);
  VkBufferCopy copy{offset,0,size};auto cmd=command_buffer();vkCmdCopyBuffer(cmd,source,out.buffer,1,&copy);
  VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.buffer=out.buffer;barrier.size=VK_WHOLE_SIZE;
  vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&barrier,0,nullptr);
@@ -104,8 +104,7 @@ void buffer_cache_check() {
 }
 void asynchronous_submission_check() {
  constexpr uint32_t submissions=10, payloadSize=16, regionSize=payloadSize*3;
- Buffer out=create_buffer(submissions*regionSize,VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+ Buffer out=create_readback_buffer(submissions*regionSize);
  std::array<UploadSlice,4> firstSlices{};
  for(uint32_t submission=0;submission<submissions;++submission) {
   auto a=allocate_upload(payloadSize,256),b=allocate_upload(payloadSize,256);

@@ -296,7 +296,7 @@ uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags flags) {
   throw std::runtime_error("No compatible Vulkan memory type");
 }
 Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                     VkMemoryPropertyFlags flags) {
+                     VkMemoryPropertyFlags flags, VkMemoryPropertyFlags preferred) {
   Buffer b;
   b.size = std::max<VkDeviceSize>(size, 16);
   VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -309,6 +309,16 @@ Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
   VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   ai.allocationSize = req.size;
   ai.memoryTypeIndex = memory_type(req.memoryTypeBits, flags);
+  if (preferred) {
+    VkPhysicalDeviceMemoryProperties p;
+    vkGetPhysicalDeviceMemoryProperties(R.physicalDevice, &p);
+    for (uint32_t i = 0; i < p.memoryTypeCount; i++)
+      if ((req.memoryTypeBits & (1u << i)) &&
+          (p.memoryTypes[i].propertyFlags & (flags | preferred)) == (flags | preferred)) {
+        ai.memoryTypeIndex = i;
+        break;
+      }
+  }
   vk_check(vkAllocateMemory(R.device, &ai, nullptr, &b.memory),
            "allocate buffer memory");
   vk_check(vkBindBufferMemory(R.device, b.buffer, b.memory, 0),
@@ -318,6 +328,20 @@ Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
              "map buffer");
   return b;
 }
+// GPU -> CPU copies (captures, overlay signatures): the CPU reads these, so host-cached memory where
+// the device has it (uncached reads of the plain host-visible type are very slow on discrete GPUs).
+Buffer create_readback_buffer(VkDeviceSize size) {
+  return create_buffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+}
+// The per-submission upload arena (and the buffer cache's blocks, buffer_cache.cpp) is written by the
+// CPU and read by the GPU only. The memory is host-visible but usually not host-cached: uncached or
+// write-combined system memory, or device-local BAR memory on discrete GPUs, where CPU reads are about
+// 100 times slower than cached ones. Rule: the CPU never reads mapped upload memory. Reuse checks and
+// index scans use CPU copies kept beside the slices (vertex_snapshot_history.h, uniform_snapshot.h,
+// draw.cpp's index paths, the buffer cache's index shadows); see docs/vulkan.md. The one exception is
+// the buffer cache's opt-in verify mode (WWHD_VK_BUFFER_CACHE_VERIFY=1, a diagnostic).
 UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
   size = std::max<VkDeviceSize>(size,16);
   alignment = std::max<VkDeviceSize>(alignment,4);

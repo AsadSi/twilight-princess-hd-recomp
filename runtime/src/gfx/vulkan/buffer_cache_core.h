@@ -252,7 +252,9 @@ class Cache {
   }
 
   // Verify mode: compares the region's first n bytes with freshly computed ones. A difference with a
-  // newer stamp on the range is a write racing this check (counted, not a mismatch).
+  // newer stamp on the range is a write racing this check (counted, not a mismatch). Diagnostics only
+  // (WWHD_VK_BUFFER_CACHE_VERIFY=1): the one place that reads mapped GPU memory, which is uncached or
+  // write-combined on discrete GPUs and slow to read. Nothing else may (docs/vulkan.md).
   bool verify(Entry& e, const void* expected, uint32_t n, uint32_t* firstDiff = nullptr) {
     ++stats.verifyChecks;
     n = std::min(n, e.outSize);
