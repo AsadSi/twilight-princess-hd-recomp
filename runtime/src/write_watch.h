@@ -76,5 +76,7 @@ struct HostWrite {
 void take_stats(uint64_t& faults, uint64_t& protectedPages);
 // hints since the last call: calls and bytes covered
 void take_hint_stats(uint64_t& calls, uint64_t& bytes);
+// pages arm() failed to protect so far (they are reported as written on every check instead)
+uint64_t protect_failures();
 
 }  // namespace wwatch

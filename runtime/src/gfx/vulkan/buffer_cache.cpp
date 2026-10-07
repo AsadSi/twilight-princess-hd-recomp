@@ -224,13 +224,13 @@ void buffer_cache_report(double frames) {
   const double lookups = double(c.lookups - o.lookups);
   LOG("[vulkan buffer cache] %.0f lookups/frame, %.1f%% hits; uploads %.1f/frame %.3f MiB/frame; stale by writes %.1f/frame, "
       "grows %.1f/frame; bypass dynamic %.1f/frame, no memory %.1f/frame, became dynamic %llu; evictions %llu; "
-      "%zu entries, %.1f MiB resident; hints %.1f/frame %.3f MiB/frame",
+      "%zu entries, %.1f MiB resident; hints %.1f/frame %.3f MiB/frame; protect failures %llu",
       lookups / frames, lookups ? 100.0 * double(c.hits - o.hits) / lookups : 0.0, (c.uploads - o.uploads) / frames,
       (c.uploadBytes - o.uploadBytes) / frames / (1 << 20), (c.staleWrites - o.staleWrites) / frames,
       (c.grows - o.grows) / frames, (c.bypassDynamic - o.bypassDynamic) / frames,
       (c.bypassNoMemory - o.bypassNoMemory) / frames, (unsigned long long)(c.becameDynamic - o.becameDynamic),
       (unsigned long long)(c.evictions - o.evictions), s.cache.entries(), s.cache.resident_bytes() / double(1 << 20),
-      hintCalls / frames, hintBytes / frames / (1 << 20));
+      hintCalls / frames, hintBytes / frames / (1 << 20), (unsigned long long)wwatch::protect_failures());
   if (buffer_cache_verify())
     LOG("[vulkan buffer cache] verify: %llu checks, %llu mismatches, %llu raced writes (total %llu checks, %llu mismatches)",
         (unsigned long long)(c.verifyChecks - o.verifyChecks), (unsigned long long)(c.verifyMismatches - o.verifyMismatches),

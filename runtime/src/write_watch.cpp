@@ -36,6 +36,7 @@ std::atomic<uint64_t> g_seq{0};                // advanced after each stamp is s
 std::atomic<uint64_t>* g_hint = nullptr;       // newest hint stamp per page (enable_hints)
 std::atomic<bool> g_hints{false};
 std::atomic<uint64_t> g_hint_calls{0}, g_hint_bytes{0};
+std::atomic<uint64_t> g_protect_failures{0};  // pages arm() could not protect
 // arm() vs host writes: a page inside a pending kernel write must stay writable until the write ends
 std::mutex g_m;
 std::vector<std::pair<uint64_t, uint64_t>> g_pins;  // page ranges [first, last] of pending host writes
@@ -153,8 +154,19 @@ uint64_t arm(uint32_t addr, uint32_t size) {
     uint64_t run = 0, runStart = 0;
     auto flush = [&] {
         if (!run) return;
-        set_rw(runStart, run, false);
-        g_protected.fetch_add(run, std::memory_order_relaxed);
+        if (set_rw(runStart, run, false)) {
+            g_protected.fetch_add(run, std::memory_order_relaxed);
+        } else {
+            // not protected (Linux: too many mappings, vm.max_map_count): writes would go unseen, so
+            // the pages count as written now and stay unflagged; callers see a change on every check
+            uint64_t v = g_clock.fetch_add(1, std::memory_order_acq_rel) + 1;
+            for (uint64_t q = runStart; q < runStart + run; q++) {
+                g_flags[q].fetch_and((uint8_t)~kProt, std::memory_order_acq_rel);
+                stamp_page(q, v);
+            }
+            g_seq.fetch_add(1, std::memory_order_acq_rel);
+            g_protect_failures.fetch_add(run, std::memory_order_relaxed);
+        }
         run = 0;
     };
     for (; p <= last; p++) {
@@ -244,6 +256,8 @@ void take_stats(uint64_t& faults, uint64_t& protectedPages) {
     faults = g_faults.exchange(0, std::memory_order_relaxed);
     protectedPages = g_protected.exchange(0, std::memory_order_relaxed);
 }
+
+uint64_t protect_failures() { return g_protect_failures.load(std::memory_order_relaxed); }
 
 void take_hint_stats(uint64_t& calls, uint64_t& bytes) {
     calls = g_hint_calls.exchange(0, std::memory_order_relaxed);
