@@ -321,6 +321,11 @@ Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
         break;
       }
   }
+  {
+    VkPhysicalDeviceMemoryProperties p;
+    vkGetPhysicalDeviceMemoryProperties(R.physicalDevice, &p);
+    b.properties = p.memoryTypes[ai.memoryTypeIndex].propertyFlags;
+  }
   vk_check(vkAllocateMemory(R.device, &ai, nullptr, &b.memory),
            "allocate buffer memory");
   vk_check(vkBindBufferMemory(R.device, b.buffer, b.memory, 0),
@@ -344,6 +349,39 @@ Buffer create_readback_buffer(VkDeviceSize size) {
 // index scans use CPU copies kept beside the slices (vertex_snapshot_history.h, uniform_snapshot.h,
 // draw.cpp's index paths, the buffer cache's index shadows); see docs/vulkan.md. The one exception is
 // the buffer cache's opt-in verify mode (WWHD_VK_BUFFER_CACHE_VERIFY=1, a diagnostic).
+// Unless the memory is host-cached: if the arena's memory type is HOST_CACHED and HOST_COHERENT (Apple
+// silicon/MoltenVK has only cached types; many UMA drivers too), reads cost what heap reads cost and the
+// copies only add time, so R.uploadReadsDirect lets the reuse caches and the native index scan read the
+// slices. CACHED without COHERENT never counts: the arena requires COHERENT (no flush/invalidate).
+// WWHD_VK_UPLOAD_READS=auto (default) | shadow (always keep CPU copies) | direct (always read slices).
+namespace {
+enum class UploadReads { Auto, Shadow, Direct };
+UploadReads upload_reads_mode() {
+  static const UploadReads mode = [] {
+    const char* e = std::getenv("WWHD_VK_UPLOAD_READS");
+    if (!e || !*e || !std::strcmp(e, "auto")) return UploadReads::Auto;
+    if (!std::strcmp(e, "shadow")) return UploadReads::Shadow;
+    if (!std::strcmp(e, "direct")) return UploadReads::Direct;
+    LOG("[vulkan] WWHD_VK_UPLOAD_READS=%s unknown (auto|shadow|direct): auto", e);
+    return UploadReads::Auto;
+  }();
+  return mode;
+}
+void note_upload_block(const Buffer& buffer) {
+  const VkMemoryPropertyFlags readable =
+      VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  const bool first = R.uploadAllocations == 0;
+  const bool cached = (buffer.properties & readable) == readable && (first || R.uploadCached);
+  const auto mode = upload_reads_mode();
+  const bool direct = mode == UploadReads::Direct || (mode == UploadReads::Auto && cached);
+  if (first || direct != R.uploadReadsDirect)
+    LOG("[vulkan] upload arena memory: %s; reuse checks %s (WWHD_VK_UPLOAD_READS=%s)",
+        cached ? "host-cached" : "not host-cached", direct ? "read the slices" : "keep CPU copies",
+        mode == UploadReads::Auto ? "auto" : mode == UploadReads::Shadow ? "shadow" : "direct");
+  R.uploadCached = cached;
+  R.uploadReadsDirect = direct;
+}
+}  // namespace
 UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
   size = std::max<VkDeviceSize>(size,16);
   alignment = std::max<VkDeviceSize>(alignment,4);
@@ -365,6 +403,7 @@ UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  note_upload_block(buffer);
   R.uploadBlocks.push_back({buffer,0});
   ++R.uploadAllocations;
   return slice(R.uploadBlocks.back());

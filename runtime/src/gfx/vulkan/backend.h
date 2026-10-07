@@ -14,7 +14,8 @@
 #include "api.h"
 #include "buffer_cache_core.h"
 namespace gfxvk {
-struct Buffer { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; void* mapped=nullptr; VkDeviceSize size=0; };
+struct Buffer { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; void* mapped=nullptr; VkDeviceSize size=0;
+                VkMemoryPropertyFlags properties=0; /* of the memory type create_buffer chose */ };
 struct UploadSlice { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceSize offset=0,size=0; void* mapped=nullptr; };
 struct CachedGuestLayout;
 struct Surface {
@@ -103,6 +104,11 @@ struct Renderer {
  struct UploadBlock { Buffer buffer; VkDeviceSize used=0; };
  std::vector<UploadBlock> uploadBlocks;
  uint64_t uploadAllocations=0,uploadBytes=0;
+ // Upload arena memory is HOST_CACHED|HOST_COHERENT (every block so far): CPU reads of it are as fast as
+ // heap reads (Apple silicon/MoltenVK, many UMA drivers). uploadReadsDirect: the snapshot reuse caches
+ // and the native index scan may read mapped upload slices instead of keeping CPU copies (auto: when
+ // uploadCached; WWHD_VK_UPLOAD_READS=shadow|direct forces a mode). Set by allocate_upload.
+ bool uploadCached=false,uploadReadsDirect=false;
  uint64_t vertexHistoryReuseChecks=0,vertexHistoryReuseHits=0,vertexHistoryReuseBytes=0;
  uint64_t vertexHistoryRequests=0,vertexHistoryMatches=0,vertexHistoryBytes=0;
  std::array<uint64_t,7> vertexHistoryDistances{};

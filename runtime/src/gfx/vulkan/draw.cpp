@@ -184,7 +184,8 @@ UploadSlice vertex_snapshot(uint32_t binding, uint32_t address, uint32_t size,
     static const bool timed = std::getenv("WWHD_VK_STATS") != nullptr;
     std::chrono::steady_clock::time_point start;
     if (timed) start = std::chrono::steady_clock::now();
-    // the entry's CPU copy, never candidate->slice.mapped (upload memory: see vertex_snapshot_history.h)
+    // the entry's CPU copy, not candidate->slice.mapped, unless the entry was made with direct reads
+    // (host-cached upload memory: see vertex_snapshot_history.h)
     const bool equal = VertexSnapshotHistory<UploadSlice>::equal(*candidate, mem::ptr(address));
     if (timed)
       R.vertexReuseCompareNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -200,7 +201,7 @@ UploadSlice vertex_snapshot(uint32_t binding, uint32_t address, uint32_t size,
       return history.last.slice;
     }
   }
-  return history.remember(address, size, mem::ptr(address), historyEnabled,
+  return history.remember(address, size, mem::ptr(address), historyEnabled, R.uploadReadsDirect,
                           [](const void* bytes, size_t n) { return snapshot(bytes, n, 4); });
 }
 
@@ -221,15 +222,17 @@ UploadSlice vertex_window_snapshot(uint32_t binding,uint32_t address,uint32_t re
     return e && !std::strcmp(e,"1");}();
   Entry* entry=reuse && binding<entries.size()?&entries[binding]:nullptr;
   const auto* fresh=static_cast<const uint8_t*>(source?source:mem::ptr(address))+begin;
-  // compares the entry's CPU copy of the window, never the mapped slice (vertex_snapshot_history.h)
+  // compares the entry's CPU copy of the window, not the mapped slice, unless the entry was made with
+  // direct reads (host-cached upload memory; vertex_snapshot_history.h)
   if(entry && entry->matches(address,reservation,begin,length)) {
     ++R.vertexReuseChecks;
     if(entry->equal(fresh)) {
       ++R.vertexReuseHits;R.vertexReuseBytes+=length;return entry->slice;
     }
   }
-  // the slice gets the bytes of the entry's copy (one read of guest memory)
-  const uint8_t* bytes=entry?entry->remember(address,reservation,begin,length,fresh):fresh;
+  // the slice gets the bytes of the entry's copy (one read of guest memory), or fresh if direct
+  const uint8_t* bytes=entry?entry->remember(address,reservation,begin,length,fresh,R.uploadReadsDirect)
+                            :fresh;
   auto slice=allocate_upload(std::max<uint32_t>(reservation,16),4);
   if(poisonUnused) std::memset(slice.mapped,0xCD,slice.size);
   std::memcpy(static_cast<uint8_t*>(slice.mapped)+begin,bytes,length);
@@ -1630,7 +1633,8 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       const char* value = std::getenv("WWHD_VK_REUSE_UNIFORM_SNAPSHOTS");
       return value && std::strcmp(value, "1") == 0;
     }();
-    // compares CPU copies of the slots' bytes, never mapped upload memory (uniform_snapshot.h)
+    // compares CPU copies of the slots' bytes, not mapped upload memory, unless the upload memory is
+    // host-cached (R.uploadReadsDirect; uniform_snapshot.h)
     static UniformSnapshotCache<UploadSlice, VkDevice> uniformCache;
     rprof::UploadKind uploads(logicalSlot == 16 ? rprof::kUpUniformVars : rprof::kUpUbo);
     auto fresh = [&](const void* source, size_t length) {
@@ -1642,7 +1646,8 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     const auto b = cached ? cachedSlice
         : reuseUniforms
         ? uniformCache.get(R.device, R.submissionGeneration,
-                           (sh->vertex ? 0 : 17) + logicalSlot, bytes, size, fresh)
+                           (sh->vertex ? 0 : 17) + logicalSlot, bytes, size,
+                           R.uploadReadsDirect, fresh)
         : fresh(bytes, size);
     if (reuseUniforms && preparation_stats_enabled()) {
       const auto& counts = uniformCache.counters;
@@ -2273,7 +2278,8 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   rprof::UploadKind indexUploads(rprof::kUpIndex);
   // Scan the actual immutable index snapshot, never a second guest read: the bytes of the buffer
   // cache entry's shadow, or of a CPU copy that the upload slice is written from. Never the slice's
-  // mapped memory: upload memory is uncached or write-combined on discrete GPUs (issue #44).
+  // mapped memory: upload memory is uncached or write-combined on discrete GPUs (issue #44). Unless it
+  // is host-cached (R.uploadReadsDirect): then the slice's mapped bytes are scanned, as fast as a copy.
   static std::vector<uint8_t> nativeIndexCopy;  // render thread only
   UploadSlice nativeIndexSlice{};
   const bool hostRestart = topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP ||
@@ -2291,9 +2297,14 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     } else {
       const size_t bytes = size_t(count) * indexBytes;
       const auto* guest = static_cast<const uint8_t*>(mem::ptr(indexAddr));
-      nativeIndexCopy.assign(guest, guest + bytes);
-      nativeIndexSlice = snapshot(nativeIndexCopy.data(), bytes, 4);
-      nativeIndexData = nativeIndexCopy.data();
+      if (R.uploadReadsDirect) {
+        nativeIndexSlice = snapshot(guest, bytes, 4);
+        nativeIndexData = nativeIndexSlice.mapped;
+      } else {
+        nativeIndexCopy.assign(guest, guest + bytes);
+        nativeIndexSlice = snapshot(nativeIndexCopy.data(), bytes, 4);
+        nativeIndexData = nativeIndexCopy.data();
+      }
       vertexExtent = indexed_vertex_extent(nativeIndexData, count,
                                            indexBytes, hostRestart,
                                            int32_t(baseVertex));

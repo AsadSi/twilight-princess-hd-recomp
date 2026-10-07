@@ -414,7 +414,7 @@ printed LR/SP values do not establish that deeper guest stack frames match. Load
 later can succeed if the worker threads reach compatible waits. Failed loads do not
 bypass these checks or establish a valid benchmark starting point.
 
-## The CPU never reads mapped upload memory
+## The CPU never reads mapped upload memory, unless it is host-cached
 
 The upload arena (`allocate_upload`) and the buffer cache's blocks are host-visible memory the CPU
 writes and the GPU reads. On discrete GPUs that memory is uncached or write-combined (plain
@@ -438,6 +438,30 @@ it is written and checks that the caches still find exactly the expected reuse h
 mapped GPU-input memory left is the buffer cache's opt-in diagnostic `WWHD_VK_BUFFER_CACHE_VERIFY=1`.
 Buffers the CPU is meant to read (captures, the GamePad overlay signatures) come from
 `create_readback_buffer`, which prefers host-cached memory.
+
+**Unless it is host-cached.** Where the arena's memory type is both `HOST_CACHED` and `HOST_COHERENT`,
+CPU reads cost what heap reads cost and the copies are pure overhead (on an M3 Max about 0.2 ms of
+render-thread time per frame at Outset, 60 fps). That is every memory type on Apple silicon (MoltenVK),
+and the usual case on UMA drivers (many Android GPUs, integrated GPUs that expose cached host memory).
+`allocate_upload` records the type of each arena block it creates (`R.uploadCached`, true only while
+every block is CACHED and COHERENT) and sets `R.uploadReadsDirect`; then:
+
+- the reuse caches keep no copy: an entry's slice is written from the fresh guest bytes and later
+  compared against `slice.mapped`, which holds exactly those bytes (slices are immutable until their
+  submission retires). The mode is stored per entry, so a comparison always matches how its entry was
+  made;
+- the native index scan of the uncached index path scans the arena slice.
+
+CACHED without COHERENT never counts: the arena requires COHERENT and does no flush or invalidate.
+Uncached memory (discrete GPUs, Windows/Linux AMD and NVIDIA) keeps the copy path unchanged. The reuse
+decisions and hit counts are identical in both modes; `snapshot_caches` runs every sequence in both
+(poisoned arena for the copy mode, a readable one for direct reads) and checks equal hits, and that
+direct reads against a poisoned arena miss.
+
+`WWHD_VK_UPLOAD_READS` overrides the choice for A/B runs: `auto` (default), `shadow` (always keep CPU
+copies, e.g. to measure the discrete-GPU path on a Mac) or `direct` (always read the slices; slow on
+uncached memory, a diagnostic only). The log line `[vulkan] upload arena memory: ...` reports the
+memory and the mode.
 
 ## CPU/GPU overlap: lazy DrawDone and asynchronous presentation (all platforms)
 
