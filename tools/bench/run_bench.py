@@ -161,7 +161,8 @@ def run_once(args, variant, env_extra, index, out_dir):
     cache = os.path.abspath(args.cache_dir or os.path.join(out_dir, "cache"))
     os.makedirs(cache, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("WWHD_")}
-    presses = ",".join("%d-%d:8000" % (f, f + 8) for f in range(load_at - 300, load_at, 60))
+    press_from = args.press_from if args.press_from >= 0 else max(0, load_at - 300)
+    presses = ",".join("%d-%d:8000" % (f, f + 8) for f in range(press_from, load_at, args.press_every))
     env.update({
         "WWHD_NO_AUDIO": "1", "WWHD_NO_GAMEPAD": "1", "WWHD_NO_HOST_INPUT": "1",
         "WWHD_SHADER_CACHE": os.path.join(cache, "shaders.bin"), "WWHD_VK_SHADER_CACHE": os.path.join(cache, "vkshaders"),
@@ -251,8 +252,13 @@ def main():
                    help="show the game windows (presentation, swapchain and vsync pacing are only exercised then)")
     p.add_argument("--uncapped", action="store_true", help="WWHD_VK_UNCAPPED=1: throughput, not gameplay pacing")
     p.add_argument("--seconds", type=float, default=60, help="scenario length in game seconds after --origin")
-    p.add_argument("--load-frame", type=int, default=1500, help="TV frame of the state load")
-    p.add_argument("--origin", type=int, default=1700, help="TV frame where the scripted input starts")
+    # the state load restores the whole game state, so it only needs the boot to have finished; A
+    # presses from frame 120 skip the intro and title (validated 2026-10-07 at loads 360 and 600)
+    p.add_argument("--load-frame", type=int, default=450, help="TV frame of the state load")
+    p.add_argument("--origin", type=int, default=650, help="TV frame where the scripted input starts")
+    p.add_argument("--press-from", type=int, default=120,
+                   help="first TV frame of the A presses through the intro and title (-1: load frame - 300)")
+    p.add_argument("--press-every", type=int, default=30, help="frames between A presses")
     p.add_argument("--skip-windows", type=int, default=2, help="120-frame reports after the load to ignore (warm-up)")
     p.add_argument("--variant", action="append", default=[], metavar="NAME:K=V,K=V",
                    help="a configuration (environment); repeat for A/B runs, run interleaved")
