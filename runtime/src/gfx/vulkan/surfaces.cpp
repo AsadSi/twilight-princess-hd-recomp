@@ -677,6 +677,9 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
         auto* s=it->second.get();
         if(!forRendering&&s->isDepth&&!d.isDepth&&s->gpuWritten&&s->width==d.width&&s->height==d.height)consider(s);
         if(s->isDepth!=d.isDepth)continue;
+        // a render target is one level: don't adopt a texture made first by sampling the address
+        // with a mip chain (rendering would define level 0 only; see metal_surfaces.mm, issue #47)
+        if(forRendering&&s->mips>1)continue;
         // a volume and a 2D array of the same size are different images (a volume's slices are its depth)
         bool sameVolume=(s->imageType==VK_IMAGE_TYPE_3D)==(dimType(d.dim)==VK_IMAGE_TYPE_3D);
         if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&sameVolume&&

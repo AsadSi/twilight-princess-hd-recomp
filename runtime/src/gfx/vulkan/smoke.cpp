@@ -453,6 +453,21 @@ int renderer_smoke_test() {
    }
    fprintf(stderr,"[renderer smoke] upload cache and interior mip invalidation/readback passed\n");
    {
+    // A buffer sampled (with a two-level descriptor) before anything rendered it, then rendered:
+    // the render target must be its own one-level surface, not the sampled texture, and later
+    // sampling must find the target (issue #47).
+    SurfaceDesc t;t.addr=mem::host_alloc(16*16*4,256);t.mipAddr=mem::host_alloc(8*8*4,256);
+    t.width=16;t.height=16;t.pitch=16;t.slices=1;t.mips=2;t.format=0x1a;t.dim=1;
+    auto* tex=find_or_create_surface(t,false);
+    upload_surface(tex);
+    SurfaceDesc rt=t;rt.mipAddr=0;rt.mips=1;
+    auto* target=find_or_create_surface(rt,true);
+    require(target&&target!=tex&&target->mips==1,"render target adopted a sampled mipmapped texture");
+    mark_gpu_written(target);
+    require(find_or_create_surface(t,false)==target,"sampling after the render did not find the render target");
+    fprintf(stderr,"[renderer smoke] render target after a mipmapped sampled texture passed\n");
+   }
+   {
     // A texel changed in place, unannounced, between the 256 words the former sampled check read
     // (step 1 KiB here): page write tracking must still upload it on the next frame.
     SurfaceDesc bigDesc;bigDesc.addr=mem::host_alloc(256*256*4,256);

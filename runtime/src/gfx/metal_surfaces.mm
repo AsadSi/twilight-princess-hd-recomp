@@ -352,6 +352,14 @@ static Surface* find_surface(const SurfaceDesc& d, bool forRendering) {
         if (!forRendering && s->isDepth && !d.isDepth && s->gpuWritten && s->width == d.width && s->height == d.height)
             consider(s);
         if (s->isDepth != d.isDepth) continue;
+        // a render target is one level. A texture made first by sampling the address (with the mip
+        // chain its descriptor declares) is not adopted as a target: rendering would define level
+        // 0 only, and samplers would keep reading the other levels as uploaded from guest memory,
+        // for the rest of the session. That happens when a pass samples a buffer before the pass
+        // that renders it has run once, e.g. its draw was skipped while its shader compiled (issue
+        // #47: the light buffer, black shadows). The target gets its own surface instead, which
+        // then wins sampling lookups as the newest write, as when the render came first.
+        if (forRendering && s->mips > 1) continue;
         // a volume and a 2D array of the same size are different textures
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
             volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
