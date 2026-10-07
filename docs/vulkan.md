@@ -133,6 +133,31 @@ directory overrides `WWHD_SHADER_CACHE=0`. Canonical GLSL and stage deduplicatio
 remains active in memory when disk storage is disabled. Fresh decompiler metadata
 is kept for every guest variant; identical final shader programs share compilation.
 
+Shader keys have two levels, like Cemu's base and auxiliary shader hashes but exact
+about what the GLSL translation reads (`gfx/vulkan/shaders.cpp`, `gather_linkage` and
+`variant_hash`). The linkage key is the program, the fetch shader, the pixel-shader input
+table (input count, position import, parameter generation, and per input its semantic,
+flat and noperspective bits), the vertex input semantics, and for vertex shaders the
+viewport-transform enable, half Z, points and streamout enable; for pixel shaders the
+output mask (`CB_SHADER_MASK`), the alpha test and the front-face import. The variant key
+adds, for the texture units the program samples, their dimension and integer format, the
+semantic ids of the parameters a vertex shader exports, and streamout strides when it writes
+streamout; the units and exports are recorded from the program's first translation.
+Render-target formats, samplers, buffer addresses and units the program does not sample
+are not in the key. Keys that still translate to an identical shader (GLSL, resource
+mapping, uniform offsets, descriptor ranks) share one shader and its pipelines.
+`WWHD_VK_SHADER_KEY_VERIFY=1` also computes the previous, wider key on every lookup and,
+once per distinct wider key, translates again under the current registers and compares
+the result with the shader the narrow key returned; any difference is logged as
+`[vulkan shader key] VIOLATION` and counted in the stats (`=N` checks one wider key in N).
+
+Pipelines are keyed by the two shader identities, the fetch layout, topology, attachment
+formats, vertex strides and the fixed-function state the pipeline bakes in, normalized so
+that ignored state (blend words of attachments that do not blend, stencil words with the
+stencil test off, depth bias words with the bias off) does not create pipelines. The key is
+a fixed-size struct hashed and compared as bytes. Descriptor sets are cached per
+submission by a 64-bit hash of layout and descriptors, confirmed by comparing them.
+
 The versioned cache checks the compiler recipe, exact shader source, checksum,
 record bounds and SPIR-V structure. Incompatible or corrupt files become misses.
 After 120 quiet frames, the render thread copies a bounded immutable snapshot
@@ -201,7 +226,7 @@ wait timers disabled. CPU time excludes sleeping and GPU waits.
 | `WWHD_VK_SHADER_ADDRESS_MEMO` | Texture address words 2/3 no longer invalidate the last Vulkan shader lookup. Other register classification is unchanged; textures and attachment aliases are resolved afresh, and context/save-state loads invalidate shader memoization. |
 | `WWHD_VK_FETCH_MEMO` | Reuses the last fetch-program lookup within one frame after fresh header/range validation, preserving the existing once-per-frame program-byte hashing contract and save-state reset. |
 | `WWHD_VK_SPECIALIZE_INDICES` | Selects a typed endian/restart reader once per draw and directly fills expanded primitive indices. Native index eligibility and the final immutable index extent scan remain unchanged; wrapped big-endian guest ranges use the original reader. |
-| `WWHD_VK_SHADER_STATE_MEMO` | Retains four exact gathered-state hash entries per shader stage. Every lookup freshly gathers all existing masked words and compares every active byte, count, and program hash seed. Misses use the identical hash mixer; save-state and sentinel calls clear the memo. |
+| `WWHD_VK_SHADER_STATE_MEMO` | Retains four exact gathered linkage-key entries per shader stage. Every lookup freshly gathers all linkage words and compares every active byte, count, and program hash seed. Misses use the identical hash mixer; save-state and sentinel calls clear the memo. |
 | `WWHD_VK_SKIP_VERTEX_BINDS` | Omits only identical host vertex buffer/offset bindings after fresh snapshot preparation. Sixteen binding slots are guarded by command buffer, submission generation, and pass resets. Index bindings remain fresh. Combine with exact vertex snapshot reuse to make unchanged slice identities available. |
 | `WWHD_VK_SAMPLER_MEMO` | Reuses immutable sampler handles after exact device, fresh sampler-word, compare/integer, and effective anisotropy matching. Texture preparation still runs before lookup. |
 | `WWHD_VK_SPARSE_HASH_MEMO` | Only used where page write tracking is unavailable (texture changes are detected by `runtime/src/write_watch.h`; the sparse check is its fallback). Compares all freshly read, ordered sparse texture samples before reusing their hash. Full texture checks, invalidation, and uploads remain unchanged. Retains 64 entries by default; `WWHD_VK_SPARSE_HASH_ENTRIES=256` selects a bounded 16 MiB sample store. Oversized sample sets stream through the original mixer. |
