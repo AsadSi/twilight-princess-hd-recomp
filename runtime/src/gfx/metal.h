@@ -83,6 +83,7 @@ struct Renderer {
 
     // surfaces keyed by guest address (several may share an address with different shapes)
     std::unordered_multimap<uint32_t, std::unique_ptr<Surface>> surfaces;
+    std::vector<Surface*> linearTargets;  // linear-aligned colour surfaces (never removed): GX2DrawDone write-back
 
     uint64_t frame = 0;
     uint64_t drawCount = 0;

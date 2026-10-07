@@ -392,6 +392,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
             s->isDepth ? " depth" : "", (unsigned long)s->tex.width, (unsigned long)s->tex.height);
     Surface* raw = s.get();
     R.surfaces.emplace(d.addr, std::move(s));
+    if (!raw->isDepth && (Latte::E_HWTILEMODE)raw->tileMode == Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED) R.linearTargets.push_back(raw);
     return forRendering ? adopt_newer_alias(raw) : raw;
 }
 
@@ -799,12 +800,12 @@ void write_back_linear_targets() {
     const uint64_t t0 = rprof::now_ns();
     uint64_t readNs = 0, bytesDone = 0;
     uint32_t count = 0;
-    for (auto& [addr, surface] : R.surfaces) {
-        Surface* s = surface.get();
-        if (!s->gpuWritten || s->isDepth || s->writtenBackSeq == s->writeSeq || !s->tex) continue;
+    // linear aligned only: a tile mode of 0 can also be GX2's "default" (a tiled copy destination)
+    for (Surface* s : R.linearTargets) {
+        if (!s->gpuWritten || s->writtenBackSeq == s->writeSeq || !s->tex) continue;
         s->writtenBackSeq = s->writeSeq;
-        // linear aligned only: a tile mode of 0 can also be GX2's "default" (a tiled copy destination)
-        if ((Latte::E_HWTILEMODE)s->tileMode != Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED || s->slices != 1 || !can_write_back(s)) continue;
+        if (s->slices != 1 || !can_write_back(s)) continue;
+        const uint32_t addr = s->addr;
         const uint32_t bytes = s->fmt.bytesPerBlock, pitch = std::max(s->pitch, s->width);
         const uint64_t r0 = rprof::now_ns();
         auto texels = read_guest_texels(s, s->width, s->height);

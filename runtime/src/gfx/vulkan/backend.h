@@ -144,6 +144,7 @@ struct Renderer {
  size_t activeSubmission=0;
  Screen tv,drc;
  std::unordered_multimap<uint32_t,std::unique_ptr<Surface>> surfaces;
+ std::vector<Surface*> linearTargets; // linear-aligned colour surfaces (never removed, like surfaces): GX2DrawDone write-back
 };
 extern Renderer R;
 // Render-thread checkpoint; failures leave the cache dirty for a later retry.
