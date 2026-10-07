@@ -340,9 +340,10 @@ uint64_t legacy_state_hash(const uint32_t* regs, uint64_t hash, bool vertex) {
     return hash_bytes(state.data(),count*sizeof(uint32_t),hash);
 }
 // Shader-cache miss histogram (render_prof.h, H6 of the performance research): for each new variant
-// of a program that already has variants, which of the words state_hash() covers differ from the
+// of a program that already has variants, which of the words legacy_state_hash() covers (the key
+// before the narrowing) differ from the
 // nearest existing variant. Texture and sampler words are split into units/samplers this shader
-// samples and ones it does not (narrowing candidates). Same words as state_hash(), fixed layout.
+// samples and ones it does not. Same words as legacy_state_hash(), fixed layout.
 enum MissGroup : uint8_t {
     kMgSemantic, kMgVsOutId, kMgVsOutConfig, kMgVsOutCntl, kMgPsInControl, kMgPsInputCntl, kMgPrimitive,
     kMgPointSprite, kMgStreamout, kMgGsMode, kMgSqConfig, kMgCbShaderMask, kMgCbShaderControl,

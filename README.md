@@ -12,6 +12,15 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ### Next update
 
+- **Far fewer shader translations and pipelines, fewer stutters in new areas, less memory
+  (Vulkan):** the renderer now keys a translated shader only on the state that actually changes its
+  translation (for example, only the textures a shader samples and the vertex inputs and outputs it
+  uses), so the same shader is no longer translated again and again for different render states.
+  Starting from an empty shader cache, Outset Island needed 569 translations and 204 pipelines
+  instead of about 6,100–6,700 and 3,200–3,500, and Windfall 829 and 236 instead of about 4,300–5,000
+  and 2,300–2,700. That takes about 100–115 MB less memory, cuts the frames that take over 50 ms
+  by about a third, and lowers render-thread CPU time by 4–12%. It supersedes PR #46 by rhemfur,
+  whose idea (keys that translate to the same shader share it and its pipelines) is part of it.
 - **Performance reports say which build and system they come from** (issue #44): **Copy performance
   report** now starts with the version and commit, the operating system and version, the graphics card
   with its driver and Vulkan version (or the Metal device), and the rendering switches that are not at

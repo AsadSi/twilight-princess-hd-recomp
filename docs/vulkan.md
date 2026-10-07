@@ -150,6 +150,24 @@ mapping, uniform offsets, descriptor ranks) share one shader and its pipelines.
 once per distinct wider key, translates again under the current registers and compares
 the result with the shader the narrow key returned; any difference is logged as
 `[vulkan shader key] VIOLATION` and counted in the stats (`=N` checks one wider key in N).
+Sharing shaders whose translation is identical is the idea of PR #46 by rhemfur, who found that
+5,072 translations in Outset (Galaxy S25) had only 686 distinct GLSL texts and that the resulting
+pipelines (7,500 in two minutes, about 0.12 MB each) eventually exhausted memory.
+
+Measured on macOS (MoltenVK), 60-second scripted runs from a save state with empty shader caches,
+devel against the narrow keys (PR #46 alone in brackets):
+
+| | before | PR #46 | narrow keys |
+| --- | --- | --- | --- |
+| Outset translations / pipelines | 6,127–6,670 / 3,229–3,525 | 6,670 / 339 | 569 / 204 |
+| Windfall translations / pipelines | 4,337–4,981 / 2,323–2,672 | 4,981 / 501 | 829 / 236 |
+| Frames over 50 ms, Outset / Windfall | 21–26 / 18 | | 15–16 / 11–13 |
+
+Peak resident memory was 100–115 MB lower. Without a frame limit render-thread CPU time fell by
+11–12% and the 99th-percentile frame interval from 39 to 20 ms (Outset) and 26 to 15 ms (Windfall);
+with 8–10 ms of artificial render-thread load at paced 60 fps, CPU time fell by 4–7% and slow
+frames by about 40%. The verify mode found no violations and the Khronos validation layer reported
+nothing.
 
 Pipelines are keyed by the two shader identities, the fetch layout, topology, attachment
 formats, vertex strides and the fixed-function state the pipeline bakes in, normalized so
