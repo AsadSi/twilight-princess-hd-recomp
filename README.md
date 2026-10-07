@@ -10,6 +10,29 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
+### Next update
+
+- **120 and 240 fps** (settings overlay → **Graphics** → **Frame rate**, or the macOS Graphics
+  menu): frame interpolation now also draws 3 or 7 blended frames between the game's 30 logic steps
+  a second, for 120 Hz and 240 Hz displays. Camera, models, particles, sea and every other blended
+  effect move at even steps between two game steps; input, sound and menus behave as at 30 fps.
+  The game detects the display's refresh rate (ProMotion Macs: 120 Hz; Windows, Linux and Android:
+  the monitor's or phone's current rate, and Android phones are asked for their fast mode) and the
+  overlay shows it ("Your display: 120 Hz"). A rate the display cannot show is capped to it:
+  240 fps on a 120 Hz display draws 120, and 120 fps on a 60 Hz display draws 60. **Keep game
+  speed** is on by default at 120/240 fps: when the computer cannot draw every frame, the game
+  still runs at full speed with fewer in-between frames. Measured on
+  an M3 Max with its 120 Hz display (Outset Island): 120 fps draws 115 frames a second on screen
+  with Vulkan and 108 with Metal, at 29.1–29.7 game steps a second; without presenting, 119.3
+  frames and 29.9 steps. 240 fps is limited by the renderer on that machine (about 146 frames a
+  second when not capped to the display), so on a 120 Hz screen it draws the same as 120 fps.
+- **"Uncapped" debug switch** (settings overlay → **Graphics**; not saved): no frame limit and no
+  vsync, to see how many frames a second your computer can draw (window title and performance
+  overlay). The game counts frames, so it runs faster than normal while it is on: not for playing.
+  Metal and Vulkan; `WWHD_UNCAPPED=1` turns it on at start.
+- **Keep game speed recovers faster after a hitch** (all frame rates): one slow frame (a shader
+  compile, a scene load) no longer turns the in-between frames off for several seconds.
+
 ### v0.2.6
 
 - **Far fewer shader translations and pipelines, fewer stutters in new areas, less memory
@@ -203,10 +226,14 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   characters in the window title. Community fixes from pull requests #1 and #2 (Miiverse manager
   throttling, shared shader-cache memory) are included.
 
-- **60 fps.** Two modes in the Graphics menu:
-  - **60 fps (key 6)**: frame interpolation. The game logic keeps its original 30 steps per second;
-    every second frame is drawn halfway between two steps (camera, models, particles, sea, wave
-    crests, grass and trees, cloth, weather, lighting). Input, sound and menus behave as at 30 fps.
+- **60, 120 and 240 fps.** Modes in the Graphics menu and the settings overlay (Graphics › Frame rate):
+  - **60 fps (key 6), 120 fps, 240 fps**: frame interpolation. The game logic keeps its original
+    30 steps per second; the frames in between (1, 3 or 7 per step) are drawn blended between two
+    steps (camera, models, particles, sea, wave crests, grass and trees, cloth, weather, lighting).
+    Input, sound and menus behave as at 30 fps. The frames reach the screen up to the display's
+    refresh rate (the overlay shows it, e.g. "Your display: 120 Hz"). "Keep game speed" (on by
+    default at 120/240 fps, off at 60) skips in-between frames the computer or display cannot show
+    instead of slowing the game down.
   - **True 60 (key 7, experimental)**: Link and the follow camera run their logic at 60 steps per
     second (for the actions that have been converted and measured against the original); everything
     else runs at 30 and is interpolated.
@@ -593,7 +620,7 @@ single-key shortcuts (R, O, M, N, 6–9, P, F1–F5, F12) and Esc can't be bound
 
 The **Graphics** menu in the menu bar switches fixes and enhancements while playing (the TV
 window title shows what is active and the current frame rate): 60 fps by frame interpolation
-(**6**), true 60 fps (**7**, experimental), internal resolution 1x / 1.5x / 2x / 3x (**R**
+(**6**; 120 and 240 fps in the menu and the settings overlay), true 60 fps (**7**, experimental), internal resolution 1x / 1.5x / 2x / 3x (**R**
 cycles; the game renders at 1280x720, 2x renders at 2560x1440), edge smoothing (FXAA, **8**),
 ambient-occlusion mode (**O** cycles), full-size occlusion depth (**M**), 16x anisotropic
 filtering (**N**), the aspect ratio, the renderer (Metal or Vulkan), and a frame capture for debugging (**P** or fn+F12, written to `captures/`;
@@ -668,8 +695,11 @@ and the renderer are remembered in `~/Library/Application Support/wwhd/display.p
   `WWHD_DRC_MODE=window|pip|auto|off|gamepad`, `WWHD_FULLSCREEN=0|1` (the TV window starts windowed / in
   full screen this time instead of as it was left; that session's full screen is not remembered), `WWHD_ASPECT=16:9|window|16:10|21:9|32:9|<w:h>`,
   `WWHD_AUDIO_VOLUME=0..1`, `WWHD_AUDIO_OUTPUT=auto|tv|gamepad` (the host plays the TV's sound, plus the GamePad's in Off-TV Play: auto; or only one of them), `WWHD_SHADER_CACHE=<file>|0`, `WWHD_AO_MODE=0..2`, `WWHD_AO_HIRES=0|1`, `WWHD_ANISO=0|1`, `WWHD_RES_SCALE=1|1.5|2|3`,
-  `WWHD_FXAA=0|1`, `WWHD_INTERP=1`, `WWHD_INTERP_PACED=0|1`, `WWHD_TRUE60=1` (start values for the Graphics menu; they
-  override the remembered choices);
+  `WWHD_FXAA=0|1`, `WWHD_INTERP=1`, `WWHD_INTERP_FPS=60|120|240` (frame interpolation at that rate),
+  `WWHD_INTERP_PACED=0|1`, `WWHD_TRUE60=1` (start values for the Graphics menu; they
+  override the remembered choices); `WWHD_DISPLAY_HZ=n` replaces the detected display refresh rate
+  that 120/240 fps are capped to (0: no cap); `WWHD_UNCAPPED=1` starts with the debug switch
+  "Uncapped" on (no frame limit, no vsync; the game runs faster than real time);
   `WWHD_SHADOW_SCALE=n` gives the shadow maps their own resolution factor; `WWHD_STATE_DIR=<dir>`
   stores save states elsewhere; `WWHD_RUMBLE=0|1` (SDL builds) start value for Controls > Rumble (overrides the remembered
   choice); `WWHD_LOG_RUMBLE=1` logs the game's motor requests and what the motors do.
