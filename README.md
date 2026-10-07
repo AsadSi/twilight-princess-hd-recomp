@@ -10,6 +10,16 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
+### Next update
+
+- **Gyro aiming** (issue #45; settings overlay → **Controls** → **Gyro…**): aim the bow, hookshot,
+  boomerang, telescope, Picto Box and grappling hook in first person by moving your controller, as
+  with the Wii U GamePad. Sources: the gyro of a **DualSense, DualShock 4, Switch Pro, Joy-Con or
+  Steam Deck** controller, a **Cemuhook (DSU)** server (DS4Windows, BetterJoy, phone apps;
+  127.0.0.1:26760 by default), or the **mouse** (for Steam Input's "gyro to mouse"). Sensitivity,
+  invert and a recenter button are adjustable. Off by default; the game's own **Options → Gyro**
+  switch still applies. See `docs/gyro.md`.
+
 ### v0.2.4
 
 - **Smoother 60 fps on slower PCs (Vulkan):** the render thread no longer waits for the GPU after
@@ -604,6 +614,14 @@ single motor, so a GamePad rumble pattern plays as on/off (or half strength wher
 and the motors stay still while the settings overlay is open, while no game window has focus and
 once the app quits. **Controls > Rumble** in the settings overlay (F1) turns it off and is
 remembered (`WWHD_RUMBLE=0` starts with it off). The macOS app does not drive controller motors yet.
+
+**Gyro aiming** (settings overlay → **Controls** → **Gyro…**, off by default): in first person the
+game turns the camera when the GamePad moves. The port turns its virtual GamePad with a host
+controller's gyro (SDL3; on the macOS app through GameController.framework), a Cemuhook (DSU) server
+or the mouse (Steam Input "gyro to mouse": while the game aims, the pointer is captured and the mouse
+turns the GamePad). Sensitivity and invert per axis, a recenter button or key, and the Cemuhook
+server, port and slot are saved; `WWHD_GYRO=off|controller|cemuhook|mouse` overrides the source at
+start. Details and what to test: `docs/gyro.md`.
 
 The **Display** menu: full screen for the TV window (**⌘F**, **⌃⌘F** or the green button; the
 pointer hides after 2 s without movement), picture scaling (smooth, sharp, or integer scale) and

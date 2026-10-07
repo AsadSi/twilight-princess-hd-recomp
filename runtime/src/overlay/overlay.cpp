@@ -34,6 +34,7 @@
 #include "../mods/mods.h"
 #include "../mods/manager.h"
 #include "../mods/packages.h"
+#include "../motion/motion.h"
 #include "../platform/keycodes.h"
 #include "../rumble.h"
 #include "../runtime.h"
@@ -1033,6 +1034,96 @@ void controls_list(input_map::Mapping& m, float h) {
     }
 }
 
+// ---------------------------------------------------------------- gyro (motion/motion.h)
+void save_gyro(const motion::Settings& g) {
+    hostui::post([g] {
+        motion::set_settings(g);
+        for (const char* k : motion::kKeys) hostui::set(k, motion::value_of(g, k));
+    });
+}
+void load_gyro() {
+    motion::Settings g;
+    std::string v;
+    for (const char* k : motion::kKeys)
+        if (hostui::get(k, v)) motion::from_kv(g, k, v);
+    motion::set_settings(g);
+}
+// the Gyro window (Controls tab > Gyro...): source, sensitivity, invert, recenter, Cemuhook server
+void gyro_window(bool& open) {
+    const char* title = "Gyro aiming##gyro";
+    if (open) { ImGui::OpenPopup(title); open = false; }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) return;
+    motion::Settings g = motion::settings(), before = g;
+    bool v;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34);
+    note("On the Wii U you aim in first person (bow, hookshot, boomerang, telescope, Picto Box, grappling hook) by "
+         "moving the GamePad. The game's own Options > Gyro switch still decides whether it uses the motion.");
+    for (int i = 0; i < motion::kSourceCount; i++)
+        if (radio(motion::source_label(i), g.source == i)) g.source = i;
+    if (motion::env_override()) note("WWHD_GYRO=%s overrides the saved source.", getenv("WWHD_GYRO"));
+    if (g.source == motion::kOff && motion::gyro_controllers() > 0) note("A controller with a gyro is connected: choose Controller gyro to use it.");
+    ImGui::SetNextItemWidth(220);
+    ImGui::SliderFloat("Sensitivity left/right", &g.tuning.sensitivity_x, 0.1f, 5.0f, "%.2fx");
+    ImGui::SameLine(0, 16);
+    if (check("Invert##x", g.tuning.invert_x, &v)) g.tuning.invert_x = v;
+    ImGui::SetNextItemWidth(220);
+    ImGui::SliderFloat("Sensitivity up/down", &g.tuning.sensitivity_y, 0.1f, 5.0f, "%.2fx");
+    ImGui::SameLine(0, 16);
+    if (check("Invert##y", g.tuning.invert_y, &v)) g.tuning.invert_y = v;
+    if (g.source == motion::kMouse) {
+        ImGui::SetNextItemWidth(220);
+        ImGui::SliderFloat("Mouse: degrees per point", &g.mouse_degrees, 0.01f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        help("How far one point of mouse movement turns the GamePad. With Steam Input's gyro to mouse, tune this and "
+             "Steam's own sensitivity together.");
+        note("While the game aims, the pointer is captured and the mouse turns the GamePad (the mouse camera mod "
+             "leaves it alone then).");
+    }
+    if (g.source == motion::kCemuhook) {
+        static char host[256] = "";
+        static int port = 0;
+        static bool init = false;
+        if (!init || ImGui::IsWindowAppearing()) { snprintf(host, sizeof host, "%s", g.dsu_host.c_str()); port = g.dsu_port; init = true; }
+        ImGui::SetNextItemWidth(220);
+        if (ImGui::InputText("Server", host, sizeof host, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
+            g.dsu_host = host[0] ? host : "127.0.0.1";
+        ImGui::SetNextItemWidth(120);
+        if (ImGui::InputInt("Port", &port, 0, 0, ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::IsItemDeactivatedAfterEdit())
+            g.dsu_port = std::clamp(port, 1, 65535);
+        ImGui::SetNextItemWidth(120);
+        int slot = g.dsu_slot + 1;
+        if (ImGui::SliderInt("Controller slot", &slot, 1, 4)) g.dsu_slot = slot - 1;
+        note("A Cemuhook (DSU) server: DS4Windows, BetterJoy, SteamDeckGyroDSU or a phone app; default 127.0.0.1, port 26760.");
+    }
+    // recenter: a controller input and/or a key
+    const char* pad_name = g.recenter_pad > 0 ? input_map::pad_label(g.recenter_pad) : "None";
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::BeginCombo("Recenter: controller", pad_name)) {
+        for (int p = 0; p < input_map::kPadCount; p++)
+            if (ImGui::Selectable(p ? input_map::pad_label(p) : "None", g.recenter_pad == p)) g.recenter_pad = p;
+        ImGui::EndCombo();
+    }
+    std::string key_name = g.recenter_key >= 0 ? input_map::key_label(g.recenter_key) : "None";
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::BeginCombo("Recenter: key", key_name.c_str())) {
+        if (ImGui::Selectable("None", g.recenter_key < 0)) g.recenter_key = -1;
+        for (int k = 0; k < 256; k++) {
+            std::string id = input_map::key_id(k);
+            if (id.rfind("Key", 0) == 0) continue;  // unnamed codes
+            if (ImGui::Selectable(input_map::key_label(k).c_str(), g.recenter_key == k)) g.recenter_key = k;
+        }
+        ImGui::EndCombo();
+    }
+    help("The button or key also reaches the game if the controls use it; pick a free one.");
+    if (ImGui::Button("Recenter now")) motion::recenter();
+    ImGui::SameLine();
+    ImGui::TextUnformatted(motion::status().c_str());
+    ImGui::PopTextWrapPos();
+    if (!(g == before)) save_gyro(g);
+    if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void tab_controls() {
     bool v;
     input_map::Mapping m = input_map::current();
@@ -1135,6 +1226,15 @@ void tab_controls() {
     }
     help(input::has_rumble() ? "Controller vibration when the game asks for it. Off keeps the motors still."
                              : "Controller vibration: this host does not drive controller motors yet.");
+    ImGui::SameLine(0, 24);
+    static bool gyro_open = false;
+    {
+        const motion::Settings g = motion::settings();
+        std::string label = std::string("Gyro: ") + (g.source == motion::kOff ? "off" : motion::source_label(g.source)) + "...";
+        if (ImGui::Button(label.c_str())) gyro_open = true;
+        help("Aim in first person by moving a controller with a gyro, a Cemuhook (DSU) source or the mouse (Steam Input)");
+    }
+    gyro_window(gyro_open);
     ImGui::SameLine(0, 24);
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
 }
@@ -1382,6 +1482,8 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             hostui::post([pro = v == "1"] { hostui::set_pro_controller(pro); });
         // the saved rumble choice (WWHD_RUMBLE wins)
         if (!rumble::env_override() && hostui::get("rumble", v)) rumble::set_enabled(v != "0");
+        // the saved gyro settings (WWHD_GYRO overrides the source)
+        hostui::post([] { load_gyro(); });
     }
     if (!test.done && render::frame_count() + 1 >= test.at) {
         test.done = true;
