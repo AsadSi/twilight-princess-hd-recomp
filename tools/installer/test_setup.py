@@ -228,6 +228,31 @@ class Arch(unittest.TestCase):
         self.assertIn("aarch64", tcs["python"]["linux-aarch64"]["url"])
 
 
+class NoScriptHost(unittest.TestCase):
+    """Antivirus heuristics read "unsigned program starts PowerShell" as a dropper (issue #58): the Windows setup
+    uses the Windows API instead (Wind Waker HD.exe fetches Python, setup.py uses ctypes)."""
+
+    def test_no_powershell(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in ("setup.py", "install-windows.bat"):
+            with open(os.path.join(here, name), encoding="utf-8") as f:
+                self.assertNotIn("powershell", f.read().lower(), name)
+        self.assertFalse(os.path.exists(os.path.join(here, "bootstrap-windows.ps1")))
+
+    @unittest.skipUnless(setup.IS_WIN, "Windows only")
+    def test_shortcut(self):
+        self.assertTrue(os.path.isdir(setup.win_known_folder(0x02)))
+        self.assertTrue(os.path.isdir(setup.win_known_folder(0x10)))
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, "Wind Waker HD test.lnk")
+            setup.win_shortcut(link, sys.executable, "--game game --save save", d, sys.executable)
+            with open(link, "rb") as f:
+                head = f.read(20)
+            self.assertEqual(head[:4], b"\x4c\x00\x00\x00")  # a shell link header
+            self.assertEqual(head[4:20], bytes.fromhex("0114020000000000c000000000000046"))  # its CLSID
+            setup.win_shortcut(link, sys.executable, workdir=d)  # replaces it
+
+
 class NonInteractive(unittest.TestCase):
     def test_ui_refuses_to_prompt(self):
         ui = setup.UI(False)

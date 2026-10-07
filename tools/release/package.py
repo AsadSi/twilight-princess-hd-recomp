@@ -351,8 +351,10 @@ def main():
     if a.platform.startswith("macos"):
         copy(os.path.join(inst, "install-macos.command"), os.path.join(pkg, "tools", "Setup in Terminal.command"))
     elif a.platform.startswith("windows"):
+        # runs "Wind Waker HD.exe --console-setup" (the program fetches Python itself; no PowerShell)
+        if not a.setup_gui:
+            sys.exit("windows: --setup-gui is required (tools/Setup in a console window.bat runs Wind Waker HD.exe)")
         copy(os.path.join(inst, "install-windows.bat"), os.path.join(pkg, "tools", "Setup in a console window.bat"))
-        copy(os.path.join(inst, "bootstrap-windows.ps1"), os.path.join(pkg, "tools", "installer", "bootstrap-windows.ps1"))
     else:
         copy(os.path.join(inst, "install-linux.sh"), os.path.join(pkg, "tools", "setup-in-terminal.sh"))
     # portable release: everything stays in this folder (setup.py and the game look for this file)

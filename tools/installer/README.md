@@ -35,7 +35,7 @@ Start menu, applications menu) are only created when the player asks for one.
 | `toolchains.json` | pinned compilers and Python downloads (URL + SHA-256); CI builds with the same ones |
 | `gui/setup_gui.cpp` | **Wind Waker HD**, the program a release starts: first-start setup, then the game launcher (SDL3 + Dear ImGui) |
 | `install-macos.command` | setup in Terminal, macOS (shipped as `tools/Setup in Terminal.command`) |
-| `install-windows.bat` + `bootstrap-windows.ps1` | setup in a console window, Windows (`tools/Setup in a console window.bat`; fetches the pinned embeddable Python) |
+| `install-windows.bat` | setup in a console window, Windows (`tools/Setup in a console window.bat`): runs `Wind Waker HD.exe --console-setup`, which fetches the pinned embeddable Python and runs `setup.py` in that console |
 | `install-linux.sh` | setup in a terminal, Linux (`tools/setup-in-terminal.sh`; falls back to a pinned standalone Python) |
 | `test_setup.py` | unit tests of the helpers (`python3 tools/installer/test_setup.py`) |
 
@@ -51,7 +51,8 @@ the game without a console window and exits). Otherwise, or with Shift held at s
 Windows) or `--setup`, it shows the setup.
 
 The setup is only a front end: it runs the release's terminal setup with `--gui-protocol` as a child
-process (so Python is found or fetched exactly as in the terminal setup) and talks to `setup.py`
+process (so Python is found or fetched exactly as in the terminal setup; on Windows it fetches the
+pinned Python itself, see below, and starts `setup.py` with it directly) and talks to `setup.py`
 over its stdin/stdout. Screens: welcome (or, when installed: play / update / repair / reinstall /
 import saves or settings / open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
 (disc images only: disc key found next to the image or chosen; common key as a file or pasted into a hidden field), installation
@@ -80,6 +81,21 @@ Build: `-DWWHD_SETUP_GUI=ON` adds the `wwhd-setup` target (`cmake/SetupGui.cmake
 statically on macOS and Windows (pinned source, release toolchain); Linux uses the shared SDL3 the
 release ships in `sdk/runtime`. The ImGui SDL3 and SDL_Renderer backends are the unmodified ones of
 the vendored ImGui release.
+
+## Windows: Python without PowerShell
+
+`Wind Waker HD.exe` gets the pinned embeddable Python (`python.windows` in `toolchains.json`) itself
+(`gui/python_fetch_win.cpp`): WinHTTP download (system proxy settings), SHA-256 check with Windows CNG
+against the pin, unpacked with zlib (`gui/unzip_min.cpp`; `python.exe` written last) into
+`<data>\python\<dir>`, where `<data>` is `%WWHD_DATA_DIR%`, the release folder's `data` (portable
+release) or `%LOCALAPPDATA%\WWHD`. The window does this on a thread while it shows "Preparing the
+installer..."; `--console-setup ARGS` (the first argument; used by `tools\Setup in a console window.bat`)
+does the same in the console it was started from and then runs `setup.py ARGS` there. `setup.py` uses
+the Windows API through ctypes for its file dialogs and shortcuts. Until 0.2.6 this was a PowerShell
+script started with `-ExecutionPolicy Bypass` that also removed the "mark of the web" from every file in
+the release folder; antivirus heuristics read that as a dropper (issue #58). Nothing needs the mark
+removed: SmartScreen asks once for `Wind Waker HD.exe` and remembers "Run anyway", and programs started
+with CreateProcess (Python, the extractor, the compiler, the game) and DLLs are not checked for it.
 
 ## Linux on x86-64 and arm64
 

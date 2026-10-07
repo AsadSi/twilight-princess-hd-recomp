@@ -284,19 +284,7 @@ def native_dialog(title, folder, filetypes):
             out = p.stdout.decode("utf-8").strip()
             return out.rstrip("/") if p.returncode == 0 and out else None
         if IS_WIN:
-            if folder:
-                ps = ("Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog;"
-                      "$d.Description='%s'; if($d.ShowDialog() -eq 'OK'){$d.SelectedPath}" % title.replace("'", "''"))
-            else:
-                flt = "|".join("%s|%s" % (n, p) for n, p in (filetypes or [])) + ("|" if filetypes else "") + "All files (*.*)|*.*"
-                ps = ("Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog;"
-                      "$d.Title='%s'; $d.Filter='%s'; if($d.ShowDialog() -eq 'OK'){$d.FileName}" %
-                      (title.replace("'", "''"), flt))
-            ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + ps
-            p = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps], stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL)
-            out = p.stdout.decode("utf-8", "replace").strip()
-            return out if p.returncode == 0 and out else None
+            return win_folder_dialog(title) if folder else win_file_dialog(title, filetypes)
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             return None
         if shutil.which("zenity"):
@@ -311,6 +299,128 @@ def native_dialog(title, folder, filetypes):
         return out if p.returncode == 0 and out else None
     except OSError:
         return None
+
+
+# ---------------------------------------------------------------------------------------------
+# Windows: dialogs and shortcuts through the Windows API (ctypes)
+
+
+def _win_com():
+    import ctypes
+    ctypes.windll.ole32.CoInitializeEx(None, 2)  # COINIT_APARTMENTTHREADED (dialogs and shell objects need STA)
+    return ctypes
+
+
+def win_file_dialog(title, filetypes):
+    """The standard Open dialog (GetOpenFileNameW). Returns the chosen file or None."""
+    ctypes = _win_com()
+    from ctypes import wintypes
+
+    class OPENFILENAMEW(ctypes.Structure):
+        _fields_ = [("lStructSize", wintypes.DWORD), ("hwndOwner", wintypes.HWND), ("hInstance", wintypes.HINSTANCE),
+                    ("lpstrFilter", wintypes.LPCWSTR), ("lpstrCustomFilter", wintypes.LPWSTR),
+                    ("nMaxCustFilter", wintypes.DWORD), ("nFilterIndex", wintypes.DWORD), ("lpstrFile", wintypes.LPWSTR),
+                    ("nMaxFile", wintypes.DWORD), ("lpstrFileTitle", wintypes.LPWSTR), ("nMaxFileTitle", wintypes.DWORD),
+                    ("lpstrInitialDir", wintypes.LPCWSTR), ("lpstrTitle", wintypes.LPCWSTR), ("Flags", wintypes.DWORD),
+                    ("nFileOffset", wintypes.WORD), ("nFileExtension", wintypes.WORD), ("lpstrDefExt", wintypes.LPCWSTR),
+                    ("lCustData", wintypes.LPARAM), ("lpfnHook", ctypes.c_void_p), ("lpTemplateName", wintypes.LPCWSTR),
+                    ("pvReserved", ctypes.c_void_p), ("dwReserved", wintypes.DWORD), ("FlagsEx", wintypes.DWORD)]
+
+    # "name\0pattern\0...\0\0", the same filters the dialog had before ("All files" last)
+    flt = ctypes.create_unicode_buffer("".join("%s\0%s\0" % (n, p) for n, p in (filetypes or [])) +
+                                       "All files (*.*)\0*.*\0\0")
+    buf = ctypes.create_unicode_buffer(32768)
+    ofn = OPENFILENAMEW()
+    ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+    ofn.lpstrFilter = ctypes.cast(flt, wintypes.LPCWSTR)
+    ofn.nFilterIndex = 1
+    ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
+    ofn.nMaxFile = len(buf)
+    ofn.lpstrTitle = title
+    ofn.Flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000008  # EXPLORER | FILEMUSTEXIST | PATHMUSTEXIST | NOCHANGEDIR
+    get = ctypes.windll.comdlg32.GetOpenFileNameW
+    get.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
+    get.restype = wintypes.BOOL
+    return buf.value if get(ctypes.byref(ofn)) and buf.value else None
+
+
+def win_folder_dialog(title):
+    """The standard folder picker (SHBrowseForFolderW). Returns the chosen folder or None."""
+    ctypes = _win_com()
+    from ctypes import wintypes
+
+    class BROWSEINFOW(ctypes.Structure):
+        _fields_ = [("hwndOwner", wintypes.HWND), ("pidlRoot", ctypes.c_void_p), ("pszDisplayName", wintypes.LPWSTR),
+                    ("lpszTitle", wintypes.LPCWSTR), ("ulFlags", wintypes.UINT), ("lpfn", ctypes.c_void_p),
+                    ("lParam", wintypes.LPARAM), ("iImage", ctypes.c_int)]
+
+    shell32 = ctypes.windll.shell32
+    shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFOW)]
+    shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+    shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wintypes.LPWSTR]
+    shell32.SHGetPathFromIDListW.restype = wintypes.BOOL
+    ctypes.windll.ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    name = ctypes.create_unicode_buffer(260)
+    bi = BROWSEINFOW()
+    bi.pszDisplayName = ctypes.cast(name, wintypes.LPWSTR)
+    bi.lpszTitle = title
+    bi.ulFlags = 0x0001 | 0x0040  # BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE (resizable, "Make New Folder")
+    pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
+    if not pidl:
+        return None
+    path = ctypes.create_unicode_buffer(32768)
+    ok = shell32.SHGetPathFromIDListW(pidl, path)
+    ctypes.windll.ole32.CoTaskMemFree(pidl)
+    return path.value if ok and path.value else None
+
+
+def win_known_folder(csidl):
+    """A shell folder (SHGetFolderPathW): 0x02 the Start menu's Programs, 0x10 the Desktop."""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(32768)
+    if ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf) != 0 or not buf.value:
+        raise OSError("SHGetFolderPathW(0x%x) failed" % csidl)
+    return buf.value
+
+
+def win_shortcut(link, target, arguments="", workdir="", icon=""):
+    """Writes a Windows shortcut (.lnk) with the shell's ShellLink object (IShellLinkW + IPersistFile)."""
+    ctypes = _win_com()
+    import uuid
+    from ctypes import wintypes
+
+    def guid(s):
+        return (ctypes.c_ubyte * 16).from_buffer_copy(uuid.UUID(s).bytes_le)
+
+    def method(obj, index, *argtypes):  # a COM method by its vtable slot; HRESULT failures raise OSError
+        vtbl = ctypes.cast(ctypes.cast(obj, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
+        return lambda *a: ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, *argtypes)(vtbl[index])(obj, *a)
+
+    def release(obj):
+        vtbl = ctypes.cast(ctypes.cast(obj, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
+        ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtbl[2])(obj)
+
+    clsid_shell_link = guid("00021401-0000-0000-c000-000000000046")
+    iid_shell_link_w = guid("000214f9-0000-0000-c000-000000000046")
+    iid_persist_file = guid("0000010b-0000-0000-c000-000000000046")
+    create = ctypes.windll.ole32.CoCreateInstance
+    create.restype = ctypes.HRESULT
+    sl, pf = ctypes.c_void_p(), ctypes.c_void_p()
+    create(ctypes.byref(clsid_shell_link), None, 1, ctypes.byref(iid_shell_link_w), ctypes.byref(sl))  # INPROC_SERVER
+    try:
+        method(sl, 20, wintypes.LPCWSTR)(target)                     # IShellLinkW::SetPath
+        method(sl, 11, wintypes.LPCWSTR)(arguments)                  # SetArguments
+        method(sl, 9, wintypes.LPCWSTR)(workdir)                     # SetWorkingDirectory
+        if icon:
+            method(sl, 17, wintypes.LPCWSTR, ctypes.c_int)(icon, 0)  # SetIconLocation
+        method(sl, 0, ctypes.c_void_p, ctypes.c_void_p)(ctypes.byref(iid_persist_file), ctypes.byref(pf))  # QueryInterface
+        try:
+            method(pf, 6, wintypes.LPCWSTR, wintypes.BOOL)(link, True)  # IPersistFile::Save
+        finally:
+            release(pf)
+    finally:
+        release(sl)
+    return link
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1063,14 +1173,14 @@ def linux_launchers(data_dir, exe):
 
 
 def windows_shortcuts(data_dir, exe):
+    """Start menu and Desktop shortcuts to the built game (a failure is logged, not fatal)."""
     icon = write_game_icon(data_dir, ico=True)
-    icon_set = "$l.IconLocation='%s';" % icon.replace("'", "''") if icon else ""
-    ps = ("$s=(New-Object -ComObject WScript.Shell);"
-          "foreach($d in @([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('Desktop'))){"
-          "$l=$s.CreateShortcut((Join-Path $d '%s.lnk'));$l.TargetPath='%s';$l.Arguments='--game game --save save';"
-          "$l.WorkingDirectory='%s';%s$l.Save()}" % (APP_NAME, exe.replace("'", "''"), data_dir.replace("'", "''"),
-                                                    icon_set))
-    subprocess.run(["powershell", "-NoProfile", "-Command", ps], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for csidl in (0x02, 0x10):  # the Start menu's Programs, the Desktop
+        try:
+            win_shortcut(os.path.join(win_known_folder(csidl), APP_NAME + ".lnk"), exe, "--game game --save save",
+                         data_dir, icon or "")
+        except (OSError, AttributeError, ValueError) as e:
+            LOG.write("shortcut not created (folder 0x%x): %s" % (csidl, e))
 
 
 def launch(state, data_dir):
@@ -1116,9 +1226,10 @@ def create_shortcut():
                     "Exec=\"%s\" --setup\n" % (APP_NAME, target, PKG, target))
     else:
         link = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", APP_NAME + ".lnk")
-        ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%s');$s.TargetPath='%s';$s.WorkingDirectory='%s';"
-              "$s.Save()" % (link.replace("'", "''"), target.replace("'", "''"), PKG.replace("'", "''")))
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            win_shortcut(link, target, workdir=PKG)
+        except (OSError, AttributeError, ValueError) as e:
+            LOG.write("shortcut not created: %s" % e)
     say("  Shortcut: %s" % link)
     return link
 
@@ -1512,7 +1623,9 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     new_exe = exe + ".new" + EXE_SUFFIX
     link_game(tc, manifest, objs, work, new_exe)
     for rf in manifest.get("runtime_files", []):
-        shutil.copy2(os.path.join(PKG, "sdk", "runtime", rf), os.path.join(exe_dir, rf))
+        # the data only (copy2 would also copy a downloaded file's "mark of the web" on Windows)
+        shutil.copyfile(os.path.join(PKG, "sdk", "runtime", rf), os.path.join(exe_dir, rf))
+        shutil.copymode(os.path.join(PKG, "sdk", "runtime", rf), os.path.join(exe_dir, rf))
     os.replace(new_exe, exe)
     say("  Built %s" % exe)
 

@@ -321,18 +321,39 @@ jobs:
       - name: Guard (no game code, game files or keys)
         run: python tools/release/guard.py dist/*.zip
 
-      - name: Installer self-test (unzipped release, placeholder code, Python and toolchain download)
+      - name: Unzip the release for the installer self-test
         shell: pwsh
         run: |
           $unz = Join-Path $env:RUNNER_TEMP 'unz'
           New-Item -ItemType Directory -Force -Path $unz | Out-Null
           Expand-Archive -Path (Get-ChildItem dist\*.zip).FullName -DestinationPath $unz
           $pkg = (Get-ChildItem $unz -Directory)[0].FullName
-          $data = Join-Path $env:RUNNER_TEMP 'data'
-          $env:WWHD_DATA_DIR = $data
-          & powershell -NoProfile -ExecutionPolicy Bypass -File "$pkg\tools\installer\bootstrap-windows.ps1" `
-            --yes --no-launch --gen-dir "$env:GITHUB_WORKSPACE\build\gen-stub" --data-dir $data
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "WWHD_PKG=$pkg" >> $env:GITHUB_ENV
+          "WWHD_DATA_DIR=$(Join-Path $env:RUNNER_TEMP 'data')" >> $env:GITHUB_ENV
+          # no script host in the Windows release (antivirus false positives, issue #58)
+          if (Get-ChildItem $pkg -Recurse -Include *.ps1, *.vbs, *.js, *.hta) { throw "a script file is in the release" }
+          $bytes = [IO.File]::ReadAllBytes((Join-Path $pkg 'Wind Waker HD.exe'))
+          foreach ($enc in [Text.Encoding]::ASCII, [Text.Encoding]::Unicode) {
+            foreach ($word in 'powershell', 'ExecutionPolicy', 'Unblock-File') {
+              if ($enc.GetString($bytes).IndexOf($word, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "Wind Waker HD.exe contains '$word'" }
+            }
+          }
+
+      - name: Installer self-test, setup in a console window (Python fetched by Wind Waker HD.exe, toolchain download)
+        # the .bat as a player starts it (it runs "Wind Waker HD.exe --console-setup"); no input
+        shell: cmd
+        run: |
+          call "%WWHD_PKG%\tools\Setup in a console window.bat" --yes --no-launch --gen-dir "%GITHUB_WORKSPACE%\build\gen-stub" --data-dir "%WWHD_DATA_DIR%" < NUL
+          if errorlevel 1 exit /b 1
+
+      - name: Installer self-test (unzipped release, placeholder code)
+        shell: pwsh
+        run: |
+          $pkg = $env:WWHD_PKG
+          $data = $env:WWHD_DATA_DIR
+          $pins = Get-Content -Raw (Join-Path $pkg 'tools\installer\toolchains.json') | ConvertFrom-Json
+          if (-not (Test-Path (Join-Path $data "python\$($pins.python.windows.dir)\python.exe"))) { throw "Python was not fetched" }
+          if (-not (Test-Path (Join-Path $data 'install.json'))) { throw "the console setup did not finish" }
           $exe = Join-Path $data 'bin\wwhd.exe'
           if (-not (Test-Path (Join-Path $data 'bin\SDL3.dll'))) { throw "SDL3.dll was not installed" }
           # no game files: the executable must start and stop with "cannot load ..." (abort() may leave

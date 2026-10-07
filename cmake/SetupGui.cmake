@@ -37,6 +37,11 @@ target_include_directories(wwhd-setup PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends
 target_link_libraries(wwhd-setup PRIVATE imgui ${WWHD_SETUP_SDL})
 set_source_files_properties(${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
   PROPERTIES COMPILE_OPTIONS "-w")
+if(WIN32)
+  # Windows: the setup fetches the pinned embeddable Python itself (WinHTTP, SHA-256 with CNG, zlib inflate)
+  target_sources(wwhd-setup PRIVATE tools/installer/gui/python_fetch_win.cpp tools/installer/gui/unzip_min.cpp)
+  target_link_libraries(wwhd-setup PRIVATE ZLIB::ZLIB winhttp bcrypt)
+endif()
 if(APPLE)
   target_link_libraries(wwhd-setup PRIVATE "-framework CoreGraphics")  # Shift held at start: the setup
 endif()
