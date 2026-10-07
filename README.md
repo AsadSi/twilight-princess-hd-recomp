@@ -10,6 +10,14 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
+### Next update
+
+- **Performance reports say which build and system they come from** (issue #44): **Copy performance
+  report** now starts with the version and commit, the operating system and version, the graphics card
+  with its driver and Vulkan version (or the Metal device), and the rendering switches that are not at
+  their defaults (buffer cache, CPU paths turned off, lazy DrawDone / async present turned off, the
+  gyro source). The log's first lines name the version and system too, so crash logs carry them.
+
 ### v0.2.5
 
 - **Fixed: much lower frame rate on Windows and Linux PCs with a dedicated graphics card (Vulkan)**

@@ -90,6 +90,7 @@ const Backend& vulkan_backend() {
             }
             return true;
         };
+        b.device = gfxvk::device_description;
         return b;
     }();
     return b;

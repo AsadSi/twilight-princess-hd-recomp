@@ -7,6 +7,7 @@
 #include "backend.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
+#include "report_header.h"
 #include "present.h"
 #include "gfx/display.h"
 #include "gfx/display_modes.h"
@@ -1599,17 +1600,20 @@ static std::string version_text(uint32_t v) {
   return std::to_string(VK_API_VERSION_MAJOR(v)) + "." + std::to_string(VK_API_VERSION_MINOR(v)) + "." +
          std::to_string(VK_API_VERSION_PATCH(v));
 }
-// driverVersion: vendor-specific packing (NVIDIA, Intel on Windows); others use Vulkan's
-static std::string driver_version_text(const VkPhysicalDeviceProperties &p) {
-  const uint32_t v = p.driverVersion;
-  if (p.vendorID == 0x10DE)
-    return std::to_string(v >> 22) + "." + std::to_string((v >> 14) & 0xff) + "." +
-           std::to_string((v >> 6) & 0xff) + "." + std::to_string(v & 0x3f);
+// driverVersion: vendor-specific packing, decoded as vulkaninfo does (report_header.cpp)
 #ifdef _WIN32
-  if (p.vendorID == 0x8086)
-    return std::to_string(v >> 14) + "." + std::to_string(v & 0x3fff);
+static constexpr bool kWindows = true;
+#else
+static constexpr bool kWindows = false;
 #endif
-  return version_text(v);
+static std::string driver_version_text(const VkPhysicalDeviceProperties &p) {
+  return reporthdr::driver_version(p.vendorID, p.driverVersion, kWindows);
+}
+// the GPU line of the performance report header: name, driver, Vulkan version ("" before init)
+std::string device_description() {
+  if (!R.properties.deviceName[0]) return "";
+  return reporthdr::vulkan_gpu(R.properties.deviceName, R.properties.vendorID, R.properties.driverVersion,
+                               R.properties.apiVersion, kWindows);
 }
 // How a GPU provides dynamic rendering, the renderer's only way of drawing: Vulkan 1.3 core, or
 // VK_KHR_dynamic_rendering on a Vulkan 1.1 / 1.2 driver. Shaders are SPIR-V 1.3 (Vulkan 1.1).

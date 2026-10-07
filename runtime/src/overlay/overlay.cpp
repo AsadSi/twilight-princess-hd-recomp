@@ -27,6 +27,7 @@
 #include "../gfx/renderer.h"
 #ifdef WWHD_HAS_VULKAN
 #include "../gfx/vulkan/settings.h"
+namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
@@ -40,6 +41,8 @@
 #include "../runtime.h"
 #include "../savestate.h"
 #include "../render_prof.h"
+#include "../build_info.h"
+#include "../report_header.h"
 
 namespace interp {
 int mode();  // 0 off, 1 frame interpolation, 2 true 60
@@ -600,12 +603,25 @@ void tab_graphics() {
     static double copiedAt = -10;
     if (ImGui::Button("Copy performance report")) {
         std::string report = rprof::latest_report();
-        char head[256];
-        snprintf(head, sizeof head, "Wind Waker HD performance report: renderer %s, host %s, %s, internal scale %.1fx\n",
-                 render::vulkan() ? "Vulkan" : "Metal", hostui::name(),
-                 interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps",
-                 hostui::res_scale());
-        report = head + (report.empty() ? std::string("No report yet: play for a few seconds, then copy again.\n") : report);
+        // which build, system, GPU and rendering-path switches (report_header.h)
+        reporthdr::Info h;
+        h.version = build::version();
+        h.commit = build::commit();
+        h.os = reporthdr::os_description();
+        h.gpu = render::device();
+        h.renderer = render::vulkan() ? "Vulkan" : "Metal";
+        h.host = hostui::name();
+        h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps";
+        h.scale = hostui::res_scale();
+#ifdef WWHD_HAS_VULKAN
+        if (render::vulkan()) {
+            h.bufferCache = gfxvk::buffer_cache_enabled();
+            h.overrides = reporthdr::vulkan_overrides([](const char* n) -> const char* { return getenv(n); });
+        }
+#endif
+        if (const int g = motion::settings().source; g != motion::kOff) h.gyro = motion::source_id(g);
+        report = reporthdr::format(h) +
+                 (report.empty() ? std::string("No report yet: play for a few seconds, then copy again.\n") : report);
         hostui::post([report] { hostui::set_clipboard(report); });
         copiedAt = ImGui::GetTime();
     }

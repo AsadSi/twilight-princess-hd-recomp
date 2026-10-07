@@ -25,7 +25,9 @@
 #include "mods/cemu_pack.h"
 #include "gx2/gx2.h"
 #include "recomp_table.h"
+#include "report_header.h"
 #include "crash_addr.h"
+#include "build_info.h"
 #include "crashrec.h"
 #include "input.h"
 #include "mods/manager.h"
@@ -234,14 +236,7 @@ static void apply_portable_mode() {
 // 30 ms per frame; on an M3 Max (MoltenVK) together they cut render-thread CPU by 8-14% with no
 // measurable cost from any single one (docs/performance.md, 2026-10-07). NAME=0 turns one off.
 static void default_vulkan_cpu_paths() {
-    for (const char* name : {"WWHD_VK_REUSE_UNIFORM_SNAPSHOTS", "WWHD_VK_REUSE_FEEDBACK_IMAGES",
-                             "WWHD_VK_SKIP_REDUNDANT_BINDS", "WWHD_VK_DESCRIPTOR_RANKS",
-                             "WWHD_VK_PIPELINE_LOOKASIDE", "WWHD_VK_SHADER_ADDRESS_MEMO",
-                             "WWHD_VK_FETCH_MEMO", "WWHD_VK_SPECIALIZE_INDICES",
-                             "WWHD_VK_SHADER_STATE_MEMO", "WWHD_VK_SKIP_VERTEX_BINDS",
-                             "WWHD_VK_SAMPLER_MEMO", "WWHD_VK_SPARSE_HASH_MEMO",
-                             "WWHD_VK_SHADER_KEY_DIRTY", "WWHD_VK_REUSE_VERTEX_SNAPSHOTS",
-                             "WWHD_VK_VERTEX_HISTORY_REUSE"}) {
+    for (const char* name : reporthdr::kVulkanCpuPaths) {  // the list: report_header.cpp
 #ifdef _WIN32
         if (!getenv(name)) _putenv_s(name, "1");
 #else
@@ -301,6 +296,8 @@ int main(int argc, char** argv) {
 #endif
     }
     install_crash_handler();
+    // which build on which system: also in crash logs (their last log lines)
+    LOG("[boot] Wind Waker HD %s (%s), %s", build::version(), build::commit(), reporthdr::os_description().c_str());
     // test aid: WWHD_TEST_HOST_CRASH=1 crashes inside a system library (strlen of a bad pointer), so
     // the crash log's module names can be checked (CTest crash_log_module, runtime/tools/crash_log_test.cmake)
     if (getenv("WWHD_TEST_HOST_CRASH")) {

@@ -108,12 +108,23 @@ target_include_directories(imgui PUBLIC ${IMGUI_DIR})
 target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_DEMO_WINDOWS IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 target_compile_options(imgui PRIVATE -w -O2)
 
+# ---- build identification (runtime/src/build_info.h): version and commit, rewritten by
+# cmake/BuildInfo.cmake on every build when they change. Release builds pass the tag.
+set(WWHD_VERSION "" CACHE STRING "release version shown in reports and logs (default: from git describe)")
+set(WWHD_BUILD_INFO ${CMAKE_BINARY_DIR}/generated/build_info.cpp)
+add_custom_target(wwhd_build_info
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${WWHD_BUILD_INFO} "-DVERSION=${WWHD_VERSION}"
+          -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
+  BYPRODUCTS ${WWHD_BUILD_INFO}
+  COMMENT "Build info (version, commit)" VERBATIM)
+
 # ---- the game executable: runtime + native GX2 + the selected renderers
 # GX2 sources are compiled into the executable (not a static library) so their
 # strong HLE definitions replace the generated weak import stubs.
 file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.cpp runtime/src/*.c runtime/src/hle/*.cpp runtime/src/mods/*.cpp runtime/src/motion/*.cpp
                                             runtime/src/overlay/*.cpp)
 list(APPEND RUNTIME_SOURCES runtime/src/platform/perf_hint.cpp)  # Android performance hints (no-op elsewhere)
+list(APPEND RUNTIME_SOURCES ${WWHD_BUILD_INFO})
 file(GLOB GX2_SOURCES CONFIGURE_DEPENDS runtime/src/gx2/*.cpp)
 # renderer selection / dispatch (runtime/src/gfx/renderer.cpp) and the GamePad screen modes / TV window
 # layout both window hosts share (display_modes.cpp): every configuration
@@ -161,6 +172,7 @@ else()
   add_executable(wwhd ${RUNTIME_SOURCES} ${GX2_SOURCES} ${GFX_SOURCES} ${MOD_GFX_SOURCES} ${IMGUI_METAL})
 endif()
 target_include_directories(wwhd PRIVATE runtime/include runtime/src runtime/src/gx2)
+add_dependencies(wwhd wwhd_build_info)
 target_compile_options(wwhd PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -ffp-contract=off)
 if(NOT TARGET ZLIB::ZLIB)
   find_package(ZLIB REQUIRED)
@@ -172,7 +184,8 @@ if(ANDROID)
 endif()
 if(WIN32)
   target_compile_definitions(wwhd PRIVATE _USE_MATH_DEFINES)
-  target_link_libraries(wwhd PRIVATE winmm ws2_32)  # timeBeginPeriod (main.cpp), Cemuhook client sockets (motion/dsu.cpp)
+  # advapi32: the Windows version for the performance report (report_header.cpp, RegGetValueW)
+  target_link_libraries(wwhd PRIVATE winmm ws2_32 advapi32)  # timeBeginPeriod (main.cpp), Cemuhook client sockets (motion/dsu.cpp)
 endif()
 if(WWHD_HAS_METAL)
   target_compile_definitions(wwhd PRIVATE WWHD_HAS_METAL=1)
@@ -253,6 +266,15 @@ target_compile_options(mod_content_fs_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_content_fs_test PRIVATE ZLIB::ZLIB Threads::Threads)
 
 # controls mapping unit tests (runtime/src/input_map.cpp)
+# performance report header: driver version decoding, OS names, overrides list (report_header.h)
+add_executable(report_header_test runtime/tools/report_header_test.cpp runtime/src/report_header.cpp ${WWHD_BUILD_INFO})
+target_include_directories(report_header_test PRIVATE runtime/src)
+target_compile_options(report_header_test PRIVATE -UNDEBUG)
+add_dependencies(report_header_test wwhd_build_info)
+if(WIN32)
+  target_link_libraries(report_header_test PRIVATE advapi32)
+endif()
+
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
 # the text prompt's reader of the game's name font (runtime/src/overlay/game_font.cpp)
@@ -371,6 +393,7 @@ add_test(NAME mod_cemu_backend COMMAND mod_package_test --cemu-backend)
 add_test(NAME mod_cemu_startup COMMAND mod_package_test --cemu-startup)
 add_test(NAME mod_content_startup COMMAND mod_package_test --content-startup)
 add_test(NAME mod_packages COMMAND mod_package_test ${CMAKE_BINARY_DIR}/package-tests $<TARGET_FILE:mod_fixture>)
+add_test(NAME report_header COMMAND report_header_test)
 add_test(NAME input_mapping COMMAND input_map_test)
 add_test(NAME game_font COMMAND game_font_test)
 add_test(NAME game_languages COMMAND game_languages_test ${CMAKE_BINARY_DIR}/game_languages_test_work)
