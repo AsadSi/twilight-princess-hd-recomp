@@ -10,7 +10,7 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
-### Next update
+### v0.2.6
 
 - **Far fewer shader translations and pipelines, fewer stutters in new areas, less memory
   (Vulkan):** the renderer now keys a translated shader only on the state that actually changes its
