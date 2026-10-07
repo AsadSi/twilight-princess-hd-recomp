@@ -19,6 +19,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <type_traits>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -493,27 +494,96 @@ struct Pipeline {
   const vk::Shader* trimVertex = nullptr;
   std::vector<BindingTrimMetadata> bindingTrims;
 };
-std::unordered_map<std::string, Pipeline> pipelines;
-// Overflow preserves the old variable-length key for unusual fetch programs.
-struct PipelineKeyBytes {
-  std::array<char, 256> stack{};
-  size_t size = 0;
-  std::string overflow;
-  void append(const void* source, size_t bytes) {
-    if (overflow.empty() && bytes <= stack.size()-size) {
-      std::memcpy(stack.data()+size, source, bytes);
-    } else {
-      if (overflow.empty()) overflow.assign(stack.data(), size);
-      overflow.append(static_cast<const char*>(source), bytes);
-    }
-    size += bytes;
+// Pipeline key: the two shader identities plus exactly the fixed-function state pipeline() bakes
+// in, normalized so that state the pipeline ignores (blend factors of attachments that do not
+// blend, stencil words with the stencil test off, depth bias words with the bias off, write masks
+// of absent attachments) does not make a new pipeline. Fixed size, compared with memcmp.
+constexpr uint32_t kMaxPipelineStrides = 16;
+struct PipelineKey {
+  uint64_t vs = 0, ps = 0, fetch = 0;
+  uint32_t topology = 0, colorControl = 0, targetMask = 0, depthControl = 0;
+  uint32_t stencilMask = 0, stencilMaskBack = 0, raster = 0, clip = 0;
+  std::array<uint32_t, 3> depthBias{};
+  std::array<uint32_t, 8> blend{};
+  std::array<uint32_t, 8> formats{};
+  uint32_t depthFormat = 0, strideCount = 0;
+  std::array<uint32_t, kMaxPipelineStrides> strides{};
+  uint32_t reserved = 0;  // no padding bytes: the key is hashed and compared as bytes
+  bool operator==(const PipelineKey& other) const {
+    return !std::memcmp(this, &other, sizeof *this);
   }
-  const char* data() const { return overflow.empty() ? stack.data() : overflow.data(); }
-  bool bounded() const { return overflow.empty(); }
 };
+static_assert(std::has_unique_object_representations_v<PipelineKey>,
+              "pipeline keys are compared and hashed as bytes");
+struct PipelineKeyHash {
+  size_t operator()(const PipelineKey& key) const {
+    const auto* p = reinterpret_cast<const uint8_t*>(&key);
+    uint64_t hash = 0x9E3779B97F4A7C15ull;
+    for (size_t i = 0; i < sizeof key; i += 8) {
+      uint64_t word;
+      std::memcpy(&word, p + i, 8);
+      hash = (hash ^ word) * 0xFF51AFD7ED558CCDull;
+      hash ^= hash >> 32;
+    }
+    return size_t(hash ^ (hash >> 29));
+  }
+};
+static_assert(sizeof(PipelineKey) % 8 == 0);
+std::unordered_map<PipelineKey, Pipeline, PipelineKeyHash> pipelines;
+PipelineKey pipeline_key(const uint32_t* r, const vk::Shader* vs, const vk::Shader* ps,
+                         const LatteFetchShader* fs, VkPrimitiveTopology topology,
+                         const std::array<Surface*, 8>& colors, const Surface* depth) {
+  PipelineKey key;
+  key.vs = vs->key;
+  key.ps = ps->key;
+  key.fetch = fs->vkPipelineHashFragment;
+  key.topology = uint32_t(topology);
+  uint32_t ncolor = 0;
+  for (uint32_t i = 0; i < 8; ++i)
+    if (colors[i]) {
+      key.formats[i] = uint32_t(colors[i]->fmt.pixel);
+      ncolor = i + 1;
+    }
+  const uint32_t colorControl = r[REGADDR::CB_COLOR_CONTROL];
+  uint32_t blending = 0;
+  for (uint32_t i = 0; i < ncolor; ++i)
+    if (colors[i] && colors[i]->fmt.kind == FormatInfo::FLOAT && ((colorControl >> (8 + i)) & 1)) {
+      blending |= 1u << i;
+      // without SEPARATE_ALPHA_BLEND the alpha factors are the color ones
+      const uint32_t raw = r[REGADDR::CB_BLEND0_CONTROL + i];
+      key.blend[i] = raw & (raw & (1u << 29) ? 0x3FFF1FFFu : 0x00001FFFu);
+    }
+  key.colorControl = (colorControl & 0x00FF0000u) | (blending << 8);  // ROP, blend enables
+  key.targetMask = ncolor >= 8 ? r[REGADDR::CB_TARGET_MASK]
+                               : r[REGADDR::CB_TARGET_MASK] & ((1u << (4 * ncolor)) - 1);
+  if (depth) {
+    key.depthFormat = uint32_t(depth->fmt.pixel);
+    const uint32_t dc = r[REGADDR::DB_DEPTH_CONTROL];
+    uint32_t canonical = dc & 4;              // depth write
+    if (dc & 2) canonical |= dc & 0x72;       // depth test and its function
+    if (depth->fmt.stencil && (dc & 1)) {
+      const bool back = dc & 0x80;
+      canonical |= dc & (back ? 0xFFFFFF81u : 0x000FFF01u);
+      key.stencilMask = r[REGADDR::DB_STENCILREFMASK] & 0x00FFFF00;
+      if (back) key.stencilMaskBack = r[REGADDR::DB_STENCILREFMASK_BF] & 0x00FFFF00;
+    }
+    key.depthControl = canonical;
+  }
+  const uint32_t mode = r[REGADDR::PA_SU_SC_MODE_CNTL];
+  key.raster = mode & 0x807;  // cull front/back, front face, depth bias enable
+  if (mode & 0x800)
+    key.depthBias = {r[REGADDR::PA_SU_POLY_OFFSET_FRONT_SCALE], r[REGADDR::PA_SU_POLY_OFFSET_FRONT_OFFSET],
+                     r[REGADDR::PA_SU_POLY_OFFSET_CLAMP]};
+  key.clip = r[REGADDR::PA_CL_CLIP_CNTL] & (1u << 27);  // depth clamp
+  if (fs->bufferGroups.size() > kMaxPipelineStrides)
+    throw std::runtime_error("fetch shader has more vertex buffers than a pipeline key holds");
+  for (auto& g : fs->bufferGroups)
+    key.strides[key.strideCount++] =
+        (r[mmSQ_VTX_ATTRIBUTE_BLOCK_START + g.attributeBufferIndex * 7 + 2] >> 11) & 0xFFFF;
+  return key;
+}
 struct LastPipelineLookup {
-  std::array<char, 256> key{};
-  size_t size = 0;
+  PipelineKey key{};
   VkDevice device = VK_NULL_HANDLE;
   Pipeline* value = nullptr;
 };
@@ -521,16 +591,14 @@ LastPipelineLookup lastPipelineLookup;
 struct PipelineLookaside {
   std::array<LastPipelineLookup, 8> entries{};
   uint32_t next = 0;
-  Pipeline* find(const char* key, size_t size, VkDevice device) const {
-    if (size > entries[0].key.size()) return nullptr;
+  Pipeline* find(const PipelineKey& key, VkDevice device) const {
     for (const auto& entry : entries)
-      if (entry.value && entry.device == device && entry.size == size &&
-          !std::memcmp(entry.key.data(), key, size))
+      if (entry.value && entry.device == device && entry.key == key)
         return entry.value;
     return nullptr;
   }
   void remember(const LastPipelineLookup& entry) {
-    if (!entry.value || entry.size > entry.key.size()) return;
+    if (!entry.value) return;
     entries[next] = entry;
     next = (next + 1) % entries.size();
   }
@@ -543,36 +611,11 @@ bool pipeline_lookaside_enabled() {
   }();
   return enabled;
 }
-void append(std::string &k, const void *p, size_t n) {
-  k.append(static_cast<const char *>(p), n);
-}
 Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
                    LatteFetchShader *fs, VkPrimitiveTopology topology,
                    const std::array<Surface *, 8> &colors, Surface *depth) {
   if(preparation_stats_enabled())++R.cpuPreparation.pipelineLookups;
-  PipelineKeyBytes bytes;
-  bytes.append( &vs->key, 8);
-  bytes.append( &ps->key, 8);
-  bytes.append( &fs->vkPipelineHashFragment, 8);
-  bytes.append( &topology, sizeof topology);
-  const uint32_t fields[] = {REGADDR::CB_COLOR_CONTROL,
-                             REGADDR::CB_TARGET_MASK,
-                             REGADDR::DB_DEPTH_CONTROL,
-                             REGADDR::DB_STENCILREFMASK,
-                             REGADDR::DB_STENCILREFMASK_BF,
-                             REGADDR::PA_SU_SC_MODE_CNTL,
-                             REGADDR::PA_CL_CLIP_CNTL,
-                             REGADDR::PA_SU_POLY_OFFSET_FRONT_SCALE,
-                             REGADDR::PA_SU_POLY_OFFSET_FRONT_OFFSET,
-                             REGADDR::PA_SU_POLY_OFFSET_CLAMP};
-  for (auto a : fields) {
-    uint32_t value=r[a];
-    if (a==REGADDR::DB_STENCILREFMASK || a==REGADDR::DB_STENCILREFMASK_BF) value &= 0x00FFFF00;
-    else if (a==REGADDR::PA_SU_SC_MODE_CNTL) value &= 0x807;
-    else if (a==REGADDR::PA_CL_CLIP_CNTL) value &= 1u<<27;
-    bytes.append(&value,4);
-  }
-  bytes.append( r + REGADDR::CB_BLEND0_CONTROL, 32);
+  const PipelineKey key = pipeline_key(r, vs, ps, fs, topology, colors, depth);
   std::array<VkFormat, 8> formats{};
   uint32_t ncolor = 0;
   for (int i = 0; i < 8; i++) {
@@ -580,45 +623,28 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     if (colors[i])
       ncolor = i + 1;
   }
-  bytes.append( formats.data(), sizeof formats);
   VkFormat df = depth ? depth->fmt.pixel : VK_FORMAT_UNDEFINED;
-  bytes.append( &df, sizeof df);
-  for (auto &g : fs->bufferGroups) {
-    uint32_t stride=(r[mmSQ_VTX_ATTRIBUTE_BLOCK_START+g.attributeBufferIndex*7+2]>>11)&0xFFFF;
-    bytes.append(&stride,4);
-  }
   if (lastPipelineLookup.device != R.device || pipelines.empty()) {
     lastPipelineLookup = {};
     pipelineLookaside = {};
   }
-  if (bytes.bounded() && lastPipelineLookup.value && lastPipelineLookup.size == bytes.size &&
-      !std::memcmp(lastPipelineLookup.key.data(), bytes.data(), bytes.size)) {
+  if (lastPipelineLookup.value && lastPipelineLookup.key == key) {
     if(preparation_stats_enabled())++R.cpuPreparation.pipelineLastHits;
     return *lastPipelineLookup.value;
   }
-  const bool useLookaside = pipeline_lookaside_enabled() && bytes.bounded();
+  const bool useLookaside = pipeline_lookaside_enabled();
   if (useLookaside)
-    if (auto* value = pipelineLookaside.find(bytes.data(), bytes.size, R.device)) {
+    if (auto* value = pipelineLookaside.find(key, R.device)) {
       if(preparation_stats_enabled())++R.cpuPreparation.pipelineLookasideHits;
-      std::memcpy(lastPipelineLookup.key.data(), bytes.data(), bytes.size);
-      lastPipelineLookup.size = bytes.size;
-      lastPipelineLookup.device = R.device;
-      lastPipelineLookup.value = value;
+      lastPipelineLookup = {key, R.device, value};
       return *value;
     }
   auto remember = [&](Pipeline& value) -> Pipeline& {
-    lastPipelineLookup = {};
-    if (bytes.bounded()) {
-      std::memcpy(lastPipelineLookup.key.data(), bytes.data(), bytes.size);
-      lastPipelineLookup.size = bytes.size;
-      lastPipelineLookup.device = R.device;
-      lastPipelineLookup.value = &value;
-      if (useLookaside) pipelineLookaside.remember(lastPipelineLookup);
-    }
+    lastPipelineLookup = {key, R.device, &value};
+    if (useLookaside) pipelineLookaside.remember(lastPipelineLookup);
     return value;
   };
   if(preparation_stats_enabled())++R.cpuPreparation.pipelineMapLookups;
-  std::string key(bytes.data(), bytes.size);
   if (auto it = pipelines.find(key); it != pipelines.end())
     return remember(it->second);
   Pipeline p;
@@ -1008,12 +1034,12 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
         fclose(f);
       }
     }
-    return remember(pipelines.emplace(std::move(key), p).first->second);
+    return remember(pipelines.emplace(key, p).first->second);
   }
   vk_check(result, "graphics pipeline");
   R.pipelineCacheDirty = true;
   R.pipelineCacheChangedFrame = R.frame;
-  return remember(pipelines.emplace(std::move(key), p).first->second);
+  return remember(pipelines.emplace(key, p).first->second);
 }
 struct SamplerMemo {
   VkDevice device = VK_NULL_HANDLE;
@@ -1198,12 +1224,10 @@ struct LastDescriptorSet {
   uint32_t count = 0;
   std::array<DescriptorIdentity, 17 + LATTE_NUM_MAX_TEX_UNITS> identities{};
 };
-bool descriptor_matches(const LastDescriptorSet &last,
-                        VkDescriptorSetLayout layout,
-                        const VkWriteDescriptorSet *writes, uint32_t count) {
-  if (!last.set || last.layout != layout || last.count != count) return false;
+bool identities_match(const DescriptorIdentity *identities, const VkWriteDescriptorSet *writes,
+                      uint32_t count) {
   for (uint32_t i = 0; i < count; ++i) {
-    const auto &identity = last.identities[i];
+    const auto &identity = identities[i];
     const auto &write = writes[i];
     if (identity.binding != write.dstBinding || identity.type != write.descriptorType ||
         identity.isBuffer != bool(write.pBufferInfo)) return false;
@@ -1220,14 +1244,10 @@ bool descriptor_matches(const LastDescriptorSet &last,
   }
   return true;
 }
-void remember_descriptors(LastDescriptorSet &last, VkDescriptorSetLayout layout,
-                          VkDescriptorSet set, const VkWriteDescriptorSet *writes,
-                          uint32_t count) {
-  last.layout = layout;
-  last.set = set;
-  last.count = count;
+void store_identities(DescriptorIdentity *identities, const VkWriteDescriptorSet *writes,
+                      uint32_t count) {
   for (uint32_t i = 0; i < count; ++i) {
-    auto &identity = last.identities[i];
+    auto &identity = identities[i];
     const auto &write = writes[i];
     identity.binding = write.dstBinding;
     identity.type = write.descriptorType;
@@ -1236,31 +1256,82 @@ void remember_descriptors(LastDescriptorSet &last, VkDescriptorSetLayout layout,
     else identity.image = *write.pImageInfo;
   }
 }
-std::string descriptor_key(VkDescriptorSetLayout layout,
-                           const VkWriteDescriptorSet *writes, uint32_t count) {
-  std::string key;
-  key.reserve(sizeof(layout) + count * 40);
-  append(key, &layout, sizeof(layout));
-  append(key, &count, sizeof(count));
+bool descriptor_matches(const LastDescriptorSet &last,
+                        VkDescriptorSetLayout layout,
+                        const VkWriteDescriptorSet *writes, uint32_t count) {
+  return last.set && last.layout == layout && last.count == count &&
+         identities_match(last.identities.data(), writes, count);
+}
+void remember_descriptors(LastDescriptorSet &last, VkDescriptorSetLayout layout,
+                          VkDescriptorSet set, const VkWriteDescriptorSet *writes,
+                          uint32_t count) {
+  last.layout = layout;
+  last.set = set;
+  last.count = count;
+  store_identities(last.identities.data(), writes, count);
+}
+// Descriptor sets written in this submission, found by a 64-bit hash of the layout and the
+// descriptors and confirmed by comparing the stored descriptors. Valid until the submission's
+// pool is reset; the vectors and buckets keep their capacity across submissions.
+uint64_t descriptor_hash(VkDescriptorSetLayout layout, const VkWriteDescriptorSet *writes,
+                         uint32_t count) {
+  auto mix = [](uint64_t hash, uint64_t value) {
+    hash = (hash ^ value) * 0xFF51AFD7ED558CCDull;
+    return hash ^ (hash >> 32);
+  };
+  uint64_t hash = mix(0x9E3779B97F4A7C15ull, uint64_t(uintptr_t(layout)) ^ (uint64_t(count) << 56));
   for (uint32_t i = 0; i < count; ++i) {
     const auto &write = writes[i];
-    append(key, &write.dstBinding, sizeof(write.dstBinding));
-    append(key, &write.descriptorType, sizeof(write.descriptorType));
+    hash = mix(hash, uint64_t(write.dstBinding) | (uint64_t(write.descriptorType) << 32));
     if (write.pBufferInfo) {
       const auto &info = *write.pBufferInfo;
-      append(key, &info.buffer, sizeof(info.buffer));
-      append(key, &info.range, sizeof(info.range));
+      hash = mix(hash, uint64_t(uintptr_t(info.buffer)));
+      hash = mix(hash, info.range);
       if (write.descriptorType != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC)
-        append(key, &info.offset, sizeof(info.offset));
+        hash = mix(hash, info.offset);
     } else {
       const auto &info = *write.pImageInfo;
-      append(key, &info.sampler, sizeof(info.sampler));
-      append(key, &info.imageView, sizeof(info.imageView));
-      append(key, &info.imageLayout, sizeof(info.imageLayout));
+      hash = mix(hash, uint64_t(uintptr_t(info.sampler)));
+      hash = mix(hash, uint64_t(uintptr_t(info.imageView)) ^ (uint64_t(info.imageLayout) << 48));
     }
   }
-  return key;
+  return hash;
 }
+struct SubmissionDescriptorCache {
+  struct Entry {
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    uint32_t count = 0, first = 0, next = UINT32_MAX;
+  };
+  std::unordered_map<uint64_t, uint32_t> heads;
+  std::vector<Entry> entries;
+  std::vector<DescriptorIdentity> identities;
+  void clear() { heads.clear(); entries.clear(); identities.clear(); }
+  VkDescriptorSet find(uint64_t hash, VkDescriptorSetLayout layout,
+                       const VkWriteDescriptorSet *writes, uint32_t count) const {
+    auto head = heads.find(hash);
+    if (head == heads.end()) return VK_NULL_HANDLE;
+    for (uint32_t i = head->second; i != UINT32_MAX; i = entries[i].next) {
+      const auto &entry = entries[i];
+      if (entry.layout == layout && entry.count == count &&
+          identities_match(identities.data() + entry.first, writes, count))
+        return entry.set;
+    }
+    return VK_NULL_HANDLE;
+  }
+  void insert(uint64_t hash, VkDescriptorSetLayout layout, VkDescriptorSet set,
+              const VkWriteDescriptorSet *writes, uint32_t count) {
+    Entry entry{layout, set, count, uint32_t(identities.size()), UINT32_MAX};
+    identities.resize(identities.size() + count);
+    store_identities(identities.data() + entry.first, writes, count);
+    auto [head, inserted] = heads.emplace(hash, uint32_t(entries.size()));
+    if (!inserted) {
+      entry.next = head->second;
+      head->second = uint32_t(entries.size());
+    }
+    entries.push_back(entry);
+  }
+};
 // A descriptor cannot sample the same subresource being written as an
 // attachment without a feedback-loop extension. Snapshot before rendering.
 // Separate stage/unit slots preserve every descriptor selected for one draw.
@@ -1728,7 +1799,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
   // Resource preparation above must always run, even when the descriptor set
   // itself is reusable. Pool reset/slot activation invalidates every old set.
   static uint64_t cacheGeneration = ~uint64_t{0};
-  static std::unordered_map<std::string, VkDescriptorSet> descriptorCache;
+  static SubmissionDescriptorCache descriptorCache;
   static LastDescriptorSet lastDescriptors[2];
   if (cacheGeneration != R.submissionGeneration) {
     descriptorCache.clear();
@@ -1743,10 +1814,10 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     out.set = last.set;
     return out;
   }
-  auto key = descriptor_key(layout, writes.data(), writeCount);
-  if (auto found = descriptorCache.find(key); found != descriptorCache.end()) {
+  const uint64_t hash = descriptor_hash(layout, writes.data(), writeCount);
+  if (auto found = descriptorCache.find(hash, layout, writes.data(), writeCount)) {
     ++R.descriptorCacheHits;
-    out.set = found->second;
+    out.set = found;
     remember_descriptors(last, layout, out.set, writes.data(), writeCount);
     return out;
   }
@@ -1759,7 +1830,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
   for (uint32_t i = 0; i < writeCount; ++i) writes[i].dstSet = out.set;
   if (writeCount)
     vkUpdateDescriptorSets(R.device, writeCount, writes.data(), 0, nullptr);
-  descriptorCache.emplace(std::move(key), out.set);
+  descriptorCache.insert(hash, layout, out.set, writes.data(), writeCount);
   remember_descriptors(last, layout, out.set, writes.data(), writeCount);
   return out;
 }
