@@ -236,6 +236,16 @@ First start, per system:
   opened". macOS 14: right-click (Ctrl-click) the app, **Open**, **Open**. macOS 15 and newer: click
   **Done**, then **System Settings › Privacy & Security › Open Anyway**. If Apple's Command Line Tools
   (the free compiler, which also brings Python) are missing, Wind Waker HD offers Apple's installer.
+  Start the app **inside the unzipped folder** and keep it there: it needs `tools/`, `sdk/` and
+  `portable.txt` next to it. Don't drag only `Wind Waker HD.app` into Applications; to keep the game
+  somewhere else, move the whole folder. The folder must be writable (not a disk image or a read-only
+  drive). If macOS asks whether Wind Waker HD may access your Downloads (or Desktop, Documents) folder,
+  click **Allow**: the game is prepared in that folder. Releases up to v0.2.3 stopped with "Setup could
+  not continue … must stay in the unpacked release folder" when started straight from the unzipped
+  download (issue #48, macOS App Translocation); with those, run
+  `xattr -dr com.apple.quarantine <the unzipped folder>` in Terminal once, then open the app again.
+  When setup cannot continue it says what failed and what to do, and writes it to
+  `data/setup-window.log` (or `~/Library/Logs/Wind Waker HD setup.log` when the folder is not writable).
 - **Windows**: the release is not code-signed, so SmartScreen may say "Windows protected your PC":
   **More info › Run anyway**. The first start downloads Python (11 MB) and the compiler (llvm-mingw,
   190 MB) into the release folder, SHA-256 checked, no administrator rights; at the end you can remove
