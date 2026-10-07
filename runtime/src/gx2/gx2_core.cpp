@@ -536,7 +536,7 @@ using namespace gx2;
 static uint64_t g_swap_count = 0, g_flip_count = 0;
 namespace gx2 { uint64_t flips_presented() { return __atomic_load_n(&g_flip_count, __ATOMIC_RELAXED); } }  // live fps in the title
 static uint32 g_swap_interval = 1;  // as set by the game (frame interpolation halves it)
-namespace interp { uint32_t effective_swap_interval(uint32_t game); bool hold_pass(); }
+namespace interp { uint32_t effective_swap_interval(uint32_t game); uint64_t logic_steps(); }
 static std::mutex g_flip_mutex;
 static const auto g_vsync_epoch = std::chrono::steady_clock::now();
 static constexpr std::chrono::nanoseconds kVsyncPeriod(16683333);  // 59.94 Hz
@@ -735,7 +735,12 @@ HLE(gx2, GX2SwapScanBuffers) {
     float a = aspect::on_swap();  // aspect ratio of the next frame (game projections, render targets)
     uint32 ab;
     memcpy(&ab, &a, 4);
-    emit_host(OP_SWAP, {ab, interp::hold_pass() ? 1u : 0u});  // hold pass: for the render-thread profiler
+    // the frame drew no new logic step (an interpolation hold pass): for the render-thread profiler
+    static uint64_t lastSteps = ~0ull;
+    const uint64_t steps = interp::logic_steps();
+    const bool hold = steps == lastSteps;
+    lastSteps = steps;
+    emit_host(OP_SWAP, {ab, hold ? 1u : 0u});
     {
         std::lock_guard<std::mutex> lk(g_flip_mutex);
         update_flips();
