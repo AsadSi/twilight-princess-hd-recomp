@@ -370,6 +370,14 @@ jobs:
           $null = $g.Handle  # keeps the process handle so ExitCode is available after it exits
           if (-not $g.WaitForExit(600000)) { $g.Kill(); throw "the setup program did not finish its self-test" }
           if ($g.ExitCode -ne 0) { throw "setup program self-test failed ($($g.ExitCode))" }
+          # the window fetching Python itself (a data folder without Python)
+          $env:WWHD_DATA_DIR = Join-Path $env:RUNNER_TEMP 'data-gui'
+          $g = Start-Process -FilePath (Join-Path $pkg 'Wind Waker HD.exe') `
+            -ArgumentList '--self-test', '--data-dir', $env:WWHD_DATA_DIR -PassThru
+          $null = $g.Handle
+          if (-not $g.WaitForExit(600000)) { $g.Kill(); throw "the setup program did not finish its self-test (Python download)" }
+          if ($g.ExitCode -ne 0) { throw "setup program self-test with Python download failed ($($g.ExitCode))" }
+          if (-not (Test-Path (Join-Path $env:WWHD_DATA_DIR "python\$($pins.python.windows.dir)\python.exe"))) { throw "the window did not fetch Python" }
 
       - uses: actions/upload-artifact@v4
         with:
