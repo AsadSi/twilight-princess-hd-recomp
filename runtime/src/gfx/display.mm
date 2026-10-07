@@ -848,6 +848,12 @@ static void present_to_layer(Screen& scr, void (^draw)(id<MTLTexture>)) {
     if (!scr.layer || !scr.tex) return;
     MTLPixelFormat want = scr.srgb ? MTLPixelFormatBGRA8Unorm_sRGB : MTLPixelFormatBGRA8Unorm;
     if (scr.layer.pixelFormat != want) scr.layer.pixelFormat = want;
+    // uncapped (gx2::uncapped, debug): presentation does not wait for the display
+    const bool sync = !gx2::uncapped();
+    if (scr.layer.displaySyncEnabled != sync) {
+        scr.layer.displaySyncEnabled = sync;
+        if (&scr == &R.tv) interp::set_present_vsync(sync);
+    }
     id<CAMetalDrawable> drawable = scr.visible ? [scr.layer nextDrawable] : nil;
     if (!drawable) return;
     draw(drawable.texture);

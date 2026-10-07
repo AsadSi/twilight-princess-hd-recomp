@@ -8,6 +8,7 @@
 // copies and presentation.
 #include <algorithm>
 #include <chrono>
+#include <atomic>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -569,26 +570,32 @@ static uint64_t flip_due(const PendingFlip& f) {
     const uint64_t g = vsync_granule();
     return std::max((f.vsync / g + 1) * g, g_last_flip_vsync + interp::effective_swap_interval(g_swap_interval) * g);
 }
-#ifdef WWHD_HAS_VULKAN
-// Vulkan diagnostics (docs/vulkan.md); never with the Metal renderer
-static bool uncapped_benchmark() {
-    static const bool enabled = [] {
-        const char* value = getenv("WWHD_VK_UNCAPPED");
-        return render::vulkan() && value && !strcmp(value, "1");
-    }();
-    return enabled;
+// Uncapped (gx2.h): debug, to see how fast the renderer can go; GPU completion ordering is kept
+static std::atomic<int> g_uncapped{-1};  // -1: not read from the environment yet
+bool gx2::uncapped() {
+    int v = g_uncapped.load(std::memory_order_relaxed);
+    if (v < 0) {
+        const char* any = getenv("WWHD_UNCAPPED");
+        const char* vk = getenv("WWHD_VK_UNCAPPED");
+        v = (any && !strcmp(any, "1")) || (vk && !strcmp(vk, "1") && render::vulkan()) ? 1 : 0;
+        int expected = -1;
+        g_uncapped.compare_exchange_strong(expected, v);
+        v = g_uncapped.load(std::memory_order_relaxed);
+    }
+    return v == 1;
 }
-#endif
+void gx2::set_uncapped(bool on) {
+    if (uncapped() == on) return;
+    g_uncapped = on ? 1 : 0;
+    LOG("[gx2] uncapped %s", on ? "on (debug: no frame limit, no vsync; the game runs faster than real time)" : "off");
+}
+static bool uncapped_benchmark() { return gx2::uncapped(); }
 
 static void update_flips() {  // g_flip_mutex held
     uint64_t now = vsync_index();
     while (!g_pending_flips.empty()) {
         uint64_t at = flip_due(g_pending_flips.front());
-#ifdef WWHD_HAS_VULKAN
         if ((!uncapped_benchmark() && at > now) || render::frames_completed() < g_pending_flips.front().swap) break;
-#else
-        if (at > now || render::frames_completed() < g_pending_flips.front().swap) break;
-#endif
         at = now / vsync_granule() * vsync_granule();
         g_pending_flips.pop_front();
         g_last_flip_vsync = at;
@@ -616,10 +623,8 @@ static void ready_flip_before_resume() {
 HLE(gx2, GX2Init) {
     set_default_state();
     LOG("[gx2] initialized (native GX2 -> %s)", render::api_name(render::active()));
-#ifdef WWHD_HAS_VULKAN
     if(uncapped_benchmark())
         LOG("[gx2 benchmark] uncapped guest flips; GPU completion ordering retained; frame-based simulation accelerates while timebase/audio clocks remain real-time");
-#endif
 }
 
 HLE(gx2, GX2SetupContextStateEx) {
@@ -794,7 +799,6 @@ HLE(gx2, GX2GetSwapStatus) {
 }
 HLE(gx2, GX2SetSwapInterval) { g_swap_interval = std::max<uint32>(arg(c, 0), 1); }
 HLE(gx2, GX2WaitForVsync) {
-#ifdef WWHD_HAS_VULKAN
     if(uncapped_benchmark()) {
         BlockingScope b;
         // The queue fence follows earlier swaps, whose presentation path waits
@@ -804,6 +808,7 @@ HLE(gx2, GX2WaitForVsync) {
         update_flips();
         return;
     }
+#ifdef WWHD_HAS_VULKAN
     static const bool readyFlipWait = [] {
         const char* value = getenv("WWHD_VK_READY_FLIP_WAIT");
         return render::vulkan() && value && !strcmp(value, "1");

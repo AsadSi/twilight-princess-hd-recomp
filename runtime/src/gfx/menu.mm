@@ -40,7 +40,7 @@ static void cycle_res() {
 
 
 
-namespace gx2 { uint64_t flips_presented(); }
+namespace gx2 { uint64_t flips_presented(); bool uncapped(); }
 #include "../mods/mods.h"
 #include "../overlay/overlay.h"
 namespace ax { void start_sound_trace(const char* path, double seconds); }
@@ -137,6 +137,7 @@ static void update_title() {
                                              ao[render::ao_mode()], render::ao_hires() ? " + full-size depth" : "",
                                              render::aniso() ? "16x" : "game",
                                              interp::mode() ? [@" \u00b7 " stringByAppendingString:@(interp::mode_name())] : @"", render::fxaa() ? @" \u00b7 FXAA" : @""];
+    if (gx2::uncapped()) t = [t stringByAppendingString:@" \u00b7 UNCAPPED (debug)"];
     std::string msg = ss::last_message();  // save state confirmations
     if (!msg.empty()) t = [NSString stringWithFormat:@"%@ \u2014 %@ \u2014 %s", kTitle, rnd, msg.c_str()];
     if (getenv("WWHD_LOG_TITLE") && ![t isEqualToString:g_tv.title]) {  // tests: the window title as it changes

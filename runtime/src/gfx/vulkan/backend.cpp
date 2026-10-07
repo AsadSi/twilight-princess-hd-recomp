@@ -930,7 +930,7 @@ static void make_swapchain(Screen &s) {
       offeredNames += std::string(offeredNames.empty() ? "" : ", ") + present_mode_name(m);
     }
   if (&s == &R.tv) set_present_modes_offered(offered);
-  const int wanted = present_mode();
+  const int wanted = effective_present_mode();
   const int chosen = offered >> wanted & 1 ? wanted : kPresentFifo;
   ci.presentMode = kModes[chosen];
   if (chosen != s.presentMode || wanted != s.presentWanted)
@@ -1040,7 +1040,7 @@ static void present(Screen &s) {
 #endif
   // Presentation changed (settings overlay): a new swapchain, as for a resize (also for a window that
   // is not shown right now, so the next frame it shows uses the new mode)
-  if (s.window && s.swapchain && s.presentWanted != present_mode())
+  if (s.window && s.swapchain && s.presentWanted != effective_present_mode())
     make_swapchain(s);
   if (!s.window || !s.visible || s.width <= 0 || s.height <= 0 || !s.scan ||
       !s.scan->image)
@@ -2406,6 +2406,7 @@ void run_main_loop() {
           double(frames - titleFrames) / elapsed,
           mode ? " · " : "", mode ? interp::mode_name() : "",
           double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");
+      if (gx2::uncapped()) std::strncat(title, " · UNCAPPED (debug)", sizeof title - std::strlen(title) - 1);
       SDL_SetWindowTitle(R.tv.window, title);
       titleFrames = frames;
       titleTime = now;

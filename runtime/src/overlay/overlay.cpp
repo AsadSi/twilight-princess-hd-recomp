@@ -45,7 +45,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../build_info.h"
 #include "../report_header.h"
 
-namespace gx2 { uint64_t flips_presented(); }
+namespace gx2 { uint64_t flips_presented(); bool uncapped(); void set_uncapped(bool on); }
 
 namespace overlay {
 namespace {
@@ -544,6 +544,13 @@ void tab_graphics() {
              "whole game down. The performance overlay shows how many are drawn.\n"
              "Saved separately for 60 fps (off by default) and 120/240 fps (on by default).");
     }
+    // debug only, not saved (gx2::uncapped)
+    bool unc;
+    if (check("Uncapped (debug: the game runs too fast)", gx2::uncapped(), &unc)) hostui::post([unc] { gx2::set_uncapped(unc); });
+    help("Debug only, to see how many frames a second this computer can draw: no frame limit and no\n"
+         "vsync. The game counts frames, so it runs faster than normal. The frame rate is in the window\n"
+         "title and the performance overlay. Not saved. (With frame interpolation and Keep game speed\n"
+         "on, the game logic still keeps 30 steps a second.)");
 
     heading("Internal resolution");
     static const float scales[] = {1.0f, 1.5f, 2.0f, 3.0f};
