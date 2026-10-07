@@ -5,6 +5,7 @@
 #define VK_USE_PLATFORM_METAL_EXT  // VK_EXT_metal_surface: AppKit views' CAMetalLayers
 #endif
 #include "backend.h"
+#include "render_prof.h"
 #include "present.h"
 #include "gfx/display.h"
 #include "gfx/display_modes.h"
@@ -168,13 +169,16 @@ void init_pipeline_cache() try {
     R.pipelineCache=VK_NULL_HANDLE;
   LOG("[vulkan cache] load disabled after error: %s",error.what());
 }
-template<class F> VkResult timed_call(WaitTiming& timing, F&& call) {
-  if (!perf_enabled()) return call();
+// profWait: also report the wait to the render-thread profiler (render_prof.h)
+template<class F> VkResult timed_call(WaitTiming& timing, F&& call, int profWait = -1) {
+  const bool profiled = profWait >= 0 && rprof::enabled();
+  if (!perf_enabled() && !profiled) return call();
   auto start = std::chrono::steady_clock::now();
   VkResult result = call();
-  ++timing.count;
-  timing.ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+  const uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now() - start).count();
+  if (perf_enabled()) { ++timing.count; timing.ns += ns; }
+  if (profiled) rprof::add_wait(rprof::Wait(profWait), ns);
   return result;
 }
 } // namespace
@@ -322,6 +326,7 @@ UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
       return UploadSlice{};
     block.used = offset + size;
     R.uploadBytes += size;
+    rprof::add_upload(size);
     return UploadSlice{block.buffer.buffer,offset,size,
                        static_cast<uint8_t*>(block.buffer.mapped)+offset};
   };
@@ -676,7 +681,7 @@ static void retire_submission(Renderer::Submission& slot, WaitTiming& timing=sub
   if (status==VK_NOT_READY) {
     vk_check(timed_call(timing,[&] {
       return vkWaitForFences(R.device,1,&slot.fence,VK_TRUE,UINT64_MAX);
-    }),"wait submission retirement");
+    },rprof::kWaitGpu),"wait submission retirement");
   } else vk_check(status,"submission fence status");
   collect_gpu_timestamp_queries(slot);
   if(R.gpuPassTimestampsEnabled) collect_gpu_pass_queries(slot);
@@ -1057,7 +1062,7 @@ static void present(Screen &s) {
   VkResult ar = timed_call(timing.acquire, [&] {
     return vkAcquireNextImageKHR(R.device, s.swapchain, UINT64_MAX,
                                 acquireSemaphore, VK_NULL_HANDLE, &index);
-  });
+  }, rprof::kWaitAcquire);
   if (ar == VK_ERROR_OUT_OF_DATE_KHR) {
     s.resize = true;
     return;
@@ -1147,7 +1152,7 @@ static void present(Screen &s) {
   pi.pImageIndices = &index;
   VkResult pr = timed_call(timing.present, [&] {
     return vkQueuePresentKHR(R.queue, &pi);
-  });
+  }, rprof::kWaitPresent);
 #ifdef __ANDROID__
   // SUBOPTIMAL here only says the compositor rotates the picture (identity pre-transform, see
   // make_swapchain); size changes come as window events. Rebuilding would happen every frame.
@@ -1165,7 +1170,7 @@ static void present(Screen &s) {
     vk_check(pr, "present scan buffer");
 #endif
   if (!async)
-    vk_check(timed_call(timing.idle, [&] { return vkQueueWaitIdle(R.queue); }),
+    vk_check(timed_call(timing.idle, [&] { return vkQueueWaitIdle(R.queue); }, rprof::kWaitGpu),
              "present completion");
 }
 void copy_to_scan(uint32_t cb, uint32_t target) {

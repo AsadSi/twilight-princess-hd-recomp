@@ -4,6 +4,7 @@
 #include "mods/shader_interface.h"
 #include "graphic_pack_hash.h"
 #include "exact_state_memo.h"
+#include "render_prof.h"
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
@@ -236,6 +237,103 @@ uint64_t state_hash(const uint32_t* regs, uint64_t hash, bool vertex, bool cache
     if(enabled && cacheLast) stateMemo.remember(vertex,state.data(),count,hash,result);
     return result;
 }
+// Shader-cache miss histogram (render_prof.h, H6 of the performance research): for each new variant
+// of a program that already has variants, which of the words state_hash() covers differ from the
+// nearest existing variant. Texture and sampler words are split into units/samplers this shader
+// samples and ones it does not (narrowing candidates). Same words as state_hash(), fixed layout.
+enum MissGroup : uint8_t {
+    kMgSemantic, kMgVsOutId, kMgVsOutConfig, kMgVsOutCntl, kMgPsInControl, kMgPsInputCntl, kMgPrimitive,
+    kMgPointSprite, kMgStreamout, kMgGsMode, kMgSqConfig, kMgCbShaderMask, kMgCbShaderControl,
+    kMgDbShaderControl, kMgInputZ, kMgAlphaTest, kMgVteCntl, kMgClipCntl, kMgDepthControl, kMgCbColorControl,
+    kMgTargetMask, kMgColorInfo, kMgTexUsed, kMgTexUnused, kMgSamplerUsed, kMgSamplerUnused, kMgFetch, kMgCount
+};
+const char* const missGroupNames[kMgCount] = {
+    "VTX_SEMANTIC", "SPI_VS_OUT_ID", "SPI_VS_OUT_CONFIG", "PA_CL_VS_OUT_CNTL", "SPI_PS_IN_CONTROL",
+    "SPI_PS_INPUT_CNTL", "primitive type", "point sprite", "streamout", "VGT_GS_MODE", "SQ_CONFIG",
+    "CB_SHADER_MASK", "CB_SHADER_CONTROL", "DB_SHADER_CONTROL", "SPI_INPUT_Z", "alpha test", "PA_CL_VTE_CNTL",
+    "PA_CL_CLIP_CNTL", "DB_DEPTH_CONTROL", "CB_COLOR_CONTROL", "CB_TARGET_MASK", "CB_COLOR_INFO",
+    "tex words (used units)", "tex words (unused units)", "sampler compare (used)", "sampler compare (unused)",
+    "fetch shader"};
+void miss_words(const uint32_t* regs, bool vertex, uint64_t fsKey, std::vector<uint32_t>& words,
+                std::vector<uint8_t>* groups, const LatteDecompilerShader* dec) {
+    words.clear();
+    if (groups) groups->clear();
+    auto put = [&](uint32_t value, uint8_t group) {
+        words.push_back(value);
+        if (groups) groups->push_back(group);
+    };
+    auto range = [&](uint32_t first, uint32_t n, uint8_t group) { for (uint32_t i = 0; i < n; ++i) put(regs[first + i], group); };
+    range(mmSQ_VTX_SEMANTIC_0, 32, kMgSemantic); range(mmSPI_VS_OUT_ID_0, 10, kMgVsOutId);
+    range(mmSPI_VS_OUT_CONFIG, 1, kMgVsOutConfig); range(mmPA_CL_VS_OUT_CNTL, 1, kMgVsOutCntl);
+    range(mmSPI_PS_IN_CONTROL_0, 2, kMgPsInControl); range(mmSPI_PS_INPUT_CNTL_0, 32, kMgPsInputCntl);
+    put(regs[REGADDR::VGT_PRIMITIVE_TYPE] & 0x3F, kMgPrimitive);
+    put(regs[mmSPI_INTERP_CONTROL_0] & (1u << 1), kMgPointSprite);
+    put(regs[mmVGT_STRMOUT_EN], kMgStreamout);
+    for (uint32_t b = 0; b < 4; ++b) put(regs[mmVGT_STRMOUT_EN] ? regs[mmVGT_STRMOUT_VTX_STRIDE_0 + b * 4] : 0, kMgStreamout);
+    range(REGADDR::VGT_GS_MODE, 1, kMgGsMode); range(REGADDR::SQ_CONFIG, 1, kMgSqConfig);
+    range(mmCB_SHADER_MASK, 1, kMgCbShaderMask); range(mmCB_SHADER_CONTROL, 1, kMgCbShaderControl);
+    range(mmDB_SHADER_CONTROL, 1, kMgDbShaderControl); range(mmSPI_INPUT_Z, 1, kMgInputZ);
+    range(REGADDR::SX_ALPHA_TEST_CONTROL, 1, kMgAlphaTest);
+    put(regs[REGADDR::PA_CL_VTE_CNTL] & 0x3F, kMgVteCntl);
+    put(regs[REGADDR::PA_CL_CLIP_CNTL] & (1u << 19), kMgClipCntl);
+    put(regs[REGADDR::DB_DEPTH_CONTROL] & 0x83, kMgDepthControl);
+    range(REGADDR::CB_COLOR_CONTROL, 1, kMgCbColorControl); range(REGADDR::CB_TARGET_MASK, 1, kMgTargetMask);
+    range(mmCB_COLOR0_INFO, 8, kMgColorInfo);
+    std::array<bool, LATTE_NUM_MAX_TEX_UNITS> usedUnit{};
+    std::array<bool, LATTE_NUM_MAX_TEX_UNITS * 3> usedSampler{};
+    if (dec)
+        for (int i = 0; i < dec->textureUnitListCount; ++i) {
+            const uint32_t unit = dec->textureUnitList[i];
+            if (unit >= LATTE_NUM_MAX_TEX_UNITS) continue;
+            usedUnit[unit] = true;
+            const uint32_t sampler = dec->textureUnitSamplerAssignment[unit];
+            if (sampler < 18) usedSampler[(vertex ? 18 : 0) + sampler] = true;
+        }
+    uint32_t base = vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
+    for (uint32_t t = 0; t < LATTE_NUM_MAX_TEX_UNITS; ++t) {
+        const auto* w = regs + base + t * 7;
+        const uint8_t g = usedUnit[t] ? kMgTexUsed : kMgTexUnused;
+        put((w[0] & 7) | (w[4] & 0x300), g);
+        put(w[1] & 0x3F00000, g);
+    }
+    for (uint32_t t = 0; t < LATTE_NUM_MAX_TEX_UNITS * 3; ++t)
+        put(regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + t * 3] & 0xF8000000, usedSampler[t] ? kMgSamplerUsed : kMgSamplerUnused);
+    put(uint32_t(fsKey), kMgFetch);
+    put(uint32_t(fsKey >> 32), kMgFetch);
+}
+std::unordered_map<uint64_t, std::vector<std::vector<uint32_t>>> missVariants;  // program base -> variants
+void record_shader_variant(const uint32_t* regs, bool vertex, uint64_t base, uint64_t fsKey,
+                           const LatteDecompilerShader* dec) {
+    if (!rprof::enabled()) return;
+    std::vector<uint32_t> words;
+    std::vector<uint8_t> groups;
+    miss_words(regs, vertex, vertex ? fsKey : 0, words, &groups, dec);
+    auto& variants = missVariants[base];
+    const char* names[kMgCount];
+    int count = 0;
+    bool onlyUnused = false;
+    if (!variants.empty()) {
+        const std::vector<uint32_t>* nearest = nullptr;
+        size_t best = SIZE_MAX;
+        for (const auto& v : variants) {
+            size_t d = 0;
+            for (size_t i = 0; i < v.size() && i < words.size(); ++i) d += v[i] != words[i];
+            if (d < best) { best = d; nearest = &v; }
+        }
+        std::array<bool, kMgCount> differs{};
+        for (size_t i = 0; i < words.size() && i < nearest->size(); ++i)
+            if ((*nearest)[i] != words[i]) differs[groups[i]] = true;
+        onlyUnused = best > 0;
+        for (int g = 0; g < kMgCount; ++g)
+            if (differs[g]) {
+                names[count++] = missGroupNames[g];
+                if (g != kMgTexUnused && g != kMgSamplerUnused) onlyUnused = false;
+            }
+        if (!count) names[count++] = "none (equal words)";
+    }
+    rprof::shader_variant(variants.empty(), onlyUnused, names, count);
+    variants.push_back(std::move(words));
+}
 void free_decompiler(LatteDecompilerShader* shader) {
     if (!shader) return;
     delete shader->strBuf_shaderSource;
@@ -418,6 +516,7 @@ Shader* translate(const uint32_t* regs, bool vertex, LatteFetchShader* fetch, ui
         free_decompiler(output.shader); shader->error = "Latte GLSL translation failed"; return shader;
     }
     shader->dec = FinishDecompiledShader(output);
+    record_shader_variant(regs, vertex, base, fsKey, shader->dec);
     shader->mapping = output.resourceMappingVK;
     shader->descriptorRanks = make_descriptor_rank_plan(shader->mapping, *shader->dec);
     shader->uniforms = output.uniformOffsetsVK;

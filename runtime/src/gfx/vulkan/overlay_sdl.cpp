@@ -297,6 +297,7 @@ void set_pro_controller(bool on) {
     show_drc(!on);
 }
 const char* name() { return "SDL"; }
+void set_clipboard(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 
 }  // namespace hostui
 #endif  // WWHD_SDL_HOST

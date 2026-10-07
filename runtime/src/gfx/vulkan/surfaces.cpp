@@ -1,6 +1,7 @@
 #include "mods/cemu_pack.h"
 // Guest surfaces backed by Vulkan images. LatteAddrLib supplies guest tiling geometry.
 #include "backend.h"
+#include "render_prof.h"
 #include "settings.h"
 #include "sparse_hash_memo.h"
 #include "write_watch.h"
@@ -702,6 +703,7 @@ void upload_surface(Surface* s) {
         Buffer staging=create_buffer(packed.size(),VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         if(!staging.mapped){defer_buffer(staging);throw std::runtime_error("Vulkan texture staging allocation is not mapped");}
         memcpy(staging.mapped,packed.data(),packed.size());
+        rprof::add_upload(rprof::kUpTexture,packed.size());
         vkCmdCopyBufferToImage(command_buffer(),staging.buffer,s->image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,uint32_t(copies.size()),copies.data());
         defer_buffer(staging);
     }

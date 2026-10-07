@@ -38,6 +38,7 @@
 #include "../rumble.h"
 #include "../runtime.h"
 #include "../savestate.h"
+#include "../render_prof.h"
 
 namespace interp {
 int mode();  // 0 off, 1 frame interpolation, 2 true 60
@@ -594,6 +595,24 @@ void tab_graphics() {
 #endif
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
+    // the render-thread profiler's latest report (render_prof.h), for performance bug reports
+    static double copiedAt = -10;
+    if (ImGui::Button("Copy performance report")) {
+        std::string report = rprof::latest_report();
+        char head[256];
+        snprintf(head, sizeof head, "Wind Waker HD performance report: renderer %s, host %s, %s, internal scale %.1fx\n",
+                 render::vulkan() ? "Vulkan" : "Metal", hostui::name(),
+                 interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps",
+                 hostui::res_scale());
+        report = head + (report.empty() ? std::string("No report yet: play for a few seconds, then copy again.\n") : report);
+        hostui::post([report] { hostui::set_clipboard(report); });
+        copiedAt = ImGui::GetTime();
+    }
+    if (ImGui::GetTime() - copiedAt < 2.0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Copied");
+    }
+    help("Where the renderer spends its time over the last few seconds, as text for a bug report");
 }
 
 void tab_display() {

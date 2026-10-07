@@ -25,6 +25,7 @@
 #include "../aspect.h"
 #include "gfx/renderer.h"
 #include "platform/perf_hint.h"
+#include "render_prof.h"
 
 using namespace Latte;
 
@@ -79,12 +80,17 @@ static void apply_small_regs(uint32 first, const uint32* v, uint32 n) {
         return e && !strcmp(e, "1");
     }();
     static const bool collectStats = getenv("WWHD_VK_STATS") != nullptr;
+    const bool classify = rprof::enabled();
     bool changed = false, baselineBump = false, actualBump = false;
     uint64_t maskedWords = 0;
     for (uint32 i = 0; i < n; ++i) {
         const uint32 reg = first + i, value = v[i], old = g_regs[reg];
         if (old != value) {
             changed = true;
+            if (classify) {
+                if (rprof::fast_class_reg(reg)) rprof::g_reg_dirty |= 1;
+                else rprof::note_other_reg(reg);
+            }
             if ((collectStats || !actualBump) && !shader_irrelevant(reg)) {
                 baselineBump = true;
                 uint32 mask;
@@ -124,6 +130,12 @@ static void apply_regs(uint32 first, const uint32* v, uint32 n) {
     }
 #endif
     if (memcmp(&g_regs[first], v, n * 4) != 0) {
+        if (rprof::enabled())  // draw classifier (render_prof.h)
+            for (uint32 i = 0; i < n; i++)
+                if (g_regs[first + i] != v[i]) {
+                    if (rprof::fast_class_reg(first + i)) rprof::g_reg_dirty |= 1;
+                    else rprof::note_other_reg(first + i);
+                }
 #ifdef WWHD_HAS_VULKAN
         static const bool keyDirty = [] {
             const char* value = getenv("WWHD_VK_SHADER_KEY_DIRTY");
@@ -186,7 +198,11 @@ static void render_thread_main() {
         {
             std::unique_lock<std::mutex> lk(g_q_mutex);
             g_q_waiting = true;
-            g_q_cv.wait(lk, [] { return !g_q_pending.empty(); });
+            if (g_q_pending.empty()) {
+                const uint64_t idle = rprof::enabled() ? rprof::now_ns() : 0;
+                g_q_cv.wait(lk, [] { return !g_q_pending.empty(); });
+                if (idle) rprof::add_idle(rprof::now_ns() - idle);
+            }
             g_q_waiting = false;
             g_q_work.swap(g_q_pending);
         }
@@ -235,7 +251,18 @@ static void sync_stat(int site, std::chrono::steady_clock::duration waited) {
 static void render_sync(int site = kSyncShutdown) {
     if (!g_render_thread) return;
     const auto started = std::chrono::steady_clock::now();
-    struct Done { int site; std::chrono::steady_clock::time_point t; ~Done() { sync_stat(site, std::chrono::steady_clock::now() - t); } } done{site, started};
+    struct Done {
+        int site;
+        std::chrono::steady_clock::time_point t;
+        ~Done() {
+            const auto waited = std::chrono::steady_clock::now() - t;
+            sync_stat(site, waited);
+            if (rprof::enabled())
+                rprof::add_sync(site == kSyncDrawDone ? rprof::kSyncDrawDone : site == kSyncCopySurface ? rprof::kSyncCopySurface
+                                : site == kSyncFlip || site == kSyncVsyncFlip ? rprof::kSyncFlip : rprof::kSyncOther,
+                                (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(waited).count());
+        }
+    } done{site, started};
     uint64_t id;
     {
         std::lock_guard<std::mutex> lk(g_q_mutex);
@@ -329,6 +356,7 @@ static void set_context(uint32 ctx) {
     g_shadow = it->second.data();
     memcpy(g_regs, g_shadow, sizeof(g_regs));
     g_shader_state_gen++;
+    rprof::g_reg_dirty |= 2;  // draw classifier: a context load counts as a full state change
 }
 
 constexpr uint32 kColorBufferWords = 0x9C / 4, kDepthBufferWords = 0xAC / 4, kSurfaceWords = 0x74 / 4;
@@ -353,7 +381,31 @@ static bool lazy_draw_done() {
     return on;
 }
 
+static void execute_op(Op op, const uint32* p, uint32 n);
+// every op is counted and (sampled) timed for the render-thread profiler (render_prof.h); display-list
+// calls are not timed themselves: their ops are
 static void execute_one(Op op, const uint32* p, uint32 n) {
+    rprof::Op kind;
+    switch (op) {
+    case OP_CALL: execute_op(op, p, n); return;
+    case OP_SET_REGS: case OP_SET_PROJ_REGS: kind = rprof::kOpRegs; break;
+    case OP_DRAW: case OP_DRAW_INDEXED: kind = rprof::kOpDraw; rprof::classify_draw(); break;
+    case OP_CLEAR_COLOR: case OP_CLEAR_DEPTH: case OP_CLEAR_BUFFERS: kind = rprof::kOpClear; break;
+    case OP_COPY_SURFACE: kind = rprof::kOpCopy; break;
+    case OP_COPY_TO_SCAN: kind = rprof::kOpScan; break;
+    case OP_INVALIDATE: kind = rprof::kOpInvalidate; break;
+    case OP_FLUSH: kind = rprof::kOpFlush; break;
+    case OP_DRAW_DONE: kind = rprof::kOpDrawDone; break;
+    case OP_SWAP: kind = rprof::kOpSwap; break;
+    default: kind = rprof::kOpOther; break;
+    }
+    const uint64_t started = rprof::op_begin(kind);
+    execute_op(op, p, n);
+    rprof::op_end(kind, started);
+    if (op == OP_SWAP) rprof::frame_end(n >= 2 && p[1]);
+}
+
+static void execute_op(Op op, const uint32* p, uint32 n) {
     switch (op) {
     case OP_NOP: break;
     case OP_SET_REGS: apply_regs(p[0], p + 1, n - 1); break;
@@ -484,7 +536,7 @@ using namespace gx2;
 static uint64_t g_swap_count = 0, g_flip_count = 0;
 namespace gx2 { uint64_t flips_presented() { return __atomic_load_n(&g_flip_count, __ATOMIC_RELAXED); } }  // live fps in the title
 static uint32 g_swap_interval = 1;  // as set by the game (frame interpolation halves it)
-namespace interp { uint32_t effective_swap_interval(uint32_t game); }
+namespace interp { uint32_t effective_swap_interval(uint32_t game); bool hold_pass(); }
 static std::mutex g_flip_mutex;
 static const auto g_vsync_epoch = std::chrono::steady_clock::now();
 static constexpr std::chrono::nanoseconds kVsyncPeriod(16683333);  // 59.94 Hz
@@ -683,7 +735,7 @@ HLE(gx2, GX2SwapScanBuffers) {
     float a = aspect::on_swap();  // aspect ratio of the next frame (game projections, render targets)
     uint32 ab;
     memcpy(&ab, &a, 4);
-    emit_host(OP_SWAP, {ab});
+    emit_host(OP_SWAP, {ab, interp::hold_pass() ? 1u : 0u});  // hold pass: for the render-thread profiler
     {
         std::lock_guard<std::mutex> lk(g_flip_mutex);
         update_flips();
