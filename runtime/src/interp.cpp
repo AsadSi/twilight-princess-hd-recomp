@@ -14,7 +14,7 @@
 // Hold passes 1..N-1 are "blended hold passes": no logic, but drawn blended like the logic pass.
 // Everything that blends (camera, model matrices here; effects in interp_fx.cpp) takes the
 // fraction from pass_t(); at 60 fps (t = 1/2) the arithmetic is bit-identical to the original
-// halfway code (lerp() and friends special-case 1/2).
+// halfway code (lerp_f() and friends special-case 1/2).
 //
 // Main loop functions in WWHD: see tools/recomp/hooks.txt and docs/decomp-notes.md.
 // Camera layout (camera_draw, 024FFC40): near +0xCC, far +0xD0, fovy +0xD4, aspect +0xD8,
@@ -205,7 +205,7 @@ float dist(const float* a, const float* b) {
 // The blend fraction t of a pass: 1/(N+1) on the logic pass, (k+1)/(N+1) on blended hold pass k;
 // 1 = exact. The blends (interp_pacing.h) keep the original halfway arithmetic at t = 1/2, so 60 fps
 // draws bit-identical frames to the halfway-only code (0.5f * (a + b), nlerp, integer halving).
-using pacing::lerp;
+using pacing::lerp_f;
 using pacing::lerp_s16;
 
 // Blended camera between the last exact step (a) and the new one (b).
@@ -228,8 +228,8 @@ bool cam_snap(const CamState& a, const CamState& b) {
 CamState blend(const CamState& a, const CamState& b, float t) {
     CamState m;
     for (int i = 0; i < 3; i++) {
-        m.center[i] = lerp(a.center[i], b.center[i], t);
-        m.up[i] = lerp(a.up[i], b.up[i], t);
+        m.center[i] = lerp_f(a.center[i], b.center[i], t);
+        m.up[i] = lerp_f(a.up[i], b.up[i], t);
     }
     // eye = center + direction * distance, each blended on its own
     float da[3], db[3], la = 0, lb = 0;
@@ -258,10 +258,10 @@ CamState blend(const CamState& a, const CamState& b, float t) {
             ld += dir[i] * dir[i];
         }
         ld = std::sqrt(ld);
-        float len = lerp(la, lb, t);
+        float len = lerp_f(la, lb, t);
         for (int i = 0; i < 3; i++) m.eye[i] = m.center[i] + (ld > 1e-3f ? dir[i] / ld : db[i] / lb) * len;
     } else {
-        for (int i = 0; i < 3; i++) m.eye[i] = lerp(a.eye[i], b.eye[i], t);
+        for (int i = 0; i < 3; i++) m.eye[i] = lerp_f(a.eye[i], b.eye[i], t);
     }
     // up: normalised and made perpendicular to the blended view direction, so the in-between frame
     // gets no extra roll (matters most when looking down from above, where small differences in up
@@ -279,7 +279,7 @@ CamState blend(const CamState& a, const CamState& b, float t) {
             for (int i = 0; i < 3; i++) m.up[i] = b.up[i];  // degenerate: keep the exact up vector
         }
     }
-    m.fovy = lerp(a.fovy, b.fovy, t);
+    m.fovy = lerp_f(a.fovy, b.fovy, t);
     m.bank = lerp_s16(a.bank, b.bank, t);  // shortest way round
     return m;
 }
@@ -481,10 +481,10 @@ bool to_quat(const float* m, float* s, float* q) {
 // blended element-wise
 void blend_mtx(const float* a, const float* b, float* out, float t) {
     float sa[3], sb[3], qa[4], qb[4];
-    for (int i = 0; i < 3; i++) out[4 * i + 3] = lerp(a[4 * i + 3], b[4 * i + 3], t);
+    for (int i = 0; i < 3; i++) out[4 * i + 3] = lerp_f(a[4 * i + 3], b[4 * i + 3], t);
     if (!to_quat(a, sa, qa) || !to_quat(b, sb, qb)) {
         for (int i = 0; i < 3; i++)
-            for (int j = 0; j < 3; j++) out[4 * i + j] = lerp(a[4 * i + j], b[4 * i + j], t);
+            for (int j = 0; j < 3; j++) out[4 * i + j] = lerp_f(a[4 * i + j], b[4 * i + j], t);
         return;
     }
     float d = qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3];
@@ -499,7 +499,7 @@ void blend_mtx(const float* a, const float* b, float* out, float t) {
                            {2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)},
                            {2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)}};
     for (int j = 0; j < 3; j++) {
-        float s = lerp(sa[j], sb[j], t);
+        float s = lerp_f(sa[j], sb[j], t);
         for (int i = 0; i < 3; i++) out[4 * i + j] = r[i][j] * s;
     }
 }

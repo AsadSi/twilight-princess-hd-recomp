@@ -97,7 +97,7 @@ bool hold_back() { return interp::hold_pass() && on(8); }
 bool halfway() { return interp::blend_draw() && !interp::in_execute(); }
 // blends at fraction t (interp_pacing.h); at t = 1/2 the original halfway arithmetic (60 fps draws
 // bit-identical frames)
-using interp::pacing::lerp;
+using interp::pacing::lerp_f;
 using interp::pacing::lerp_s16;
 using interp::pacing::lerp_u8;
 
@@ -161,9 +161,9 @@ void write_ptcl(uint32_t p, const uint32_t* w) {
 // between two particle states at t: floats, colours per channel, the rotation angle the short way
 void mid_ptcl(const uint32_t* a, const uint32_t* b, uint32_t* m, bool extras, float t) {
     for (int i = 0; i < kPW; i++) m[i] = b[i];
-    for (int i = kWPos; i < kWSize + 2; i++) m[i] = fw(lerp(wf(a[i]), wf(b[i]), t));
+    for (int i = kWPos; i < kWSize + 2; i++) m[i] = fw(lerp_f(wf(a[i]), wf(b[i]), t));
     if (!extras) return;
-    for (int i = kWAxis; i <= kWAlpha; i++) m[i] = fw(lerp(wf(a[i]), wf(b[i]), t));
+    for (int i = kWAxis; i <= kWAlpha; i++) m[i] = fw(lerp_f(wf(a[i]), wf(b[i]), t));
     for (int i : {kWPrm, kWEnv}) {
         const uint8_t* x = (const uint8_t*)&a[i];
         const uint8_t* y = (const uint8_t*)&b[i];
@@ -318,7 +318,7 @@ std::vector<Temp> g_temp, g_temp_keep;
 // the word to show at t; an s16 replaces only its half of the word as it is now (the other half
 // may be another blended s16: tree sway slots keep two in one word)
 uint32_t temp_value(const Temp& e, float t) {
-    if (e.kind == kF32) return f32_as_u32(lerp(u32_as_f32(e.prev), u32_as_f32(e.exact), t));
+    if (e.kind == kF32) return f32_as_u32(lerp_f(u32_as_f32(e.prev), u32_as_f32(e.exact), t));
     int16_t b = (int16_t)(e.exact >> e.shift);
     uint16_t m = (uint16_t)lerp_s16((int16_t)e.prev, b, t);
     return (ld32(e.addr) & ~(0xFFFFu << e.shift)) | ((uint32_t)m << e.shift);
@@ -514,13 +514,13 @@ void wave_restore() {
 // the crests (and the packet's skew) at t; the exact values are in g_wave.exact
 void wave_apply(float t) {
     const uint32_t pk = g_wave.pkt;
-    for (int k = 0; k < 2; k++) st32(pk + kWaveSkew[k], fh(lerp(hf(g_wave.skew_before[k]), hf(g_wave.skew[k]), t)));
+    for (int k = 0; k < 2; k++) st32(pk + kWaveSkew[k], fh(lerp_f(hf(g_wave.skew_before[k]), hf(g_wave.skew[k]), t)));
     for (int i = 0; i < kWaves; i++) {
         if (!g_wave.blend[i]) continue;
         uint32_t e = pk + kWaveEff + kWaveStride * i;
         const uint32_t* a = &g_wave.before[kWaveFields * i];
         const uint32_t* w = &g_wave.exact[kWaveFields * i];
-        for (int f = 0; f < kWaveFields; f++) st32(e + kWaveField[f], fh(lerp(hf(a[f]), hf(w[f]), t)));
+        for (int f = 0; f < kWaveFields; f++) st32(e + kWaveField[f], fh(lerp_f(hf(a[f]), hf(w[f]), t)));
     }
 }
 void wave_reapply(float t) {  // blended hold pass, after wave_restore at the pass start
@@ -603,7 +603,7 @@ extern "C" void hook_0256A448(Cpu* c) {
         g_wave.blend[i] = 1;
         if (tr && d2 > 1e-4f) {
             moving++;
-            frac += (lerp(hf(a[0]), hf(w[0]), t) - hf(a[0])) / (hf(w[0]) - hf(a[0]) != 0 ? (hf(w[0]) - hf(a[0])) : 1.0f);
+            frac += (lerp_f(hf(a[0]), hf(w[0]), t) - hf(a[0])) / (hf(w[0]) - hf(a[0]) != 0 ? (hf(w[0]) - hf(a[0])) : 1.0f);
         }
     }
     wave_apply(t);
@@ -760,9 +760,9 @@ extern "C" void hook_0251D864(Cpu* c) {
         saved.emplace_back(now, std::vector<uint32_t>(b, b + n));
         if (tr && arr == 0) {
             tr--;
-            LOG("[interp-fx] cloth %08X vertex 0 x %.3f -> %.3f, drawn %.3f", pk, hf(a[0]), hf(b[0]), lerp(hf(a[0]), hf(b[0]), t));
+            LOG("[interp-fx] cloth %08X vertex 0 x %.3f -> %.3f, drawn %.3f", pk, hf(a[0]), hf(b[0]), lerp_f(hf(a[0]), hf(b[0]), t));
         }
-        for (uint32_t q = 0; q < n; q++) b[q] = fh(lerp(hf(a[q]), hf(b[q]), t));
+        for (uint32_t q = 0; q < n; q++) b[q] = fh(lerp_f(hf(a[q]), hf(b[q]), t));
     }
     f_0251D864_orig(c);
     for (auto& [addr, w] : saved) memcpy(ppc_ptr(addr), w.data(), 4 * w.size());
@@ -1133,9 +1133,9 @@ extern "C" void hook_0246C5E8(Cpu* c) {
     }
     const float t = interp::pass_t();
     std::vector<uint32_t> exact(h, h + kSeaCells);
-    for (int i = 0; i < kSeaCells; i++) h[i] = fw(lerp(wf(g_sea.h[i]), wf(exact[i]), t));
-    stf32(pk + kSeaMinX, t == 0.5f ? 0.5f * (min_x + g_sea.min_x) : lerp(g_sea.min_x, min_x, t));
-    stf32(pk + kSeaMinZ, t == 0.5f ? 0.5f * (min_z + g_sea.min_z) : lerp(g_sea.min_z, min_z, t));
+    for (int i = 0; i < kSeaCells; i++) h[i] = fw(lerp_f(wf(g_sea.h[i]), wf(exact[i]), t));
+    stf32(pk + kSeaMinX, t == 0.5f ? 0.5f * (min_x + g_sea.min_x) : lerp_f(g_sea.min_x, min_x, t));
+    stf32(pk + kSeaMinZ, t == 0.5f ? 0.5f * (min_z + g_sea.min_z) : lerp_f(g_sea.min_z, min_z, t));
     static int tr = trace_left(1);
     if (tr) {
         tr--;
@@ -1249,7 +1249,7 @@ extern "C" void hook_024EC1C8(Cpu* c) {
     float d2 = 0, mp[3];
     for (int i = 0; i < 3; i++) {
         float cur = (float)ldf32(pos + 4 * i);
-        mp[i] = valid ? lerp(it->second.pos[i], cur, interp::pass_t()) : cur;
+        mp[i] = valid ? lerp_f(it->second.pos[i], cur, interp::pass_t()) : cur;
         d2 += (mp[i] - cur) * (mp[i] - cur);
     }
     if (!(d2 < 200.0f * 200.0f)) for (int i = 0; i < 3; i++) mp[i] = (float)ldf32(pos + 4 * i);  // new target

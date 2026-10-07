@@ -17,7 +17,7 @@ namespace pacing {
 // Blends at fraction t (0 = the previous step, 1 = the new one). At t = 1/2 they keep the original
 // halfway arithmetic, so 60 fps draws bit-identical frames to the halfway-only code.
 // (Other fractions as (1-t) a + t b: exact at both ends, unlike a + (b - a) t.)
-inline float lerp(float a, float b, float t) { return t == 0.5f ? 0.5f * (a + b) : (1.0f - t) * a + t * b; }
+inline float lerp_f(float a, float b, float t) { return t == 0.5f ? 0.5f * (a + b) : (1.0f - t) * a + t * b; }
 // s16 angle from a towards b, the short way round
 inline int16_t lerp_s16(int16_t a, int16_t b, float t) {
     const int16_t d = (int16_t)(b - a);

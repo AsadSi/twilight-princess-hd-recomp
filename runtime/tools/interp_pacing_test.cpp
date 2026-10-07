@@ -44,16 +44,16 @@ static void test_blends() {
     for (int i = 0; i < 10000; i++) {
         const float a = u(rng), b = u(rng);
         // bit-identical to the original halfway arithmetic at 1/2 (60 fps frames unchanged)
-        const float h = lerp(a, b, 0.5f), o = 0.5f * (a + b);
+        const float h = lerp_f(a, b, 0.5f), o = 0.5f * (a + b);
         CHECK(std::memcmp(&h, &o, 4) == 0);
         // other fractions: linear, exact at the ends
         for (int k = 0; k <= 8; k++) {
             const float t = k / 8.0f;
             if (t == 0.5f) continue;
-            CHECK_NEAR(lerp(a, b, t), a + (b - a) * double(t), 1e-3);
+            CHECK_NEAR(lerp_f(a, b, t), a + (b - a) * double(t), 1e-3);
         }
-        CHECK(lerp(a, b, 1.0f) == b);
-        CHECK(lerp(a, b, 0.0f) == a);
+        CHECK(lerp_f(a, b, 1.0f) == b);
+        CHECK(lerp_f(a, b, 0.0f) == a);
     }
     // s16 angles: halfway as before, other fractions the short way round across the wrap
     for (int a = -32768; a < 32768; a += 997)
