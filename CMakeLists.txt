@@ -117,6 +117,14 @@ add_custom_target(wwhd_build_info
           -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
   BYPRODUCTS ${WWHD_BUILD_INFO}
   COMMENT "Build info (version, commit)" VERBATIM)
+# Windows: VERSIONINFO + application manifest (wwhd_windows_resources); release builds strip the shipped
+# programs' debug information (WWHD_STRIP_RELEASE: -s for GNU-style linkers in Release/MinSizeRel)
+include(cmake/WindowsResources.cmake)
+if(WIN32 AND NOT MSVC AND NOT CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+  set(WWHD_STRIP_RELEASE "$<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-s>")
+else()
+  set(WWHD_STRIP_RELEASE "")
+endif()
 
 # ---- the game executable: runtime + native GX2 + the selected renderers
 # GX2 sources are compiled into the executable (not a static library) so their
@@ -184,6 +192,7 @@ if(ANDROID)
 endif()
 if(WIN32)
   target_compile_definitions(wwhd PRIVATE _USE_MATH_DEFINES)
+  wwhd_windows_resources(wwhd "The Wind Waker HD, native PC port" "wwhd.exe" gui)
   # advapi32: the Windows version for the performance report (report_header.cpp, RegGetValueW)
   target_link_libraries(wwhd PRIVATE winmm ws2_32 advapi32)  # timeBeginPeriod (main.cpp), Cemuhook client sockets (motion/dsu.cpp)
 endif()
@@ -366,6 +375,10 @@ add_executable(wwhd-extract tools/wudextract/wwhd_extract.cpp tools/wudextract/z
 target_link_libraries(wwhd-extract PRIVATE wudcrypto wwhd_zstd)
 if(WIN32)
   target_link_libraries(wwhd-extract PRIVATE shell32)
+  wwhd_windows_resources(wwhd-extract "Wind Waker HD game extractor (disc images, Cemu archives)" "wwhd-extract.exe" console)
+  if(WWHD_STRIP_RELEASE)
+    target_link_options(wwhd-extract PRIVATE ${WWHD_STRIP_RELEASE})
+  endif()
 endif()
 add_executable(extract_crypto_test tools/wudextract/crypto_test.cpp)
 target_link_libraries(extract_crypto_test PRIVATE wudcrypto)
