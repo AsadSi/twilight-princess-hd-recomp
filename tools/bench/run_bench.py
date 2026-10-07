@@ -223,12 +223,15 @@ def run_once(args, variant, env_extra, index, out_dir):
         status = "no state load"
     windows = parse_prof(lines[loaded:] if loaded is not None else [])
     windows = windows[args.skip_windows:]
+    paced = [float(m.group(1)) for l in lines[loaded or 0:] for m in [re.search(r"\[interp\] paced: " + NUM + "% of in-between", l)] if m]
     pacing = [float(m.group(1)) for l in lines[loaded or 0:] for m in [re.search(r"\[vulkan pacing\].*p95 " + NUM, l)] if m]
     result = {"variant": variant, "run": index, "status": status, "env": env_extra, "load_before": load_before,
               "load_after": load_after, "seconds": round(time.time() - started, 1), "windows": len(windows),
               "summary": summarize(windows) if windows else {}}
     if pacing:
         result["summary"]["vulkan_pacing_p95_ms"] = statistics.fmean(pacing[args.skip_windows:] or pacing)
+    if paced:  # WWHD_INTERP_PACED=1: share of in-between (60 fps) frames drawn, per 300 decisions
+        result["summary"]["paced_drawn_pct"] = statistics.fmean(paced[1:] or paced)
     with open(os.path.join(run_dir, "result.json"), "w") as f:
         json.dump({"result": result, "windows": windows}, f, indent=1)
     return result
@@ -311,7 +314,7 @@ def main():
                 row += [("%.4g" % s[x]) if s else "" for x in ("median", "min", "max", "n")] if s else ["", "", "", ""]
             w.writerow(row)
     for k in ("frame_ms", "swaps_per_s", "logic_steps_per_s", "render_cpu_ms", "render_idle_ms", "wait_gpu_ms",
-              "game_wait_DrawDone_ms", "upload_mib", "draws_per_frame"):
+              "game_wait_DrawDone_ms", "paced_drawn_pct", "upload_mib", "draws_per_frame"):
         if any(k in t for t in table.values()):
             print("%-24s %s" % (k, "  ".join("%s %.2f [%.2f..%.2f]" % (n, table[n][k]["median"], table[n][k]["min"], table[n][k]["max"])
                                             for n, _ in variants if k in table[n])))
