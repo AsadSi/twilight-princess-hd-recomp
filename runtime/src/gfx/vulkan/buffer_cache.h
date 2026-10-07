@@ -1,5 +1,5 @@
-// Vulkan guest buffer cache (design: buffer_cache_core.h). Off by default:
-//   WWHD_VK_BUFFER_CACHE=1         vertex arrays, index arrays and uniform blocks come from persistent
+// Vulkan guest buffer cache (design: buffer_cache_core.h). On by default on macOS, off elsewhere:
+//   WWHD_VK_BUFFER_CACHE=0|1       vertex arrays, index arrays and uniform blocks come from persistent
 //                                  GPU copies, re-uploaded only when their pages were written
 //   WWHD_VK_BUFFER_CACHE_VERIFY=1  (implies the cache) compares every hit with guest memory and logs
 //                                  mismatches; slow, for validation runs

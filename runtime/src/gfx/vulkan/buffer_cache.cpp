@@ -122,9 +122,18 @@ bool buffer_cache_verify() {
   return verify;
 }
 
+// On by default on macOS (verified there: 0 mismatches in verify mode over long gameplay runs); off on
+// Windows, Linux and Android until the verify run and the write-fault cost have been checked on those
+// hosts. WWHD_VK_BUFFER_CACHE=0|1 overrides the default everywhere.
+#if defined(__APPLE__)
+constexpr bool kBufferCacheDefault = true;
+#else
+constexpr bool kBufferCacheDefault = false;
+#endif
+
 bool buffer_cache_enabled() {
   static const bool enabled = [] {
-    bool want = env_is("WWHD_VK_BUFFER_CACHE", "1") || buffer_cache_verify();
+    bool want = kBufferCacheDefault || env_is("WWHD_VK_BUFFER_CACHE", "1") || buffer_cache_verify();
     if (env_is("WWHD_VK_BUFFER_CACHE", "0")) want = false;
     if (!want) return false;
     if (!wwatch::active()) {

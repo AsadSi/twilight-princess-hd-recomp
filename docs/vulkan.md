@@ -247,11 +247,24 @@ roughly 4,124 calls per frame in the saved scene while retaining fresh byte chec
 State memo differential QA passed 100,000 cases with UBSan. ASan could not run:
 a process sample showed a runtime initializer deadlock before `main`.
 
-## Guest buffer cache (opt-in)
+## Guest buffer cache
 
-`WWHD_VK_BUFFER_CACHE=1` replaces the per-draw copies of guest vertex arrays, index arrays and uniform
+The guest buffer cache replaces the per-draw copies of guest vertex arrays, index arrays and uniform
 blocks into the upload arena with persistent GPU copies keyed by guest address
-(`runtime/src/gfx/vulkan/buffer_cache_core.h`, glue in `buffer_cache.cpp`). It is off by default.
+(`runtime/src/gfx/vulkan/buffer_cache_core.h`, glue in `buffer_cache.cpp`). It is **on by default on
+macOS** and **off on Windows, Linux and Android**; `WWHD_VK_BUFFER_CACHE=1` turns it on and
+`WWHD_VK_BUFFER_CACHE=0` off on any platform.
+
+**Testers on Windows and Linux (and Android):** it stays opt-in there until it has been checked on
+those hosts, where the page-fault handling it relies on costs more and Linux limits the number of
+protected regions. Please run a normal play session, or the benchmark scene, once with
+`WWHD_VK_BUFFER_CACHE_VERIFY=1 WWHD_VK_CPU_ONLY_STATS=1` and report:
+- the `[vulkan buffer cache] verify:` lines (the mismatch count must stay 0; any `VERIFY MISMATCH` line
+  is a bug, please include it),
+- the `page write faults` count of the `[vulkan textures]` lines and the `protect failures` count of
+  the `[vulkan buffer cache]` lines,
+- and, if you can, render-thread CPU and FPS with `WWHD_VK_BUFFER_CACHE=1` against `=0`
+  (`tools/bench/run_bench.py --variant off:WWHD_VK_BUFFER_CACHE=0 --variant on:WWHD_VK_BUFFER_CACHE=1`).
 
 - **Validity without hashing.** An entry is current while none of its pages has a newer stamp in the
   page write tracker (`runtime/src/write_watch.h`, shared with the texture checks): the upload arms

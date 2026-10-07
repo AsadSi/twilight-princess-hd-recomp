@@ -10,6 +10,14 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
+### Next update (unreleased, on `devel`)
+
+- **Less CPU work per frame with the Vulkan renderer on macOS:** vertex, index and uniform data the
+  game does not change are kept on the GPU instead of being copied again for every draw (and again for
+  every 60 fps in-between frame). Measured on Outset Island and Windfall: 6-17% less render-thread
+  time and 43-64% less data uploaded per frame. Windows, Linux and Android testers can try it with
+  `WWHD_VK_BUFFER_CACHE=1`; see `docs/vulkan.md` ("Guest buffer cache") for what to report.
+
 ### v0.2.3
 
 - **Mod manager** (settings overlay → **Mods**): the built-in mods (direct and mouse camera,
