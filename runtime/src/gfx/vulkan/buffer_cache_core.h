@@ -161,7 +161,7 @@ struct Entry {
 
 struct Stats {
   uint64_t lookups = 0, hits = 0, uploads = 0, uploadBytes = 0;
-  uint64_t staleWrites = 0, grows = 0, newEntries = 0;
+  uint64_t staleWrites = 0, staleHintOnly = 0, grows = 0, newEntries = 0;
   uint64_t bypassDynamic = 0, bypassNoMemory = 0, becameDynamic = 0;
   uint64_t verifyChecks = 0, verifyMismatches = 0, verifyRaced = 0;
   uint64_t evictions = 0, epochDrops = 0;
@@ -204,7 +204,9 @@ class Cache {
       } else if (size <= x.size) {
         if (current(x)) { ++stats.hits; return kHit; }
         ++stats.staleWrites;
-        note_write(x);
+        const bool hintOnly = !wwatch::written_since(x.addr, x.size, x.stamp);
+        stats.staleHintOnly += hintOnly;
+        if (note_write(x) && onDynamic) onDynamic(key, x, hintOnly);
         drop_region(x);
       } else {
         ++stats.grows;  // a longer request: not a write
@@ -302,6 +304,9 @@ class Cache {
   uint64_t resident_bytes() const { return resident_; }
   size_t entries() const { return map_.size(); }
   Stats stats;
+  // diagnostics: called when an entry becomes dynamic (hintOnly: its last invalidation was a hint, not
+  // a write fault)
+  void (*onDynamic)(const Key& key, const Entry& entry, bool hintOnly) = nullptr;
 
  private:
   static uint64_t round(uint64_t n) { return (std::max<uint64_t>(n, 16) + kAlign - 1) / kAlign * kAlign; }
@@ -312,15 +317,17 @@ class Cache {
     e.checkedSeq = seq;
     return true;
   }
-  void note_write(Entry& e) {
+  // returns true when the entry just became dynamic
+  bool note_write(Entry& e) {
     const uint64_t age = frame_ - e.uploadFrame;
     if (age > kMaxBackoff) e.backoffs = 0;  // was stable for long: start the back-off over
     e.churn = age <= kChurnFrames ? e.churn + 1 : 1;
-    if (e.churn < kChurnLimit) return;
+    if (e.churn < kChurnLimit) return false;
     e.churn = 0;
     e.dynamicUntil = frame_ + std::min<uint64_t>(kFirstBackoff << std::min<uint32_t>(e.backoffs, 16), kMaxBackoff);
     ++e.backoffs;
     ++stats.becameDynamic;
+    return true;
   }
   void drop_region(Entry& e) {
     if (!e.region.valid()) return;

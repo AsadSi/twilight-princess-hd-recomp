@@ -103,6 +103,14 @@ State& state() {
       (unsigned long long)(b.budget >> 20),
       (b.flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? "device-local host-visible" : "host-visible",
       env_is("WWHD_VK_BUFFER_CACHE_HINTS", "0") ? "off" : "on");
+  // WWHD_VK_BUFFER_CACHE_LOG=1: log the first 300 ranges that become dynamic
+  if (env_is("WWHD_VK_BUFFER_CACHE_LOG", "1"))
+    created->cache.onDynamic = [](const bufcache::Key& k, const bufcache::Entry& e, bool hintOnly) {
+      static int logged = 0;
+      if (logged++ < 300)
+        LOG("[vulkan buffer cache] dynamic: kind %u at %08X, %u bytes, last invalidation by %s", k.kind, k.addr, e.size,
+            hintOnly ? "hint" : "write");
+    };
   g_state.store(created, std::memory_order_release);
   return *created;
 }
@@ -222,11 +230,13 @@ void buffer_cache_report(double frames) {
   uint64_t hintCalls, hintBytes;
   wwatch::take_hint_stats(hintCalls, hintBytes);
   const double lookups = double(c.lookups - o.lookups);
-  LOG("[vulkan buffer cache] %.0f lookups/frame, %.1f%% hits; uploads %.1f/frame %.3f MiB/frame; stale by writes %.1f/frame, "
+  LOG("[vulkan buffer cache] %.0f lookups/frame, %.1f%% hits; uploads %.1f/frame %.3f MiB/frame; stale by writes %.1f/frame "
+      "(hint only %.1f), "
       "grows %.1f/frame; bypass dynamic %.1f/frame, no memory %.1f/frame, became dynamic %llu; evictions %llu; "
       "%zu entries, %.1f MiB resident; hints %.1f/frame %.3f MiB/frame; protect failures %llu",
       lookups / frames, lookups ? 100.0 * double(c.hits - o.hits) / lookups : 0.0, (c.uploads - o.uploads) / frames,
       (c.uploadBytes - o.uploadBytes) / frames / (1 << 20), (c.staleWrites - o.staleWrites) / frames,
+      (c.staleHintOnly - o.staleHintOnly) / frames,
       (c.grows - o.grows) / frames, (c.bypassDynamic - o.bypassDynamic) / frames,
       (c.bypassNoMemory - o.bypassNoMemory) / frames, (unsigned long long)(c.becameDynamic - o.becameDynamic),
       (unsigned long long)(c.evictions - o.evictions), s.cache.entries(), s.cache.resident_bytes() / double(1 << 20),
