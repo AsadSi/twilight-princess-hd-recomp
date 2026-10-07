@@ -4,8 +4,8 @@
 // resampled, run through its volume envelope and filters and mixed into the buses (main + 3 aux)
 // of two devices: the TV and the (first) GamePad, each with its own device mix per voice. The
 // game's aux effects (reverb...) and final-mix callbacks run on each device's result, which is
-// upsampled to 48 kHz; the host hears both devices merged into one stereo output, every sound
-// once (audio_device_merge.h: in Off-TV Play the game moves all sound to the GamePad).
+// upsampled to 48 kHz and sent to the host as stereo: the TV, or in Off-TV Play (the game moves
+// its sound to the GamePad) TV + GamePad (audio_output_mode.h).
 // Behaviour follows Cemu's snd_core (ax_mix.cpp, ax_ist.cpp, ax_aux.cpp).
 #include "../platform/host.h"
 
@@ -18,7 +18,7 @@
 #include <thread>
 #include <vector>
 
-#include "../audio_device_merge.h"
+#include "../audio_output_mode.h"
 #include "../audio_out.h"
 #include "../runtime.h"
 
@@ -96,7 +96,7 @@ struct DrcState {
     uint16_t aux_return[kAuxBuses];
 };
 DrcState g_drc = {{}, {}, {}, {0x8000, 0x8000, 0x8000}};
-audio::DeviceMerge g_merge;  // what the final-mix callbacks add to the two devices -> host
+audio::OutputSelect g_output;  // which device mixes the host hears
 
 // ------------------------------------------------------------------ offsets
 uint32_t base_units(uint16_t fmt, uint32_t samples_ptr) {
@@ -225,7 +225,6 @@ void apply_lpf(Voice& v, float* s) {
 // ------------------------------------------------------------------ mixing
 float g_tv_bus[kBuses][kTvChannels][kSamples];
 float g_drc_bus[kBuses][kDrcChannels][kSamples];
-float g_shared[2][kSamples];  // L/R: what voices play on both devices' main buses (taken out once)
 double g_sfx_energy = 0;   // stats: output of non-stream voices
 uint32_t g_sfx_started = 0;
 
@@ -266,15 +265,14 @@ void log_stats() {
     LOG("[ax] %d playing: adpcm %d pcm16 %d pcm8 %d | tap %d linear %d none %d | looping %d stream %d | aux cb %d%d%d final mix %d%d",
         n, fmt[0], fmt[1], fmt[2], filt[0], filt[1], filt[2], loops, streams, !!g_aux_cb[0], !!g_aux_cb[1], !!g_aux_cb[2],
         !!g_final_mix_cb[0], !!g_final_mix_cb[1]);
-    LOG("[ax] GamePad aux cb %d%d%d, TV share already on the GamePad %.2f", !!g_drc.aux_cb[0], !!g_drc.aux_cb[1],
-        !!g_drc.aux_cb[2], g_merge.shared_fraction());
+    LOG("[ax] GamePad aux cb %d%d%d, host plays %s", !!g_drc.aux_cb[0], !!g_drc.aux_cb[1], !!g_drc.aux_cb[2],
+        g_output.play_drc ? (g_output.play_tv ? "TV + GamePad" : "GamePad") : "TV");
 }
 
 void process_voices() {
     log_stats();
     memset(g_tv_bus, 0, sizeof g_tv_bus);
     memset(g_drc_bus, 0, sizeof g_drc_bus);
-    memset(g_shared, 0, sizeof g_shared);
     float buf[kSamples];
     for (Voice& v : g_voices) {
         if (!v.acquired || v.state != 1) continue;
@@ -288,11 +286,6 @@ void process_voices() {
             for (int i = 0; i < kSamples; i++) g_sfx_energy += std::fabs(buf[i] / 256.0f) * tv;
         }
         auto& drc = g_drc.mix[&v - g_voices];
-        // before mix_into moves the ramps on: the voice's share on both devices (front L/R, main bus)
-        for (int c = 0; c < 2; c++) {
-            const ChMix &t = v.tv[c][0], &d = drc[c][0];
-            if ((t.vol || t.delta) && (d.vol || d.delta)) audio::mix_shared(buf, g_shared[c], kSamples, t.vol, t.delta, d.vol, d.delta);
-        }
         for (int c = 0; c < kTvChannels; c++)
             for (int b = 0; b < kBuses; b++)
                 if (v.tv[c][b].vol || v.tv[c][b].delta) mix_into(buf, g_tv_bus[b][c], v.tv[c][b]);
@@ -319,8 +312,7 @@ float g_up_hist[kTvChannels] = {};
 uint32_t g_drc_aux[2][kAuxBuses] = {};
 int g_drc_aux_idle[kAuxBuses] = {};  // frames without GamePad aux input (the effect is skipped)
 float g_drc_up_hist[kDrcChannels] = {};
-float g_post_hist[2][2][2] = {};  // upsampling after the final mix: [device][input, added][L/R]
-float g_shared_hist[2] = {};
+float g_post_hist[2][2] = {};  // upsampling after the final mix: [device][L/R]
 
 void init_buffers() {
     for (auto& f : G.aux)
@@ -338,10 +330,42 @@ void init_buffers() {
     G.drc_param = mem::runtime_alloc(0x10, 32);
     for (auto& f : g_drc_aux)
         for (auto& b : f) b = mem::host_alloc(4 * kDrcChannels * kSamples, 64);  // zeroed
-    if (const char* e = getenv("WWHD_AUDIO_OUTPUT"))
-        g_merge.source = !strcmp(e, "tv") ? audio::DeviceMerge::kTvOnly
-                         : !strcmp(e, "gamepad") ? audio::DeviceMerge::kDrcOnly
-                                                 : audio::DeviceMerge::kMerged;
+    g_output.source = audio::OutputSelect::parse(getenv("WWHD_AUDIO_OUTPUT"));
+}
+
+// The game's output mode, from its sound player's master faders (audio_output_mode.h): the player
+// is ((sound manager 1018EC64)->+0x10)->+4 (Snd_player 020307F8 -> 0202BF78 -> 0202BC80), its
+// TV fader at +0x194 and GamePad fader at +0x1AC (Player_fadeMaster 0202F14C).
+bool guest_obj(uint32_t a) { return a >= mem::kMem2Start && a < mem::kMem2End - 0x400 && !(a & 3); }
+bool read_game_faders(audio::Fader& tv, audio::Fader& drc) {
+    uint32_t mgr = ld32(0x1018EC64);
+    if (!guest_obj(mgr)) return false;
+    uint32_t x = ld32(mgr + 0x10);
+    if (!guest_obj(x)) return false;
+    uint32_t player = ld32(x + 4);
+    if (!guest_obj(player)) return false;
+    auto fader = [](uint32_t f) {
+        audio::Fader r;
+        uint32_t v = ld32(f), t = ld32(f + 4);
+        memcpy(&r.value, &v, 4);
+        memcpy(&r.target, &t, 4);
+        r.frames = ld32(f + 0xC);
+        return r;
+    };
+    tv = fader(player + 0x194);
+    drc = fader(player + 0x1AC);
+    return true;
+}
+
+void update_output_mode() {
+    audio::Fader tv, drc;
+    bool ok = read_game_faders(tv, drc);
+    bool before = g_output.play_drc;
+    g_output.update(ok, tv, drc);
+    static bool stats = getenv("WWHD_AX_STATS") != nullptr;
+    if (stats && g_output.play_drc != before)
+        LOG("[ax] host output: %s (TV fader %.2f -> %.2f, GamePad fader %.2f -> %.2f)",
+            g_output.play_drc ? "TV + GamePad (Off-TV Play)" : "TV", tv.value, tv.goal(), drc.value, drc.goal());
 }
 
 // a GamePad aux effect without input for this long has finished its tail: it is not called (in
@@ -364,7 +388,8 @@ void run_aux_callbacks(Cpu* c) {
     }
     for (int b = 0; b < kAuxBuses; b++) {
         uint32_t buf = g_drc_aux[out][b];
-        if (!g_drc.aux_cb[b] || g_drc_aux_idle[b] > kDrcAuxIdleFrames) {
+        // only while the host plays the GamePad mix (Off-TV Play), and not while idle
+        if (!g_drc.aux_cb[b] || !g_output.play_drc || g_drc_aux_idle[b] > kDrcAuxIdleFrames) {
             memset(mem::ptr(buf), 0, 4 * kDrcChannels * kSamples);
             continue;
         }
@@ -460,20 +485,16 @@ int final_mix_input(const int32_t (*in)[kSamples], int channels, uint32_t data, 
     return n;
 }
 
-// a device's front left/right at its final mix: the input (still in guest memory: call before the
-// callback) or, after the callback, what the callback added to it
-void final_mix_lr(uint32_t data, int n, int32_t lr[2][kSamples48], const int32_t (*sub)[kSamples48] = nullptr) {
-    for (int ch = 0; ch < 2; ch++)
-        for (int i = 0; i < n; i++) lr[ch][i] = (int32_t)ld32(data + 4 * (ch * n + i)) - (sub ? sub[ch][i] : 0);
-}
-
-// n samples at the final mix's rate -> 48 kHz (in place)
-void to48(int32_t lr[2][kSamples48], int n, float* hist) {
-    if (n == kSamples48) return;
+// a device's front left/right after its final mix, at 48 kHz
+void final_mix_lr(uint32_t data, int n, float* hist, int32_t lr[2][kSamples48]) {
     for (int ch = 0; ch < 2; ch++) {
-        int32_t in[kSamples];
-        memcpy(in, lr[ch], sizeof in);
-        upsample(in, lr[ch], hist[ch], 0);
+        if (n == kSamples48) {
+            for (int i = 0; i < kSamples48; i++) lr[ch][i] = (int32_t)ld32(data + 4 * (ch * n + i));
+        } else {
+            int32_t in[kSamples];
+            for (int i = 0; i < kSamples; i++) in[i] = (int32_t)ld32(data + 4 * (ch * n + i));
+            upsample(in, lr[ch], hist[ch], 0);
+        }
     }
 }
 
@@ -481,43 +502,20 @@ void output_frame(Cpu* c) {
     static int32_t tv[kTvChannels][kSamples], drc[kDrcChannels][kSamples];
     merge_tv(tv);
     merge_drc(drc);
-    // [device][L/R]: the final mix input, then what the callback added
-    int32_t in[2][2][kSamples48], add[2][2][kSamples48];
     int n_tv = final_mix_input(tv, kTvChannels, G.tv48, g_upsample_stage[0] == 0, g_up_hist);
-    final_mix_lr(G.tv48, n_tv, in[0]);
     call_final_mix(c, 0, G.tv_param, G.tv_ptrs, G.tv48, kTvChannels, 1, n_tv);
-    final_mix_lr(G.tv48, n_tv, add[0], in[0]);
-    // GamePad: DRC 0 mixed, DRC 1 silent (data: 4 channels of DRC 0, then 4 of DRC 1)
+    // GamePad: DRC 0 mixed, DRC 1 silent (data: 4 channels of DRC 0, then 4 of DRC 1). Its final-mix
+    // callback runs in every mode: the game's stream mixer keeps its GamePad position there.
     int n_drc = final_mix_input(drc, kDrcChannels, G.drc48, g_upsample_stage[1] == 0, g_drc_up_hist);
     memset(mem::ptr(G.drc48 + 4 * kDrcChannels * n_drc), 0, 4 * kDrcChannels * n_drc);
-    final_mix_lr(G.drc48, n_drc, in[1]);
     call_final_mix(c, 1, G.drc_param, G.drc_ptrs, G.drc48, kDrcChannels, 2, n_drc);
-    final_mix_lr(G.drc48, n_drc, add[1], in[1]);
-    for (int d = 0; d < 2; d++) {
-        int n = d ? n_drc : n_tv;
-        to48(in[d], n, g_post_hist[d][0]);
-        to48(add[d], n, g_post_hist[d][1]);
-    }
-    int32_t shared[2][kSamples48];
-    for (int ch = 0; ch < 2; ch++) {
-        int32_t s32[kSamples];
-        for (int i = 0; i < kSamples; i++) s32[i] = (int32_t)std::clamp(g_shared[ch][i], -2147483648.0f, 2147483520.0f);
-        upsample(s32, shared[ch], g_shared_hist[ch], 8);
-    }
 
-    // stereo out at 48 kHz (both devices are in stereo mode: front left/right): both devices, every
-    // sound once (audio_device_merge.h). The voices' share on both is taken out exactly; what the
-    // final-mix callbacks added (streams) is merged from the two signals.
-    int32_t added[2][kSamples48], lr[2][kSamples48];
-    g_merge.merge(add[0][0], add[0][1], add[1][0], add[1][1], kSamples48, added[0], added[1]);
-    for (int ch = 0; ch < 2; ch++)
-        for (int i = 0; i < kSamples48; i++) {
-            switch (g_merge.source) {
-            case audio::DeviceMerge::kTvOnly: lr[ch][i] = in[0][ch][i] + add[0][ch][i]; break;
-            case audio::DeviceMerge::kDrcOnly: lr[ch][i] = in[1][ch][i] + add[1][ch][i]; break;
-            default: lr[ch][i] = in[0][ch][i] + in[1][ch][i] - shared[ch][i] + added[ch][i]; break;
-            }
-        }
+    // stereo out at 48 kHz (both devices are in stereo mode: front left/right): the TV, plus the
+    // GamePad in Off-TV Play (audio_output_mode.h)
+    int32_t tv_lr[2][kSamples48], drc_lr[2][kSamples48], lr[2][kSamples48];
+    final_mix_lr(G.tv48, n_tv, g_post_hist[0], tv_lr);
+    final_mix_lr(G.drc48, n_drc, g_post_hist[1], drc_lr);
+    g_output.mix(tv_lr[0], tv_lr[1], drc_lr[0], drc_lr[1], kSamples48, lr[0], lr[1]);
     int16_t pcm[kSamples48 * 2];
     for (int i = 0; i < kSamples48; i++) {
         pcm[i * 2] = (int16_t)std::clamp(lr[0][i], -32768, 32767);
@@ -542,6 +540,7 @@ void frame_thread() {
             process_voices();
         }
         bool took = threads::ensure_core();  // callbacks run guest code
+        update_output_mode();  // the game's faders: TV, or TV + GamePad (Off-TV Play)
         run_aux_callbacks(c);
         uint32_t cbs[64];
         {
@@ -615,9 +614,7 @@ void ax_ss_load(ss::Reader& r) {
     memset(g_up_hist, 0, sizeof g_up_hist);
     memset(g_drc_up_hist, 0, sizeof g_drc_up_hist);
     memset(g_post_hist, 0, sizeof g_post_hist);
-    memset(g_shared_hist, 0, sizeof g_shared_hist);
     memset(g_drc_aux_idle, 0, sizeof g_drc_aux_idle);
-    g_merge.reset();
     audio::flush();
 }
 
