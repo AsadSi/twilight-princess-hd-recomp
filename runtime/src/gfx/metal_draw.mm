@@ -895,6 +895,28 @@ static Surface* hires_surface(Surface& dst, const Surface* like) {
         dst.mips = 1;
         dst.sx = (float)pw / w;
         dst.sy = (float)ph / h;
+        // private textures start with undefined contents and every pass on them loads: clear once
+        // (colour 0, depth 1) so nothing the redraw doesn't cover reads leftover GPU memory
+        end_encoder();
+        MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        if (dst.fmt.depth) {
+            rp.depthAttachment.texture = dst.tex;
+            rp.depthAttachment.loadAction = MTLLoadActionClear;
+            rp.depthAttachment.clearDepth = 1.0;
+            rp.depthAttachment.storeAction = MTLStoreActionStore;
+            if (dst.fmt.stencil) {
+                rp.stencilAttachment.texture = dst.tex;
+                rp.stencilAttachment.loadAction = MTLLoadActionClear;
+                rp.stencilAttachment.clearStencil = 0;
+                rp.stencilAttachment.storeAction = MTLStoreActionStore;
+            }
+        } else {
+            rp.colorAttachments[0].texture = dst.tex;
+            rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+            rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
+            rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        }
+        [[command_buffer() renderCommandEncoderWithDescriptor:rp] endEncoding];
     }
     return &dst;
 }
