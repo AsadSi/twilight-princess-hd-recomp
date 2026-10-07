@@ -1,9 +1,11 @@
 // snd_core (AX): voices, the 3 ms audio frame, mixing and output.
 //
 // Every frame (96 samples at 32 kHz) each playing voice is decoded (ADPCM/PCM16/PCM8),
-// resampled, run through its volume envelope and filters and mixed into the TV buses
-// (main + 3 aux). The game's aux effects (reverb...) and final-mix callbacks run on the
-// result, which is upsampled to 48 kHz and sent to the host as stereo.
+// resampled, run through its volume envelope and filters and mixed into the buses (main + 3 aux)
+// of two devices: the TV and the (first) GamePad, each with its own device mix per voice. The
+// game's aux effects (reverb...) and final-mix callbacks run on each device's result, which is
+// upsampled to 48 kHz; the host hears both devices merged into one stereo output, every sound
+// once (audio_device_merge.h: in Off-TV Play the game moves all sound to the GamePad).
 // Behaviour follows Cemu's snd_core (ax_mix.cpp, ax_ist.cpp, ax_aux.cpp).
 #include "../platform/host.h"
 
@@ -11,10 +13,12 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+#include "../audio_device_merge.h"
 #include "../audio_out.h"
 #include "../runtime.h"
 
@@ -71,6 +75,7 @@ struct Voice {
     float bq_xn1 = 0, bq_xn2 = 0, bq_yn1 = 0, bq_yn2 = 0;
     // TV device mix: [channel][bus]
     ChMix tv[kTvChannels][kBuses];
+    // (the GamePad device mix is g_drc.mix: Voice keeps its layout in save states)
 };
 
 std::mutex g_ax_mutex;
@@ -82,6 +87,16 @@ uint32_t g_aux_cb[kAuxBuses] = {}, g_aux_user[kAuxBuses] = {};
 uint16_t g_aux_return[kAuxBuses] = {0x8000, 0x8000, 0x8000};
 uint32_t g_upsample_stage[3] = {};  // 0 = before final mix (final mix sees 48 kHz)
 std::atomic<bool> g_running{false};
+
+// GamePad (DRC 0) device: per voice mix [channel L, R, SL, SR][bus], aux callbacks and returns.
+// A second GamePad (deviceIndex 1) is not mixed: the game drives one.
+struct DrcState {
+    ChMix mix[kMaxVoices][kDrcChannels][kBuses];
+    uint32_t aux_cb[kAuxBuses], aux_user[kAuxBuses];
+    uint16_t aux_return[kAuxBuses];
+};
+DrcState g_drc = {{}, {}, {}, {0x8000, 0x8000, 0x8000}};
+audio::DeviceMerge g_merge;  // what the final-mix callbacks add to the two devices -> host
 
 // ------------------------------------------------------------------ offsets
 uint32_t base_units(uint16_t fmt, uint32_t samples_ptr) {
@@ -209,6 +224,8 @@ void apply_lpf(Voice& v, float* s) {
 
 // ------------------------------------------------------------------ mixing
 float g_tv_bus[kBuses][kTvChannels][kSamples];
+float g_drc_bus[kBuses][kDrcChannels][kSamples];
+float g_shared[2][kSamples];  // L/R: what voices play on both devices' main buses (taken out once)
 double g_sfx_energy = 0;   // stats: output of non-stream voices
 uint32_t g_sfx_started = 0;
 
@@ -249,11 +266,15 @@ void log_stats() {
     LOG("[ax] %d playing: adpcm %d pcm16 %d pcm8 %d | tap %d linear %d none %d | looping %d stream %d | aux cb %d%d%d final mix %d%d",
         n, fmt[0], fmt[1], fmt[2], filt[0], filt[1], filt[2], loops, streams, !!g_aux_cb[0], !!g_aux_cb[1], !!g_aux_cb[2],
         !!g_final_mix_cb[0], !!g_final_mix_cb[1]);
+    LOG("[ax] GamePad aux cb %d%d%d, TV share already on the GamePad %.2f", !!g_drc.aux_cb[0], !!g_drc.aux_cb[1],
+        !!g_drc.aux_cb[2], g_merge.shared_fraction());
 }
 
 void process_voices() {
     log_stats();
     memset(g_tv_bus, 0, sizeof g_tv_bus);
+    memset(g_drc_bus, 0, sizeof g_drc_bus);
+    memset(g_shared, 0, sizeof g_shared);
     float buf[kSamples];
     for (Voice& v : g_voices) {
         if (!v.acquired || v.state != 1) continue;
@@ -266,9 +287,18 @@ void process_voices() {
             for (int ch = 0; ch < 2; ch++) tv += v.tv[ch][0].vol / 32768.0f;
             for (int i = 0; i < kSamples; i++) g_sfx_energy += std::fabs(buf[i] / 256.0f) * tv;
         }
+        auto& drc = g_drc.mix[&v - g_voices];
+        // before mix_into moves the ramps on: the voice's share on both devices (front L/R, main bus)
+        for (int c = 0; c < 2; c++) {
+            const ChMix &t = v.tv[c][0], &d = drc[c][0];
+            if ((t.vol || t.delta) && (d.vol || d.delta)) audio::mix_shared(buf, g_shared[c], kSamples, t.vol, t.delta, d.vol, d.delta);
+        }
         for (int c = 0; c < kTvChannels; c++)
             for (int b = 0; b < kBuses; b++)
                 if (v.tv[c][b].vol || v.tv[c][b].delta) mix_into(buf, g_tv_bus[b][c], v.tv[c][b]);
+        for (int c = 0; c < kDrcChannels; c++)
+            for (int b = 0; b < kBuses; b++)
+                if (drc[c][b].vol || drc[c][b].delta) mix_into(buf, g_drc_bus[b][c], drc[c][b]);
         if (!v.state) st32(v.vpb + kVpbState, 0);
         st32(v.vpb + kVpbOffsets + 0xC, v.cur_abs - base_units(v.format, v.samples));
     }
@@ -283,6 +313,14 @@ struct GuestBuffers {
 } G;
 int g_aux_frame = 0;
 float g_up_hist[kTvChannels] = {};
+// GamePad aux buffers (per aux frame and bus: 4 channels x 96 int32). Host scratch memory, not
+// runtime_alloc: they only carry one frame to the next, and new runtime objects would change the
+// layout that save states check.
+uint32_t g_drc_aux[2][kAuxBuses] = {};
+int g_drc_aux_idle[kAuxBuses] = {};  // frames without GamePad aux input (the effect is skipped)
+float g_drc_up_hist[kDrcChannels] = {};
+float g_post_hist[2][2][2] = {};  // upsampling after the final mix: [device][input, added][L/R]
+float g_shared_hist[2] = {};
 
 void init_buffers() {
     for (auto& f : G.aux)
@@ -298,7 +336,17 @@ void init_buffers() {
     G.drc48 = mem::runtime_alloc(4 * kDrcChannels * 2 * kSamples48, 64);
     G.drc_ptrs = mem::runtime_alloc(4 * kDrcChannels * 2, 32);
     G.drc_param = mem::runtime_alloc(0x10, 32);
+    for (auto& f : g_drc_aux)
+        for (auto& b : f) b = mem::host_alloc(4 * kDrcChannels * kSamples, 64);  // zeroed
+    if (const char* e = getenv("WWHD_AUDIO_OUTPUT"))
+        g_merge.source = !strcmp(e, "tv") ? audio::DeviceMerge::kTvOnly
+                         : !strcmp(e, "gamepad") ? audio::DeviceMerge::kDrcOnly
+                                                 : audio::DeviceMerge::kMerged;
 }
+
+// a GamePad aux effect without input for this long has finished its tail: it is not called (in
+// TV play the GamePad buses are mostly silent; this keeps their effects from costing guest time)
+constexpr int kDrcAuxIdleFrames = 1000;  // 3 s
 
 // aux effects run one frame behind: process the buffers stored last frame
 void run_aux_callbacks(Cpu* c) {
@@ -314,6 +362,17 @@ void run_aux_callbacks(Cpu* c) {
         st32(G.aux_info + 4, kSamples);
         guest_call(c, g_aux_cb[b], {G.aux_ptrs, g_aux_user[b], G.aux_info});
     }
+    for (int b = 0; b < kAuxBuses; b++) {
+        uint32_t buf = g_drc_aux[out][b];
+        if (!g_drc.aux_cb[b] || g_drc_aux_idle[b] > kDrcAuxIdleFrames) {
+            memset(mem::ptr(buf), 0, 4 * kDrcChannels * kSamples);
+            continue;
+        }
+        for (int ch = 0; ch < kDrcChannels; ch++) st32(G.aux_ptrs + 4 * ch, buf + 4 * ch * kSamples);
+        st32(G.aux_info, kDrcChannels);
+        st32(G.aux_info + 4, kSamples);
+        guest_call(c, g_drc.aux_cb[b], {G.aux_ptrs, g_drc.aux_user[b], G.aux_info});
+    }
 }
 
 void store_aux_input() {
@@ -322,6 +381,18 @@ void store_aux_input() {
         uint32_t buf = G.aux[g_aux_frame][b];
         for (int ch = 0; ch < kTvChannels; ch++)
             for (int i = 0; i < kSamples; i++) st32(buf + 4 * (ch * kSamples + i), (uint32_t)((int32_t)g_tv_bus[b + 1][ch][i] >> 8));
+    }
+    for (int b = 0; b < kAuxBuses; b++) {
+        if (!g_drc.aux_cb[b]) continue;
+        uint32_t buf = g_drc_aux[g_aux_frame][b];
+        bool any = false;
+        for (int ch = 0; ch < kDrcChannels; ch++)
+            for (int i = 0; i < kSamples; i++) {
+                int32_t s = (int32_t)g_drc_bus[b + 1][ch][i] >> 8;
+                any |= s != 0;
+                st32(buf + 4 * (ch * kSamples + i), (uint32_t)s);
+            }
+        g_drc_aux_idle[b] = any ? 0 : std::min(g_drc_aux_idle[b] + 1, kDrcAuxIdleFrames + 1);
     }
 }
 
@@ -333,6 +404,19 @@ void merge_tv(int32_t out[kTvChannels][kSamples]) {
             float s = g_tv_bus[0][ch][i];
             for (int b = 0; b < kAuxBuses; b++)
                 if (g_aux_cb[b]) s += (float)((int32_t)ld32(G.aux[in][b] + 4 * (ch * kSamples + i)) << 8) * (g_aux_return[b] / 32768.0f);
+            out[ch][i] = (int32_t)std::clamp(s, -2147483648.0f, 2147483520.0f);
+        }
+}
+
+// the same for the GamePad
+void merge_drc(int32_t out[kDrcChannels][kSamples]) {
+    int in = 1 - g_aux_frame;
+    for (int ch = 0; ch < kDrcChannels; ch++)
+        for (int i = 0; i < kSamples; i++) {
+            float s = g_drc_bus[0][ch][i];
+            for (int b = 0; b < kAuxBuses; b++)
+                if (g_drc.aux_cb[b])
+                    s += (float)((int32_t)ld32(g_drc_aux[in][b] + 4 * (ch * kSamples + i)) << 8) * (g_drc.aux_return[b] / 32768.0f);
             out[ch][i] = (int32_t)std::clamp(s, -2147483648.0f, 2147483520.0f);
         }
 }
@@ -360,39 +444,81 @@ void call_final_mix(Cpu* c, int dev, uint32_t param, uint32_t ptrs, uint32_t dat
     if (g_final_mix_cb[dev]) guest_call(c, g_final_mix_cb[dev], {param});
 }
 
-void output_frame(Cpu* c) {
-    static int32_t tv[kTvChannels][kSamples];
-    merge_tv(tv);
-    bool before = g_upsample_stage[0] == 0;
+// a device's final-mix input: its merged buses as s16-range int32 per channel, at 48 kHz when the
+// device upsamples before the final mix; returns the samples per channel
+int final_mix_input(const int32_t (*in)[kSamples], int channels, uint32_t data, bool before, float* hist) {
     int n = before ? kSamples48 : kSamples;
-    // final mix input: s16-range int32 per channel
-    for (int ch = 0; ch < kTvChannels; ch++) {
+    for (int ch = 0; ch < channels; ch++) {
         if (before) {
             int32_t tmp[kSamples48];
-            upsample(tv[ch], tmp, g_up_hist[ch], 8);
-            for (int i = 0; i < n; i++) st32(G.tv48 + 4 * (ch * n + i), (uint32_t)tmp[i]);
+            upsample(in[ch], tmp, hist[ch], 8);
+            for (int i = 0; i < n; i++) st32(data + 4 * (ch * n + i), (uint32_t)tmp[i]);
         } else {
-            for (int i = 0; i < n; i++) st32(G.tv48 + 4 * (ch * n + i), (uint32_t)(tv[ch][i] >> 8));
+            for (int i = 0; i < n; i++) st32(data + 4 * (ch * n + i), (uint32_t)(in[ch][i] >> 8));
         }
     }
-    call_final_mix(c, 0, G.tv_param, G.tv_ptrs, G.tv48, kTvChannels, 1, n);
-    // DRC: not output; the game still gets its callback with silence
-    memset(mem::ptr(G.drc48), 0, 4 * kDrcChannels * 2 * n);
-    call_final_mix(c, 1, G.drc_param, G.drc_ptrs, G.drc48, kDrcChannels, 2, n);
+    return n;
+}
 
-    // stereo out at 48 kHz (TV mode is stereo: front left/right)
-    int16_t pcm[kSamples48 * 2];
-    int32_t lr[2][kSamples48];
+// a device's front left/right at its final mix: the input (still in guest memory: call before the
+// callback) or, after the callback, what the callback added to it
+void final_mix_lr(uint32_t data, int n, int32_t lr[2][kSamples48], const int32_t (*sub)[kSamples48] = nullptr) {
+    for (int ch = 0; ch < 2; ch++)
+        for (int i = 0; i < n; i++) lr[ch][i] = (int32_t)ld32(data + 4 * (ch * n + i)) - (sub ? sub[ch][i] : 0);
+}
+
+// n samples at the final mix's rate -> 48 kHz (in place)
+void to48(int32_t lr[2][kSamples48], int n, float* hist) {
+    if (n == kSamples48) return;
     for (int ch = 0; ch < 2; ch++) {
-        if (before) {
-            for (int i = 0; i < kSamples48; i++) lr[ch][i] = (int32_t)ld32(G.tv48 + 4 * (ch * n + i));
-        } else {
-            static float hist2[2];
-            int32_t in[kSamples];
-            for (int i = 0; i < kSamples; i++) in[i] = (int32_t)ld32(G.tv48 + 4 * (ch * n + i));
-            upsample(in, lr[ch], hist2[ch], 0);
-        }
+        int32_t in[kSamples];
+        memcpy(in, lr[ch], sizeof in);
+        upsample(in, lr[ch], hist[ch], 0);
     }
+}
+
+void output_frame(Cpu* c) {
+    static int32_t tv[kTvChannels][kSamples], drc[kDrcChannels][kSamples];
+    merge_tv(tv);
+    merge_drc(drc);
+    // [device][L/R]: the final mix input, then what the callback added
+    int32_t in[2][2][kSamples48], add[2][2][kSamples48];
+    int n_tv = final_mix_input(tv, kTvChannels, G.tv48, g_upsample_stage[0] == 0, g_up_hist);
+    final_mix_lr(G.tv48, n_tv, in[0]);
+    call_final_mix(c, 0, G.tv_param, G.tv_ptrs, G.tv48, kTvChannels, 1, n_tv);
+    final_mix_lr(G.tv48, n_tv, add[0], in[0]);
+    // GamePad: DRC 0 mixed, DRC 1 silent (data: 4 channels of DRC 0, then 4 of DRC 1)
+    int n_drc = final_mix_input(drc, kDrcChannels, G.drc48, g_upsample_stage[1] == 0, g_drc_up_hist);
+    memset(mem::ptr(G.drc48 + 4 * kDrcChannels * n_drc), 0, 4 * kDrcChannels * n_drc);
+    final_mix_lr(G.drc48, n_drc, in[1]);
+    call_final_mix(c, 1, G.drc_param, G.drc_ptrs, G.drc48, kDrcChannels, 2, n_drc);
+    final_mix_lr(G.drc48, n_drc, add[1], in[1]);
+    for (int d = 0; d < 2; d++) {
+        int n = d ? n_drc : n_tv;
+        to48(in[d], n, g_post_hist[d][0]);
+        to48(add[d], n, g_post_hist[d][1]);
+    }
+    int32_t shared[2][kSamples48];
+    for (int ch = 0; ch < 2; ch++) {
+        int32_t s32[kSamples];
+        for (int i = 0; i < kSamples; i++) s32[i] = (int32_t)std::clamp(g_shared[ch][i], -2147483648.0f, 2147483520.0f);
+        upsample(s32, shared[ch], g_shared_hist[ch], 8);
+    }
+
+    // stereo out at 48 kHz (both devices are in stereo mode: front left/right): both devices, every
+    // sound once (audio_device_merge.h). The voices' share on both is taken out exactly; what the
+    // final-mix callbacks added (streams) is merged from the two signals.
+    int32_t added[2][kSamples48], lr[2][kSamples48];
+    g_merge.merge(add[0][0], add[0][1], add[1][0], add[1][1], kSamples48, added[0], added[1]);
+    for (int ch = 0; ch < 2; ch++)
+        for (int i = 0; i < kSamples48; i++) {
+            switch (g_merge.source) {
+            case audio::DeviceMerge::kTvOnly: lr[ch][i] = in[0][ch][i] + add[0][ch][i]; break;
+            case audio::DeviceMerge::kDrcOnly: lr[ch][i] = in[1][ch][i] + add[1][ch][i]; break;
+            default: lr[ch][i] = in[0][ch][i] + in[1][ch][i] - shared[ch][i] + added[ch][i]; break;
+            }
+        }
+    int16_t pcm[kSamples48 * 2];
     for (int i = 0; i < kSamples48; i++) {
         pcm[i * 2] = (int16_t)std::clamp(lr[0][i], -32768, 32767);
         pcm[i * 2 + 1] = (int16_t)std::clamp(lr[1][i], -32768, 32767);
@@ -459,6 +585,7 @@ void ax_ss_save(ss::Writer& w) {
     w.pod(g_upsample_stage);
     w.pod(G);
     w.u32((uint32_t)g_aux_frame);
+    w.pod(g_drc);  // added later: states without it load with a silent GamePad mix
 }
 bool ax_ss_check(ss::Reader r, std::string& why) {
     bool running = r.u8();
@@ -483,7 +610,14 @@ void ax_ss_load(ss::Reader& r) {
     GuestBuffers g = r.pod<GuestBuffers>();
     if (G.tv48 && g.tv48 != G.tv48) LOG("[savestate] AX buffers moved (%08X -> %08X)", g.tv48, G.tv48);
     g_aux_frame = (int)r.u32() & 1;
+    g_drc = DrcState{{}, {}, {}, {0x8000, 0x8000, 0x8000}};
+    if (!r.at_end()) g_drc = r.pod<DrcState>();
     memset(g_up_hist, 0, sizeof g_up_hist);
+    memset(g_drc_up_hist, 0, sizeof g_drc_up_hist);
+    memset(g_post_hist, 0, sizeof g_post_hist);
+    memset(g_shared_hist, 0, sizeof g_shared_hist);
+    memset(g_drc_aux_idle, 0, sizeof g_drc_aux_idle);
+    g_merge.reset();
     audio::flush();
 }
 
@@ -493,6 +627,7 @@ HLE(snd_core, AXInit) {
     g_vpb_base = mem::runtime_alloc(kVpbSize * kMaxVoices, 32);
     for (int i = 0; i < kMaxVoices; i++) {
         g_voices[i] = Voice{};
+        memset(g_drc.mix[i], 0, sizeof g_drc.mix[i]);
         g_voices[i].vpb = g_vpb_base + i * kVpbSize;
         st32(g_voices[i].vpb + kVpbIndex, i);
     }
@@ -530,18 +665,27 @@ HLE(snd_core, AXGetDeviceFinalMixCallback) {
     ret(c, 0);
 }
 HLE(snd_core, AXRegisterAuxCallback) {
-    // (device, deviceIndex, auxBus, func, userParam); only the TV aux buses are mixed
-    uint32_t dev = arg(c, 0), bus = arg(c, 2);
-    LOG("[ax] aux callback: device %u index %u bus %u func %08X", dev, arg(c, 1), bus, arg(c, 3));
+    // (device, deviceIndex, auxBus, func, userParam); the TV's and the first GamePad's buses are mixed
+    uint32_t dev = arg(c, 0), idx = arg(c, 1), bus = arg(c, 2);
+    LOG("[ax] aux callback: device %u index %u bus %u func %08X", dev, idx, bus, arg(c, 3));
     if (bus >= kAuxBuses) { ret(c, (uint32_t)-5); return; }
     if (dev == 0) {
         g_aux_cb[bus] = arg(c, 3);
         g_aux_user[bus] = arg(c, 4);
+    } else if (dev == 1 && idx == 0) {
+        std::lock_guard<std::mutex> lk(g_ax_mutex);
+        g_drc.aux_cb[bus] = arg(c, 3);
+        g_drc.aux_user[bus] = arg(c, 4);
+        g_drc_aux_idle[bus] = 0;
     }
     ret(c, 0);
 }
 HLE(snd_core, AXSetAuxReturnVolume) {
-    if (arg(c, 0) == 0 && arg(c, 2) < kAuxBuses) g_aux_return[arg(c, 2)] = (uint16_t)arg(c, 3);
+    // (device, deviceIndex, auxBus, volume)
+    if (arg(c, 2) < kAuxBuses) {
+        if (arg(c, 0) == 0) g_aux_return[arg(c, 2)] = (uint16_t)arg(c, 3);
+        else if (arg(c, 0) == 1 && arg(c, 1) == 0) g_drc.aux_return[arg(c, 2)] = (uint16_t)arg(c, 3);
+    }
     ret(c, 0);
 }
 HLE(snd_core, AXGetDeviceMode) { if (arg(c, 1)) st32(arg(c, 1), 0); ret(c, 0); }  // stereo
@@ -675,6 +819,7 @@ HLE(snd_core, AXAcquireVoiceEx) {
         if (v.acquired) continue;
         uint32_t vpb = v.vpb;
         v = Voice{};
+        memset(g_drc.mix[&v - g_voices], 0, sizeof g_drc.mix[0]);
         v.vpb = vpb;
         v.acquired = true;
         st32(vpb + kVpbState, 0);
@@ -829,6 +974,15 @@ HLE(snd_core, AXSetVoiceDeviceMix) {
                 v->tv[ch][b].vol = ld16(e);
                 v->tv[ch][b].delta = (int16_t)ld16(e + 2);
             }
+    // GamePad: the game sets it for every voice (NW4F, 028A710C) and moves all sound here in
+    // Off-TV Play; the second GamePad (idx 1) is not mixed
+    if (dev == 1 && idx == 0)
+        for (int ch = 0; ch < kDrcChannels; ch++)
+            for (int b = 0; b < kBuses; b++) {
+                uint32_t e = mix + 4 * (ch * kBuses + b);
+                g_drc.mix[v - g_voices][ch][b].vol = ld16(e);
+                g_drc.mix[v - g_voices][ch][b].delta = (int16_t)ld16(e + 2);
+            }
     ret(c, 0);
 }
 HLE(snd_core, AXSetVoiceAdpcm) {
@@ -908,7 +1062,7 @@ HLE(snd_core, AXComputeLpfCoefs) {
     st16(arg(c, 1), 0x7FFF - r);
     st16(arg(c, 2), r);
 }
-// the remote speaker and voice priorities don't affect TV output
+// the remote speaker and voice priorities don't affect the output
 HLE(snd_core, AXSetVoicePriority) {
     ax_stat(14);}
 HLE(snd_core, AXSetVoiceMixerSelect) { ret(c, 0); }
