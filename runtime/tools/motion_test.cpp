@@ -17,6 +17,13 @@
 #include <thread>
 
 #ifdef _WIN32
+// (windows.h defines near and far as empty macros, min and max as macros)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -36,10 +43,36 @@ void log_msg(const char* fmt, ...) {
 }
 namespace mods { double game_time() { return 0; } }
 
-using namespace motion;
+// explicit names (no using-directive): nothing from the system headers can make them ambiguous
+using motion::Fusion;
+using motion::Quat;
+using motion::Settings;
+using motion::Tuning;
+using motion::Vec3;
+using motion::VpadMotion;
+using motion::controller_gone;
+using motion::controller_sample;
+using motion::from_dsu;
+using motion::from_sdl;
+using motion::kCemuhook;
+using motion::kController;
+using motion::kMouse;
+using motion::kOff;
+using motion::mouse_drives_gyro;
+using motion::mouse_motion;
+using motion::mouse_rate;
+using motion::poll_recenter;
+using motion::recenter;
+using motion::set_aiming;
+using motion::set_settings;
+using motion::status;
+using motion::to_ini;
+using motion::from_kv;
+using motion::vpad;
+using motion::wants_controller_sensors;
 static constexpr float kPi = 3.14159265358979f;
-static bool near(float a, float b, float tol = 0.03f) { return std::fabs(a - b) < tol; }
-static bool near(Vec3 a, Vec3 b, float tol = 0.03f) { return near(a.x, b.x, tol) && near(a.y, b.y, tol) && near(a.z, b.z, tol); }
+static bool close_to(float a, float b, float tol = 0.03f) { return std::fabs(a - b) < tol; }
+static bool close_to(Vec3 a, Vec3 b, float tol = 0.03f) { return close_to(a.x, b.x, tol) && close_to(a.y, b.y, tol) && close_to(a.z, b.z, tol); }
 static void print(const char* what, Vec3 v) { fprintf(stderr, "  %s = (%.3f, %.3f, %.3f)\n", what, v.x, v.y, v.z); }
 
 // a physical motion of a controller, as SDL reports it: rotation rate (rad/s, SDL frame) and gravity
@@ -92,11 +125,11 @@ static void test_recorded_poses() {
     {
         Controller c;
         VpadMotion m = c.f.vpad();
-        assert(near(m.dir[0], {1, 0, 0}) && near(m.dir[1], {0, 1, 0}) && near(m.dir[2], {0, 0, 1}));
+        assert(close_to(m.dir[0], {1, 0, 0}) && close_to(m.dir[1], {0, 1, 0}) && close_to(m.dir[2], {0, 0, 1}));
         c.rest(0.1f);
         m = c.f.vpad();
-        assert(near(m.acc, {0, -1, 0}) && near(m.acc_magnitude, 1));
-        assert(near(m.dir[0], {1, 0, 0}) && near(m.dir[1], {0, 1, 0}) && near(m.dir[2], {0, 0, 1}));
+        assert(close_to(m.acc, {0, -1, 0}) && close_to(m.acc_magnitude, 1));
+        assert(close_to(m.dir[0], {1, 0, 0}) && close_to(m.dir[1], {0, 1, 0}) && close_to(m.dir[2], {0, 0, 1}));
     }
     for (bool dsu : {false, true}) {
         // flat, turned 45 degrees to the right: x (0.71, -0.03, 0.71), z (-0.70, 0.14, 0.70)
@@ -104,7 +137,7 @@ static void test_recorded_poses() {
         c.turn({0, -1, 0}, 45, 0.5f, dsu);  // SDL yaw is counter-clockwise seen from above: right = negative
         VpadMotion m = c.f.vpad();
         print("right 45: dir x", m.dir[0]);
-        assert(near(m.dir[0], {0.71f, 0, 0.71f}, 0.05f) && near(m.dir[1], {0, 1, 0}, 0.05f) && near(m.dir[2], {-0.71f, 0, 0.71f}, 0.05f));
+        assert(close_to(m.dir[0], {0.71f, 0, 0.71f}, 0.05f) && close_to(m.dir[1], {0, 1, 0}, 0.05f) && close_to(m.dir[2], {-0.71f, 0, 0.71f}, 0.05f));
         assert(m.gyro.y < 0 || m.gyro.y > 0);  // a rate is reported
     }
     {
@@ -113,11 +146,11 @@ static void test_recorded_poses() {
         c.turn({1, 0, 0}, 90, 0.5f);
         VpadMotion m = c.f.vpad();
         print("up 90: dir y", m.dir[1]);
-        assert(near(m.dir[0], {1, 0, 0}, 0.05f) && near(m.dir[1], {0, 0, -1}, 0.05f) && near(m.dir[2], {0, 1, 0}, 0.05f));
+        assert(close_to(m.dir[0], {1, 0, 0}, 0.05f) && close_to(m.dir[1], {0, 0, -1}, 0.05f) && close_to(m.dir[2], {0, 1, 0}, 0.05f));
         // acc (specific force, up): flat it is -y (y points into the table), now -z (z, towards the
         // holder, points down)
         print("up 90: acc", m.acc);
-        assert(near(m.acc, {0, 0, -1}, 0.05f));
+        assert(close_to(m.acc, {0, 0, -1}, 0.05f));
     }
     {
         // leaned 45 degrees on its left side: x (0.66, -0.75, -0.03), y (0.74, 0.66, -0.11)
@@ -125,7 +158,7 @@ static void test_recorded_poses() {
         c.turn({0, 0, 1}, 45, 0.5f);
         VpadMotion m = c.f.vpad();
         print("left side 45: dir x", m.dir[0]);
-        assert(near(m.dir[0], {0.71f, -0.71f, 0}, 0.06f) && near(m.dir[1], {0.71f, 0.71f, 0}, 0.06f));
+        assert(close_to(m.dir[0], {0.71f, -0.71f, 0}, 0.06f) && close_to(m.dir[1], {0.71f, 0.71f, 0}, 0.06f));
     }
 }
 
@@ -140,7 +173,7 @@ static void test_game_reading() {
         g.frame(c.f.vpad());
         for (int i = 0; i < 30; i++) { c.turn({0, -1, 0}, 1, 1.0f / 30); g.frame(c.f.vpad()); }
         flat_yaw = g.yaw;
-        assert(near(g.pitch, 0, 0.05f));
+        assert(close_to(g.pitch, 0, 0.05f));
     }
     {
         Controller c;
@@ -155,14 +188,14 @@ static void test_game_reading() {
     }
     fprintf(stderr, "  game yaw input for 30 degrees right: flat %.3f, upright %.3f\n", flat_yaw, upright_yaw);
     assert(std::fabs(flat_yaw) > 0.5f * 30 * 30 * kPi / 180 && flat_yaw * upright_yaw > 0);
-    assert(near(flat_yaw, upright_yaw, 0.1f * std::fabs(flat_yaw)));
+    assert(close_to(flat_yaw, upright_yaw, 0.1f * std::fabs(flat_yaw)));
     {
         Controller c;
         Game g;
         g.frame(c.f.vpad());
         for (int i = 0; i < 30; i++) { c.turn({1, 0, 0}, 1, 1.0f / 30); g.frame(c.f.vpad()); }
         fprintf(stderr, "  game pitch input for 30 degrees up: %.3f\n", g.pitch);
-        assert(std::fabs(std::fabs(g.pitch) - 30 * 30 * kPi / 180) < 1.0f && near(g.yaw, 0, 0.05f));
+        assert(std::fabs(std::fabs(g.pitch) - 30 * 30 * kPi / 180) < 1.0f && close_to(g.yaw, 0, 0.05f));
         g_up_pitch = g.pitch;
     }
     {
@@ -173,7 +206,7 @@ static void test_game_reading() {
         Game g;
         g.frame(c.f.vpad());
         for (int i = 0; i < 30; i++) { c.turn({0, -1, 0}, 0.5f, 1.0f / 30); g.frame(c.f.vpad()); }
-        assert(near(g.yaw, flat_yaw, 0.08f * std::fabs(flat_yaw)));
+        assert(close_to(g.yaw, flat_yaw, 0.08f * std::fabs(flat_yaw)));
         for (int i = 0; i < 30; i++) { c.turn({1, 0, 0}, 1, 1.0f / 30); g.frame(c.f.vpad()); }
         assert(g.pitch * g_up_pitch < 0 && std::fabs(g.pitch) > 0.8f * std::fabs(g_up_pitch));
         c.t.invert_x = true;
@@ -199,20 +232,20 @@ static void test_bias_and_noise() {
     }
     print("bias", c.f.bias());
     assert(c.f.calibrated());
-    assert(near(c.f.bias(), {bias_sdl.x, -bias_sdl.y, -bias_sdl.z}, 0.005f));
+    assert(close_to(c.f.bias(), {bias_sdl.x, -bias_sdl.y, -bias_sdl.z}, 0.005f));
     VpadMotion m = c.f.vpad();
-    assert(near(m.gyro, {0, 0, 0}, 0.002f));
+    assert(close_to(m.gyro, {0, 0, 0}, 0.002f));
     fprintf(stderr, "  drift over the last second: yaw %.4f pitch %.4f\n", g.yaw, g.pitch);
     assert(std::fabs(g.yaw) < 0.05f && std::fabs(g.pitch) < 0.05f);
     // slow aiming after calibration does not move the bias
     Vec3 b = c.f.bias();
     c.turn({0, -1, 0}, 20, 2.0f);  // 10 deg/s
-    assert(near(c.f.bias(), b, 0.002f));
+    assert(close_to(c.f.bias(), b, 0.002f));
     // recenter: forward again, tilt kept
     c.turn({1, 0, 0}, 20, 0.2f);
     c.f.recenter();
     m = c.f.vpad();
-    assert(near(m.dir[0], {1, 0, 0}, 0.05f) && near(m.angle, {0, 0, 0}, 1e-4f));
+    assert(close_to(m.dir[0], {1, 0, 0}, 0.05f) && close_to(m.angle, {0, 0, 0}, 1e-4f));
 }
 
 static void test_mouse() {
@@ -231,7 +264,7 @@ static void test_mouse() {
     Game gc;
     gc.frame(c.f.vpad());
     for (int i = 0; i < 30; i++) { c.turn({0, -1, 0}, 1, 1.0f / 30); gc.frame(c.f.vpad()); }
-    assert(near(g.yaw, gc.yaw, 0.05f * std::fabs(gc.yaw)));
+    assert(close_to(g.yaw, gc.yaw, 0.05f * std::fabs(gc.yaw)));
     float yaw = g.yaw;
     for (int i = 0; i < 30; i++) {
         Vec3 w = mouse_rate(f.orientation(), 0, -10, 1.0f / 30, 0.1f);  // up
@@ -239,10 +272,10 @@ static void test_mouse() {
         g.frame(f.vpad());
     }
     fprintf(stderr, "  mouse: 300 points up -> game pitch %.3f\n", g.pitch);
-    assert(near(g.pitch, g_up_pitch, 0.05f * std::fabs(g_up_pitch)) && near(g.yaw, yaw, 0.1f));
+    assert(close_to(g.pitch, g_up_pitch, 0.05f * std::fabs(g_up_pitch)) && close_to(g.yaw, yaw, 0.1f));
     // the mouse source has no accelerometer: acc follows the pose
     VpadMotion m = f.vpad();
-    assert(near(m.acc_magnitude, 1, 0.01f));
+    assert(close_to(m.acc_magnitude, 1, 0.01f));
 }
 
 static void test_dsu_packets() {
@@ -392,7 +425,7 @@ static void test_settings_and_sources() {
     vpad(false);
     mouse_motion(100, 0);
     VpadMotion a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-4f));  // not aiming: ignored
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-4f));  // not aiming: ignored
     assert(!mouse_drives_gyro());
     set_aiming(true);
     assert(mouse_drives_gyro());
@@ -400,24 +433,24 @@ static void test_settings_and_sources() {
     mouse_motion(100, 0);  // 10 degrees right
     a = vpad(false);
     print("mouse 10 deg: dir x", a.dir[0]);
-    assert(near(a.dir[0], {std::cos(10 * kPi / 180), 0, std::sin(10 * kPi / 180)}, 0.01f));
+    assert(close_to(a.dir[0], {std::cos(10 * kPi / 180), 0, std::sin(10 * kPi / 180)}, 0.01f));
     VpadMotion b = vpad(true);  // a repeated read repeats
-    assert(near(b.dir[0], a.dir[0], 1e-6f));
+    assert(close_to(b.dir[0], a.dir[0], 1e-6f));
     recenter();
     a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-3f));
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-3f));
     // recenter binding: rising edge only
     m.recenter_key = 15;
     set_settings(m);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     mouse_motion(100, 0);
     a = vpad(false);
-    assert(!near(a.dir[0], {1, 0, 0}, 1e-3f));
+    assert(!close_to(a.dir[0], {1, 0, 0}, 1e-3f));
     bool keys[256] = {};
     keys[15] = true;
     poll_recenter(nullptr, keys);
     a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-3f));
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-3f));
     set_aiming(false);
     // the controller source: samples from SDL, the latest active controller wins
     Settings c;
@@ -429,10 +462,10 @@ static void test_settings_and_sources() {
     vpad(false);
     for (int i = 0; i < 100; i++) controller_sample(42, t += 4000000, g, acc);  // 0.4 s: 36 degrees
     a = vpad(false);
-    assert(near(a.dir[0], {std::cos(36 * kPi / 180), 0, std::sin(36 * kPi / 180)}, 0.03f));
+    assert(close_to(a.dir[0], {std::cos(36 * kPi / 180), 0, std::sin(36 * kPi / 180)}, 0.03f));
     controller_gone(42);
     a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-4f));  // gone: at rest
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-4f));  // gone: at rest
     // the Cemuhook source starts and stops its client (no server on port 9: it keeps asking)
     Settings d;
     d.source = kCemuhook;
@@ -444,13 +477,13 @@ static void test_settings_and_sources() {
     d.dsu_port = 10;
     set_settings(d);  // restarts on the new port
     a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-4f));
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-4f));
     set_settings(Settings{});
     assert(status().rfind("Gyro off", 0) == 0);
     assert(!wants_controller_sensors());
     for (int i = 0; i < 10; i++) controller_sample(42, t += 4000000, g, acc);
     a = vpad(false);
-    assert(near(a.dir[0], {1, 0, 0}, 1e-4f));  // off: ignored
+    assert(close_to(a.dir[0], {1, 0, 0}, 1e-4f));  // off: ignored
 }
 
 int main() {

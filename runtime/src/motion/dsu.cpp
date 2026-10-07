@@ -7,14 +7,23 @@
 #include <cstring>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 using socket_t = SOCKET;
 static constexpr socket_t kNoSocket = INVALID_SOCKET;
 static void close_socket(socket_t s) { closesocket(s); }
 #else
+#include <cerrno>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
 using socket_t = int;
@@ -196,7 +205,18 @@ void Client::run(std::string host, uint16_t port, uint8_t slot) {
             addr_len = (socklen_t)res->ai_addrlen;
             s = socket(res->ai_family, SOCK_DGRAM, IPPROTO_UDP);
             freeaddrinfo(res);
-            if (s == kNoSocket) { set_status("no socket"); continue; }
+            if (s == kNoSocket) {
+#ifdef __ANDROID__
+                // the Android app does not ask for the INTERNET permission (docs/gyro.md): no sockets
+                if (errno == EACCES || errno == EPERM) {
+                    set_status("unavailable: the Android app has no network permission");
+                    next_resolve = t + 60000;
+                    continue;
+                }
+#endif
+                set_status("no socket");
+                continue;
+            }
 #ifdef _WIN32
             DWORD tv = 100;
             setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
