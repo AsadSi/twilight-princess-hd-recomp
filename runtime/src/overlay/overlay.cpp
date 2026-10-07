@@ -38,19 +38,13 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
 #include "../rumble.h"
+#include "../interp.h"
 #include "../runtime.h"
 #include "../savestate.h"
 #include "../render_prof.h"
 #include "../build_info.h"
 #include "../report_header.h"
 
-namespace interp {
-int mode();  // 0 off, 1 frame interpolation, 2 true 60
-void set_mode(int m);
-bool paced_interpolation();  // 60 fps frame interpolation keeps the game's speed (skips in-between frames)
-void set_paced_interpolation(bool on);
-float paced_drawn_share();  // share of in-between frames drawn lately (paced and on), -1 otherwise
-}
 namespace gx2 { uint64_t flips_presented(); }
 
 namespace overlay {
@@ -517,19 +511,38 @@ void tab_graphics() {
         }
     }
     heading("Frame rate");
-    int m = interp::mode();
+    int m = interp::mode(), f = interp::fps();
     if (radio("30 fps (original)", m == 0)) post_changed([] { interp::set_mode(0); });
-    ImGui::SameLine();
-    if (radio("60 fps: frame interpolation", m == 1)) post_changed([] { interp::set_mode(1); });
-    ImGui::SameLine();
+    for (int r : {60, 120, 240}) {
+        ImGui::SameLine();
+        char label[16];
+        snprintf(label, sizeof label, "%d fps", r);
+        if (radio(label, m == 1 && f == r)) post_changed([r] { interp::set_fps(r); interp::set_mode(1); });
+    }
+    help("60, 120 and 240 fps: frame interpolation. The game logic keeps its 30 steps a second, and the\n"
+         "frames in between are drawn blended (1 in-between frame per step at 60 fps, 3 at 120 fps,\n"
+         "7 at 240 fps). The display shows at most its refresh rate: higher choices draw that many.");
     if (radio("True 60 (experimental)", m == 2)) post_changed([] { interp::set_mode(2); });
     help("True 60 runs the game logic at 60 steps per second");
+    // the display's refresh rate, and what the chosen rate draws on it (interp::output_fps)
+    if (const int hz = interp::display_hz(); hz > 0) {
+        const int out = interp::output_fps();
+        if (m == 1 && out < f)
+            note("Your display: %d Hz. %d fps needs a %d Hz display; %d fps are drawn (the display cannot show more).", hz, f, f, out);
+        else if (m == 1 && f > hz + 2)
+            note("Your display: %d Hz. Frames beyond %d a second are drawn but not shown (presentation without vsync).", hz, hz);
+        else
+            note("Your display: %d Hz", hz);
+    } else if (m == 1 && f > 60) {
+        note("Display refresh rate unknown: %d fps are drawn; frames beyond the display's rate are not shown.", f);
+    }
     if (m == 1) {
         bool paced;
         if (check("Keep game speed", interp::paced_interpolation(), &paced, !getenv("WWHD_INTERP_PACED")))
             post_changed([paced] { interp::set_paced_interpolation(paced); });
-        help("When the computer cannot draw 60 frames a second, skip in-between frames instead of\n"
-             "slowing the whole game down. The performance overlay shows how many are drawn.");
+        help("When the computer cannot draw all frames, skip in-between frames instead of slowing the\n"
+             "whole game down. The performance overlay shows how many are drawn.\n"
+             "Saved separately for 60 fps (off by default) and 120/240 fps (on by default).");
     }
 
     heading("Internal resolution");
@@ -1347,10 +1360,9 @@ void perf_window(bool menu_open) {
     if (ImGui::Begin("##perf", nullptr, fl)) {
         ImGui::Text("%.0f fps   %.1f ms (worst %.1f)", U.fps, sum / 120.0f, worst);
         ImGui::PlotLines("##ft", U.frame_ms, 120, U.frame_i, nullptr, 0.0f, 50.0f, ImVec2(220, 36));
-        ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(),
-                            interp::mode() == 2 ? "true 60" : interp::mode() == 1 ? "60 fps" : "30 fps");
+        ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());
         if (float share = interp::paced_drawn_share(); share >= 0)
-            ImGui::TextDisabled("60 fps frames drawn: %.0f%%", share * 100.0f);
+            ImGui::TextDisabled("in-between frames drawn: %.0f%%", share * 100.0f);
     }
     ImGui::End();
     (void)menu_open;

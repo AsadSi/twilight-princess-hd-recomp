@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
-namespace interp { int mode(); void set_mode(int); }
+#include "../../interp.h"
 namespace gfxvk {
 namespace {
 int normalize(int v) { return (v % 3 + 3) % 3; }
@@ -49,7 +49,8 @@ bool graphics_hotkey(char k,bool activate) {
     GraphicsFeature f;
     switch(k) {
     case 'R': if(activate) { constexpr float scales[]={1,1.5f,2,3}; float cur=requested_res_scale(); unsigned next=0; for(unsigned i=0;i<4;++i) if(cur<scales[i]-0.01f) { next=i; break; } set_res_scale(scales[next]); } return true;
-    case '6': case '7': if(activate) { int m=k=='6'?1:2; interp::set_mode(interp::mode()==m?0:m); } return true;
+    case '6': if(activate) interp::toggle_fps(60); return true;  // 60 fps frame interpolation on/off
+    case '7': if(activate) interp::set_mode(interp::mode()==2?0:2); return true;
     case 'O': f=GraphicsFeature::AO; break;
     case 'M': f=GraphicsFeature::AOHires; break;
     case 'N': f=GraphicsFeature::Anisotropy; break;
