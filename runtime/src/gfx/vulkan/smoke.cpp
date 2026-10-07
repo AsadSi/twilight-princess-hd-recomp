@@ -5,6 +5,7 @@
 #include "write_watch.h"
 #include "shaders.h"
 #include "gx2/gx2.h"
+#include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "runtime.h"
 #include <algorithm>
 #include <cmath>
@@ -158,6 +159,49 @@ void asynchronous_submission_check() {
   require(!slot.pending&&slot.garbageBuffers.empty()&&slot.garbageImages.empty(),"async drain left pending resources");
  defer_buffer(out);flush();
  fprintf(stderr,"[renderer smoke] ten async submissions, immutable snapshots, slot wrap and deferred retirement passed\n");
+}
+// Volume render targets (issue #53, the Picto Box): the game renders 8x8x8 colour-grading volumes
+// slice by slice (GX2 colour buffers of a 3D surface, the view selecting the slice) and samples them
+// as 3D textures. The render target must be a volume whose slices are attachments, and the sampled
+// lookup must return it (a 2D render target at that address made the 3D view throw).
+void volume_target_check() {
+ if(!R.imageView2DOn3DImage){fprintf(stderr,"[renderer smoke] volume render targets skipped (no imageView2DOn3DImage)\n");return;}
+ const uint32_t w=8,h=8,depth=4,slice=2;
+ std::vector<uint32_t> regs(0x10000,0);
+ uint32_t addr=mem::host_alloc(w*h*depth*4,256);
+ regs[mmCB_COLOR0_BASE]=addr;regs[mmCB_COLOR0_INFO]=0x1Au<<2;  // RGBA8 unorm
+ regs[mmCB_COLOR0_TILE]=w|(depth<<16)|gx2::kColorTarget3D;regs[mmCB_COLOR0_FRAG]=h;regs[mmCB_COLOR0_VIEW]=slice;
+ uint32_t selected=~0u;Surface* s=color_target(regs.data(),0,&selected);
+ require(s&&s->imageType==VK_IMAGE_TYPE_3D&&s->extent.depth==depth&&s->arrayLayers==1,"volume colour target is not a 3D image");
+ require(selected==slice,"volume colour target slice differs");
+ const float blue[4]={0,0,1,1};clear_image(*s,blue);
+ transition_image(s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+ VkRenderingAttachmentInfo target{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};target.imageView=layer_view(s,selected);target.imageLayout=s->layout;
+ target.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;target.storeOp=VK_ATTACHMENT_STORE_OP_STORE;target.clearValue.color.float32[1]=1;target.clearValue.color.float32[3]=1;
+ VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};ri.renderArea.extent={w,h};ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&target;
+ auto cmd=command_buffer();vkCmdBeginRendering(cmd,&ri);R.rendering=true;end_encoder();mark_gpu_written(s);
+ auto read_slice=[&](uint32_t z) {
+  Buffer b=create_readback_buffer(w*h*4);
+  transition_image(s,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
+  VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageOffset={0,0,int32_t(z)};copy.imageExtent={w,h,1};
+  auto c=command_buffer();vkCmdCopyImageToBuffer(c,s->image,s->layout,b.buffer,1,&copy);
+  VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_HOST_READ_BIT;barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.buffer=b.buffer;barrier.size=VK_WHOLE_SIZE;
+  vkCmdPipelineBarrier(c,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&barrier,0,nullptr);
+  try {flush();std::vector<uint8_t> result(w*h*4);memcpy(result.data(),b.mapped,result.size());defer_buffer(b);return result;}
+  catch(...){defer_buffer(b);throw;}
+ };
+ const uint8_t greenBytes[4]={0,255,0,255},blueBytes[4]={0,0,255,255};
+ rgba_is(read_slice(slice),greenBytes,"volume slice render differs");
+ rgba_is(read_slice(slice-1),blueBytes,"volume render wrote outside its slice");
+ // sampled as a volume (DIM_3D), it is this render target; a 2D sampled view never gets it
+ SurfaceDesc volume;volume.addr=addr;volume.width=w;volume.height=h;volume.slices=depth;volume.pitch=w;volume.format=0x1a;volume.dim=2;
+ require(find_or_create_surface(volume,false)==s,"sampled volume is not the rendered volume");
+ uint32_t textureWords[7]={2,0,0,0,(0u<<16)|(1u<<19)|(2u<<22)|(3u<<25),0,0};
+ require(sampled_texture_view(s,textureWords)!=VK_NULL_HANDLE,"sampled volume view creation failed");
+ SurfaceDesc flat=volume;flat.slices=1;flat.dim=1;
+ Surface* other=find_or_create_surface(flat,false);
+ require(other&&other!=s&&other->imageType==VK_IMAGE_TYPE_2D,"a 2D sampled view got the rendered volume");
+ fprintf(stderr,"[renderer smoke] volume render target slice, clear isolation and 3D sampling passed\n");
 }
 void triangle(Surface& s) {
  struct Resources {
@@ -446,6 +490,7 @@ int renderer_smoke_test() {
    depths=read_image(depth.s,VK_IMAGE_ASPECT_DEPTH_BIT,4);stencils=read_image(depth.s,VK_IMAGE_ASPECT_STENCIL_BIT,1);
    for(size_t i=0;i<stencils.size();++i){float value;memcpy(&value,depths.data()+i*4,4);require(value==0.25f&&stencils[i]==0xa5,"depth/stencil clear differs");}
    fprintf(stderr,"[renderer smoke] depth/stencil upload and clear passed\n");
+   volume_target_check();
    Image rendered(64,64,0x1a);dynamic_uniform_check(rendered.s);vertex_window_check(rendered.s);triangle(rendered.s);
    if(R.tv.scan)destroy_surface_image(R.tv.scan.get());R.tv.scan=std::make_unique<Surface>();auto& scan=*R.tv.scan;scan.width=64;scan.height=64;scan.format=0x1a;scan.fmt=format_info(scan.format,false);create_surface_image(&scan,false);resample(&rendered.s,&scan,1);mark_gpu_written(&scan);
    auto capturePath=std::filesystem::temp_directory_path()/("wwhd-vulkan-smoke-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".png");

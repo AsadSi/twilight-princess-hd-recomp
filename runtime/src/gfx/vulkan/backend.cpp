@@ -1909,6 +1909,7 @@ static void init_device(std::vector<const char *> extensions,
   if (R.portabilitySubset) {
     R.imageViewSwizzle = portability.imageViewFormatSwizzle;
     R.imageViewReinterpretation = portability.imageViewFormatReinterpretation;
+    R.imageView2DOn3DImage = portability.imageView2DOn3DImage;
     R.samplerMipLodBias = portability.samplerMipLodBias;
     R.separateStencilMaskRef = portability.separateStencilMaskRef;
     R.constantAlphaColorBlendFactors =

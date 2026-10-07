@@ -165,7 +165,7 @@ static float target_scale(const Surface* s) {
 
 // ---------------------------------------------------------------- render targets
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
-constexpr uint32_t kDim2D = 1, kDim2DArray = 5;
+constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
 Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
@@ -173,9 +173,11 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
     uint32_t pitch = ((size & 0x3FF) + 1) * 8;
     uint32_t height = (((size >> 10) & 0xFFFFF) + 1) * 64 / pitch;
-    // our convention (GX2SetColorBuffer): TILE = width | array slices << 16, FRAG = height
-    uint32_t w = regs[mmCB_COLOR0_TILE + i] & 0xFFFF, h = regs[mmCB_COLOR0_FRAG + i];
-    uint32_t slices = std::max<uint32_t>(regs[mmCB_COLOR0_TILE + i] >> 16, 1);
+    // our convention (GX2SetColorBuffer, gx2.h kColorTarget3D): TILE = width | slices << 16 | volume flag, FRAG = height
+    uint32_t tile = regs[mmCB_COLOR0_TILE + i];
+    uint32_t w = tile & 0xFFFF, h = regs[mmCB_COLOR0_FRAG + i];
+    uint32_t slices = gx2::color_target_slices(tile);
+    bool volume = (tile & gx2::kColorTarget3D) != 0;
     if (slice) *slice = slices > 1 ? std::min<uint32_t>(regs[mmCB_COLOR0_VIEW + i] & 0x7FF, slices - 1) : 0;
     static const uint32_t numberBits[8] = {0, 0x200, 0, 0, 0x100, 0x300, 0x400, 0x800};
     SurfaceDesc d;
@@ -186,7 +188,15 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     d.format = ((info >> 2) & 0x3F) | numberBits[(info >> 12) & 7];
     d.tileMode = (info >> 8) & 0xF;
     d.slices = slices;
-    d.dim = slices > 1 ? kDim2DArray : kDim2D;
+    if (volume && !R.imageView2DOn3DImage) {
+        // the device cannot render into a volume slice (portability subset without imageView2DOn3DImage):
+        // render into an array of the same size; sampling it as a volume then reads the guest memory
+        static bool logged = false;
+        if (!logged) LOG("[gfx] Vulkan: this device cannot render into 3D texture slices; volume render targets stay empty");
+        logged = true;
+        volume = false;
+    }
+    d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
     return find_or_create_surface(d, true);
 }
 
@@ -215,9 +225,11 @@ Surface* depth_target(const uint32_t* regs, uint32_t* slice) {
 Surface* surface_from_color_buffer(uint32_t addr, uint32_t* firstSlice, uint32_t* numSlices) {
     auto* cb = (GX2::GX2ColorBuffer*)mem::ptr(addr);
     SurfaceDesc d;
-    uint32_t slices = cb->surface.dim.value() == Latte::E_DIM::DIM_2D_ARRAY ? std::max<uint32_t>(cb->surface.depth, 1) : 1;
+    bool volume = cb->surface.dim.value() == Latte::E_DIM::DIM_3D;
+    uint32_t slices = cb->surface.dim.value() == Latte::E_DIM::DIM_2D_ARRAY ? std::max<uint32_t>(cb->surface.depth, 1)
+                      : volume ? std::max<uint32_t>(cb->surface.depth >> cb->viewMip, 1) : 1;
     d.slices = slices;
-    d.dim = slices > 1 ? kDim2DArray : kDim2D;
+    d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
     if (firstSlice) *firstSlice = std::min<uint32_t>(cb->viewFirstSlice, slices - 1);
     if (numSlices) *numSlices = std::clamp<uint32_t>(cb->viewNumSlices, 1, slices - std::min<uint32_t>(cb->viewFirstSlice, slices - 1));
     d.addr = gx2::color_buffer_address(cb);
@@ -486,9 +498,12 @@ void create_surface_image(Surface* s, bool forRendering, VkExtent3D explicitExte
     if(!s->fmt.compressed&&(features&attachment))usage|=s->fmt.depth?VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT:VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     imageInfo.flags=(cube?VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT:0)|VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+    // volumes are render targets too (the game renders its colour-grading volumes slice by slice): their
+    // slices get 2D attachment views (layer_view)
+    if(threeD&&R.imageView2DOn3DImage&&(usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))imageInfo.flags|=VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
     imageInfo.imageType=s->imageType; imageInfo.format=s->fmt.pixel; imageInfo.extent=s->extent;
     imageInfo.mipLevels=s->mips;imageInfo.arrayLayers=s->arrayLayers;imageInfo.samples=VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling=VK_IMAGE_TILING_OPTIMAL;imageInfo.usage=usage;s->usage=usage;imageInfo.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.tiling=VK_IMAGE_TILING_OPTIMAL;imageInfo.usage=usage;s->usage=usage;s->createFlags=imageInfo.flags;imageInfo.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
     try {
         check_vk(vkCreateImage(R.device,&imageInfo,nullptr,&s->image),"create image");
@@ -519,9 +534,12 @@ void destroy_surface_image(Surface* s) {
     s->layerViews.clear();
 }
 VkImageView layer_view(Surface* s,uint32_t layer) {
-    if(!s||!s->image||layer>=s->arrayLayers)throw std::runtime_error("Vulkan attachment layer is out of range");
-    if(s->imageType==VK_IMAGE_TYPE_3D)throw std::runtime_error("Rendering a GX2 volume slice is unsupported");
-    if(s->layerViews.size()<s->arrayLayers)s->layerViews.resize(s->arrayLayers,VK_NULL_HANDLE);
+    // a volume's slices are its depth (2D views of a 2D-array-compatible 3D image, one mip)
+    bool volume=s&&s->imageType==VK_IMAGE_TYPE_3D;
+    uint32_t layers=!s?0:volume?s->extent.depth:s->arrayLayers;
+    if(!s||!s->image||layer>=layers)throw std::runtime_error("Vulkan attachment layer is out of range");
+    if(volume&&!(s->createFlags&VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT))throw std::runtime_error("Rendering into this GX2 volume slice is unsupported");
+    if(s->layerViews.size()<layers)s->layerViews.resize(layers,VK_NULL_HANDLE);
     if(!s->layerViews[layer]) {
         VkImageViewCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};info.image=s->image;
         info.viewType=s->imageType==VK_IMAGE_TYPE_1D?VK_IMAGE_VIEW_TYPE_1D:VK_IMAGE_VIEW_TYPE_2D;info.format=s->fmt.pixel;
@@ -594,8 +612,12 @@ static Surface* rescale(Surface* s) {
     float wanted=target_scale(s),ax,ay;
     target_aspect(s,ax,ay);
     auto attachment=s->fmt.depth?VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT:VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if(s->imageType!=VK_IMAGE_TYPE_2D||s->viewType==VK_IMAGE_VIEW_TYPE_CUBE||s->viewType==VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) {
+        // 1D, volume and cube images keep the guest size (create_surface_image): nothing to rescale
+        if(s->usage&attachment)return s;
+        throw std::runtime_error("Vulkan GX2 surface cannot be a render target");
+    }
     if(s->scale==wanted&&s->ax==ax&&s->ay==ay&&(s->usage&attachment))return s;
-    if(s->imageType!=VK_IMAGE_TYPE_2D)throw std::runtime_error("Vulkan internal-resolution scaling requires a 2D render target");
     Surface replacement;
     replacement.width=s->width;replacement.height=s->height;replacement.slices=s->slices;replacement.mips=s->mips;
     replacement.dim=s->dim;replacement.format=s->format;replacement.isDepth=s->isDepth;replacement.fmt=s->fmt;
@@ -604,7 +626,7 @@ static Surface* rescale(Surface* s) {
     catch(...) { destroy_surface_image(&replacement);throw; }
     destroy_surface_image(s);
     s->image=replacement.image;s->memory=replacement.memory;s->view=replacement.view;
-    s->extent=replacement.extent;s->layout=replacement.layout;s->usage=replacement.usage;s->scale=replacement.scale;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
+    s->extent=replacement.extent;s->layout=replacement.layout;s->usage=replacement.usage;s->createFlags=replacement.createFlags;s->scale=replacement.scale;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
     forget_texture_views();return s;
 }
 Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
@@ -612,12 +634,20 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     auto range=R.surfaces.equal_range(d.addr);
     Surface* exact=nullptr;Surface* rendered=nullptr;
     auto score=[&](Surface* s){return std::make_tuple(s->width==d.width&&s->height==d.height,s->slices==d.slices,s->writeSeq);};
-    auto consider=[&](Surface* s){if(!rendered||score(s)>score(rendered))rendered=s;};
+    // a rendered surface can stand in for a sampled view only with the same image type
+    // (sampled_texture_view cannot view a 2D image as a volume or the other way round)
+    auto dimType=[](uint32_t dim){auto e=static_cast<Latte::E_DIM>(dim);
+        return e==Latte::E_DIM::DIM_1D||e==Latte::E_DIM::DIM_1D_ARRAY?VK_IMAGE_TYPE_1D:e==Latte::E_DIM::DIM_3D?VK_IMAGE_TYPE_3D:VK_IMAGE_TYPE_2D;};
+    auto consider=[&](Surface* s){
+        if(s->imageType!=dimType(d.dim))return;
+        if(!rendered||score(s)>score(rendered))rendered=s;};
     for(auto it=range.first;it!=range.second;++it) {
         auto* s=it->second.get();
         if(!forRendering&&s->isDepth&&!d.isDepth&&s->gpuWritten&&s->width==d.width&&s->height==d.height)consider(s);
         if(s->isDepth!=d.isDepth)continue;
-        if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&
+        // a volume and a 2D array of the same size are different images (a volume's slices are its depth)
+        bool sameVolume=(s->imageType==VK_IMAGE_TYPE_3D)==(dimType(d.dim)==VK_IMAGE_TYPE_3D);
+        if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&sameVolume&&
            (forRendering||s->mips>=d.mips||s->gpuWritten)) {
             if(forRendering)return rescale(s);
             if(!exact||s->writeSeq>exact->writeSeq)exact=s;
@@ -721,8 +751,23 @@ void clear_color(const uint32_t*,uint32_t cb,const float rgba[4]) {
         else if(s->fmt.kind==FormatInfo::SINT)value.int32[i]=int32_t(std::clamp(integerValue,-2147483648.0,2147483647.0));
         else value.float32[i]=rgba[i];
     }
-    end_encoder();transition_image(s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,first,num};
+    end_encoder();
+    if(s->imageType==VK_IMAGE_TYPE_3D&&(first||num<s->extent.depth)) {
+        // part of a volume: a transfer clear covers all of its depth, so clear each slice as an attachment
+        transition_image(s,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+        for(uint32_t z=first;z<first+num;++z) {
+            VkRenderingAttachmentInfo a{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            a.imageView=layer_view(s,z);a.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            a.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a.storeOp=VK_ATTACHMENT_STORE_OP_STORE;a.clearValue.color=value;
+            VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+            ri.renderArea.extent={s->extent.width,s->extent.height};ri.layerCount=1;ri.colorAttachmentCount=1;ri.pColorAttachments=&a;
+            vkCmdBeginRendering(command_buffer(),&ri);vkCmdEndRendering(command_buffer());
+        }
+        mark_gpu_written(s);return;
+    }
+    transition_image(s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+    // a volume has one layer; its depth is in the extent
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT,0,1,s->imageType==VK_IMAGE_TYPE_3D?0:first,s->imageType==VK_IMAGE_TYPE_3D?1:num};
     vkCmdClearColorImage(command_buffer(),s->image,s->layout,&value,1,&range);mark_gpu_written(s);
 }
 void clear_depth_stencil(const uint32_t*,uint32_t db,float depth,uint32_t stencil,uint32_t flags) {

@@ -1057,7 +1057,9 @@ static bool ensure_pass(Surface* const* colors, const uint32_t* colorSlices, Sur
     for (int i = 0; i < 8; i++) {
         if (!colors[i]) continue;
         rp.colorAttachments[i].texture = colors[i]->tex;
-        rp.colorAttachments[i].slice = colorSlices[i];
+        // a volume's slice is a depth plane
+        if (colors[i]->tex.textureType == MTLTextureType3D) rp.colorAttachments[i].depthPlane = colorSlices[i];
+        else rp.colorAttachments[i].slice = colorSlices[i];
         rp.colorAttachments[i].loadAction = MTLLoadActionLoad;
         rp.colorAttachments[i].storeAction = MTLStoreActionStore;
         mark_gpu_written(colors[i]);

@@ -130,10 +130,12 @@ static void target_aspect(const Surface* s, float& kx, float& ky) {
 }
 
 static id<MTLTexture> make_texture(Surface* s, MTLTextureType type, bool forRendering, float scale, float ax = 1.0f, float ay = 1.0f) {
-    if (forRendering && type != MTLTextureType2DArray) type = MTLTextureType2D;
+    // render targets: 2D, 2D arrays and volumes (rendered slice by slice: the game's colour-grading volumes)
+    if (forRendering && type != MTLTextureType2DArray && type != MTLTextureType3D) type = MTLTextureType2D;
     bool is1D = type == MTLTextureType1D || type == MTLTextureType1DArray;
     uint32_t pw = s->width, ph = s->height;
-    if ((scale != 1.0f || ax != 1.0f || ay != 1.0f) && !is1D) {
+    // volumes keep the guest size (they are sampled as lookup tables, not shown)
+    if ((scale != 1.0f || ax != 1.0f || ay != 1.0f) && !is1D && type != MTLTextureType3D) {
         pw = (uint32_t)std::ceil(s->width * scale * ax - 0.01f);
         ph = (uint32_t)std::ceil(s->height * scale * ay - 0.01f);
     } else {
@@ -168,7 +170,7 @@ static id<MTLTexture> make_texture(Surface* s, MTLTextureType type, bool forRend
 static Surface* rescale(Surface* s) {
     float want = target_scale(s), ax, ay;
     target_aspect(s, ax, ay);
-    if ((s->scale == want && s->ax == ax && s->ay == ay) || !s->tex) return s;
+    if ((s->scale == want && s->ax == ax && s->ay == ay) || !s->tex || s->tex.textureType == MTLTextureType3D) return s;
     id<MTLTexture> old = s->tex;
     float osx = s->sx, osy = s->sy, oscale = s->scale, oax = s->ax, oay = s->ay;
     id<MTLTexture> t = make_texture(s, old.textureType, true, want, ax, ay);
@@ -299,15 +301,21 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     auto score = [&](Surface* s) {
         return std::make_tuple(s->width == d.width && s->height == d.height, s->slices == d.slices, s->writeSeq);
     };
-    auto consider = [&](Surface* s) { if (!rendered || score(s) > score(rendered)) rendered = s; };
+    // only with the same kind of texture: a 2D render target cannot stand in for a sampled volume
+    auto volume = [](uint32_t dim) { return (Latte::E_DIM)dim == Latte::E_DIM::DIM_3D; };
+    auto consider = [&](Surface* s) {
+        if (volume(s->dim) != volume(d.dim)) return;
+        if (!rendered || score(s) > score(rendered)) rendered = s;
+    };
     for (auto it = range.first; it != range.second; ++it) {
         Surface* s = it->second.get();
         // a rendered depth buffer sampled as a texture (fog, depth of field, shadow maps...)
         if (!forRendering && s->isDepth && !d.isDepth && s->gpuWritten && s->width == d.width && s->height == d.height)
             consider(s);
         if (s->isDepth != d.isDepth) continue;
+        // a volume and a 2D array of the same size are different textures
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
-            (forRendering || s->mips >= d.mips || s->gpuWritten)) {
+            volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
             if (forRendering) return rescale(s);
             if (!exact || s->writeSeq > exact->writeSeq) exact = s;
             continue;
@@ -351,7 +359,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
 
 // ---------------------------------------------------------------- render targets
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
-constexpr uint32_t kDim2D = 1, kDim2DArray = 5;
+constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
 Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
@@ -359,9 +367,11 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
     uint32_t pitch = ((size & 0x3FF) + 1) * 8;
     uint32_t height = (((size >> 10) & 0xFFFFF) + 1) * 64 / pitch;
-    // our convention (GX2SetColorBuffer): TILE = width | array slices << 16, FRAG = height
-    uint32_t w = regs[mmCB_COLOR0_TILE + i] & 0xFFFF, h = regs[mmCB_COLOR0_FRAG + i];
-    uint32_t slices = std::max<uint32_t>(regs[mmCB_COLOR0_TILE + i] >> 16, 1);
+    // our convention (GX2SetColorBuffer, gx2.h kColorTarget3D): TILE = width | slices << 16 | volume flag, FRAG = height
+    uint32_t tile = regs[mmCB_COLOR0_TILE + i];
+    uint32_t w = tile & 0xFFFF, h = regs[mmCB_COLOR0_FRAG + i];
+    uint32_t slices = gx2::color_target_slices(tile);
+    bool volume = (tile & gx2::kColorTarget3D) != 0;
     if (slice) *slice = slices > 1 ? std::min<uint32_t>(regs[mmCB_COLOR0_VIEW + i] & 0x7FF, slices - 1) : 0;
     static const uint32_t numberBits[8] = {0, 0x200, 0, 0, 0x100, 0x300, 0x400, 0x800};
     SurfaceDesc d;
@@ -372,7 +382,7 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     d.format = ((info >> 2) & 0x3F) | numberBits[(info >> 12) & 7];
     d.tileMode = (info >> 8) & 0xF;
     d.slices = slices;
-    d.dim = slices > 1 ? kDim2DArray : kDim2D;
+    d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
     return find_or_create_surface(d, true);
 }
 
@@ -401,9 +411,11 @@ Surface* depth_target(const uint32_t* regs, uint32_t* slice) {
 Surface* surface_from_color_buffer(uint32_t addr, uint32_t* firstSlice, uint32_t* numSlices) {
     auto* cb = (GX2::GX2ColorBuffer*)mem::ptr(addr);
     SurfaceDesc d;
-    uint32_t slices = cb->surface.dim.value() == Latte::E_DIM::DIM_2D_ARRAY ? std::max<uint32_t>(cb->surface.depth, 1) : 1;
+    bool volume = cb->surface.dim.value() == Latte::E_DIM::DIM_3D;
+    uint32_t slices = cb->surface.dim.value() == Latte::E_DIM::DIM_2D_ARRAY ? std::max<uint32_t>(cb->surface.depth, 1)
+                      : volume ? std::max<uint32_t>(cb->surface.depth >> cb->viewMip, 1) : 1;
     d.slices = slices;
-    d.dim = slices > 1 ? kDim2DArray : kDim2D;
+    d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
     if (firstSlice) *firstSlice = std::min<uint32_t>(cb->viewFirstSlice, slices - 1);
     if (numSlices) *numSlices = std::clamp<uint32_t>(cb->viewNumSlices, 1, slices - std::min<uint32_t>(cb->viewFirstSlice, slices - 1));
     d.addr = gx2::color_buffer_address(cb);

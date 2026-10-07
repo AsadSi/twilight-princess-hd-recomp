@@ -1,5 +1,6 @@
 // Internal interfaces between the GX2 layer and the renderer.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 
 struct LatteFetchShader;
@@ -29,6 +30,11 @@ void set_uncapped(bool on);
 // commands, in submission order. Guest structures are passed by guest address.
 namespace gx2 {
 constexpr uint32_t kDepthSlicesReg = 0xA002;  // our convention (unused register): depth buffer array size
+// our convention: CB_COLORn_TILE = view width | slices << 16 (bits 16..30) | kColorTarget3D. Slices are the
+// array size of a 2D array buffer, or the depth of a volume (3D) buffer, whose slice the view selects
+// (CB_COLORn_VIEW slice start). The game renders its 8x8x8 colour-grading volumes slice by slice that way.
+constexpr uint32_t kColorTarget3D = 0x80000000u;
+constexpr uint32_t color_target_slices(uint32_t tile) { return std::max<uint32_t>((tile >> 16) & 0x7FFF, 1); }
 }
 
 namespace gfx {

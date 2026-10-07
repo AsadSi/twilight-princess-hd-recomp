@@ -21,7 +21,7 @@ struct CachedGuestLayout;
 struct Surface {
  VkImage image=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE;
  VkImageType imageType=VK_IMAGE_TYPE_2D; VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D;
- VkExtent3D extent{}; VkImageLayout layout=VK_IMAGE_LAYOUT_UNDEFINED; VkImageAspectFlags aspect=VK_IMAGE_ASPECT_COLOR_BIT; VkImageUsageFlags usage=0;
+ VkExtent3D extent{}; VkImageLayout layout=VK_IMAGE_LAYOUT_UNDEFINED; VkImageAspectFlags aspect=VK_IMAGE_ASPECT_COLOR_BIT; VkImageUsageFlags usage=0; VkImageCreateFlags createFlags=0;
  uint32_t arrayLayers=1; std::vector<VkImageView> layerViews;
  std::unordered_map<uint32_t,VkImageView> sampledViews;
  uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0;
@@ -66,6 +66,7 @@ struct Renderer {
  VkPhysicalDeviceFeatures enabledFeatures{};
  bool dynamicRenderingKHR=false; // VK_KHR_dynamic_rendering (device older than Vulkan 1.3)
  bool portabilitySubset=false,imageViewSwizzle=true,imageViewReinterpretation=true;
+ bool imageView2DOn3DImage=true; // 2D views of volume slices (render targets); core Vulkan 1.1, optional in the portability subset
  bool samplerMipLodBias=true,separateStencilMaskRef=true,constantAlphaColorBlendFactors=true,vertexAttributeAccessBeyondStride=true,samplerMirrorClampToEdge=false;
  VkPhysicalDeviceProperties properties{}; VkQueue queue=VK_NULL_HANDLE; uint32_t queueFamily=0;
  bool gpuTimestampsEnabled=false,gpuPassTimestampsEnabled=false;
