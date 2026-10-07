@@ -229,8 +229,30 @@ static void apply_portable_mode() {
 #endif
 }
 
+// The Vulkan renderer's validated opt-in CPU paths (docs/vulkan.md, "Opt-in CPU experiments"), on by
+// default on every platform: on a Galaxy S25 Ultra they took the render thread from about 40 to
+// 30 ms per frame; on an M3 Max (MoltenVK) together they cut render-thread CPU by 8-14% with no
+// measurable cost from any single one (docs/performance.md, 2026-10-07). NAME=0 turns one off.
+static void default_vulkan_cpu_paths() {
+    for (const char* name : {"WWHD_VK_REUSE_UNIFORM_SNAPSHOTS", "WWHD_VK_REUSE_FEEDBACK_IMAGES",
+                             "WWHD_VK_SKIP_REDUNDANT_BINDS", "WWHD_VK_DESCRIPTOR_RANKS",
+                             "WWHD_VK_PIPELINE_LOOKASIDE", "WWHD_VK_SHADER_ADDRESS_MEMO",
+                             "WWHD_VK_FETCH_MEMO", "WWHD_VK_SPECIALIZE_INDICES",
+                             "WWHD_VK_SHADER_STATE_MEMO", "WWHD_VK_SKIP_VERTEX_BINDS",
+                             "WWHD_VK_SAMPLER_MEMO", "WWHD_VK_SPARSE_HASH_MEMO",
+                             "WWHD_VK_SHADER_KEY_DIRTY", "WWHD_VK_REUSE_VERTEX_SNAPSHOTS",
+                             "WWHD_VK_VERTEX_HISTORY_REUSE"}) {
+#ifdef _WIN32
+        if (!getenv(name)) _putenv_s(name, "1");
+#else
+        setenv(name, "1", 0);
+#endif
+    }
+}
+
 int main(int argc, char** argv) {
     apply_portable_mode();
+    default_vulkan_cpu_paths();
 #ifdef _WIN32
     // Windows sleeps in steps of the system timer (15.6 ms by default): sleep_for(1 ms) took
     // 15.7 ms, the 3 ms AX frame loop ran in bursts and vsync waits alternated 15.7 / 31.5 ms.
@@ -244,18 +266,8 @@ int main(int argc, char** argv) {
     if (const char* dir = SDL_GetAndroidExternalStoragePath()) {
         if (chdir(dir) != 0) fprintf(stderr, "cannot enter %s\n", dir);
         setenv("XDG_CONFIG_HOME", (std::string(dir) + "/config").c_str(), 1);
-        // Phones: the Vulkan renderer's validated opt-in CPU paths (docs/vulkan.md, "Opt-in CPU
-        // experiments") and draw batching are on; measured on a Galaxy S25 Ultra, Outset Island,
-        // they took the render thread from about 40 to 30 ms per frame. env.txt can turn any off.
-        for (const char* name : {"WWHD_VK_REUSE_UNIFORM_SNAPSHOTS", "WWHD_VK_REUSE_FEEDBACK_IMAGES",
-                                 "WWHD_VK_SKIP_REDUNDANT_BINDS", "WWHD_VK_DESCRIPTOR_RANKS",
-                                 "WWHD_VK_PIPELINE_LOOKASIDE", "WWHD_VK_SHADER_ADDRESS_MEMO",
-                                 "WWHD_VK_FETCH_MEMO", "WWHD_VK_SPECIALIZE_INDICES",
-                                 "WWHD_VK_SHADER_STATE_MEMO", "WWHD_VK_SKIP_VERTEX_BINDS",
-                                 "WWHD_VK_SAMPLER_MEMO", "WWHD_VK_SPARSE_HASH_MEMO",
-                                 "WWHD_VK_SHADER_KEY_DIRTY", "WWHD_VK_REUSE_VERTEX_SNAPSHOTS",
-                                 "WWHD_VK_VERTEX_HISTORY_REUSE"})
-            setenv(name, "1", 0);
+        // draw batching (the default everywhere since; kept explicit) and the CPU paths
+        // (default_vulkan_cpu_paths) are on; env.txt can turn any off
         setenv("WWHD_VK_DRAW_BATCH", "2048", 0);
         // 60 fps (frame interpolation) is on unless chosen otherwise (settings.ini, read when the
         // renderer starts); platform/perf_hint.cpp pauses it where the phone cannot keep up
