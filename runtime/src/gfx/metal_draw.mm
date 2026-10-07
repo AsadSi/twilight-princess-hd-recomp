@@ -247,9 +247,11 @@ static const int g_test_fail_compiles = getenv("WWHD_TEST_FAIL_COMPILES") ? atoi
 
 // render thread: true when a failed compile with attempts left is due for its retry (schedules the
 // retry on the first call after the failure)
+// (now: retry at once, for a draw that must not be skipped; see wait_compiled)
 template <class T>
-static bool retry_due(T* x) {
+static bool retry_due(T* x, bool now = false) {
     if (x->attempts >= kCompileAttempts) return false;
+    if (now) { x->retryFrame = 0; return true; }
     if (!x->retryFrame) {
         x->retryFrame = R.frame + kRetryFrames * (uint64_t)x->attempts;
         return false;
@@ -462,8 +464,8 @@ static void compile_deferred(Shader* s) {
 
 // render thread: start the retry of a failed Metal compile when it is due (see kCompileAttempts).
 // Shaders that failed to translate (no dec) never compiled and are not retried.
-static void retry_failed_compile(Shader* s) {
-    if (!s || !s->dec || s->state.load(std::memory_order_acquire) != CS_FAILED || !retry_due(s)) return;
+static void retry_failed_compile(Shader* s, bool now = false) {
+    if (!s || !s->dec || s->state.load(std::memory_order_acquire) != CS_FAILED || !retry_due(s, now)) return;
     LOG("[gfx] retrying shader %016llx compile (attempt %d of %d)", (unsigned long long)s->key, s->attempts + 1, kCompileAttempts);
     s->state = CS_PENDING;
     compile_msl(s, s->dec->strBuf_shaderSource->c_str(), s->key);
@@ -591,7 +593,17 @@ void set_ao_mode(int m) { g_ao_mode = m % 3; LOG("[gfx] ambient occlusion mode %
 // for a few frames after entering a new area. Instead wait for the compile, up to a per-frame budget
 // (WWHD_COMPILE_WAIT_MS, default 25; the game's frame is 33 ms and the GPU needs ~4 ms of it).
 // Pipelines built ahead of use (cache replay, head start) never wait.
+// Skipping is only harmless for targets the game redraws every frame. A draw into a target that is
+// new or wasn't drawn in the previous frame may be the only one its result gets (a buffer rendered
+// once, at a load or after a photo, or a pass's first frame), and a skipped one would leave that
+// result missing for as long as the game keeps using it (issue #47: the light buffer sampled before
+// its first render, black shadows for the session; the Picto Box colour-grading volume). Those draws
+// wait for their compile without the budget, like the Vulkan renderer does for every draw.
 static bool g_building_ahead = false;
+static bool g_draw_must_run = false;  // the current draw writes a target that isn't redrawn every frame
+static std::unordered_map<uint32_t, uint64_t> g_target_drawn;  // render target address -> frame of its last draw
+static uint64_t g_must_run_waits = 0;
+static double g_must_run_wait_ms = 0;
 static bool wait_compiled(const std::atomic<int>& st) {
     static const double budgetMs = getenv("WWHD_COMPILE_WAIT_MS") ? atof(getenv("WWHD_COMPILE_WAIT_MS")) : 25.0;
     if (g_building_ahead) return st.load(std::memory_order_acquire) == CS_READY;
@@ -599,6 +611,21 @@ static bool wait_compiled(const std::atomic<int>& st) {
     static double spent = 0;
     if (frame != R.frame) { frame = R.frame; spent = 0; }
     if (st.load(std::memory_order_acquire) != CS_PENDING) return st.load(std::memory_order_acquire) == CS_READY;
+    if (g_draw_must_run) {
+        double t0 = now_ms();
+        {
+            std::unique_lock<std::mutex> lk(g_compile_mu);
+            g_compile_cv.wait(lk, [&] { return st.load(std::memory_order_acquire) != CS_PENDING; });
+        }
+        double dt = now_ms() - t0;
+        spent += dt;
+        g_must_run_waits++;
+        g_must_run_wait_ms += dt;
+        static int logged = 0;
+        if (dt >= 30 && logged++ < 50)
+            LOG("[gfx] frame %llu: waited %.0f ms for a compile (draw into a target not redrawn every frame)", (unsigned long long)R.frame, dt);
+        return st.load(std::memory_order_acquire) == CS_READY;
+    }
     if (spent >= budgetMs) return false;
     double t0 = now_ms();
     {
@@ -640,7 +667,7 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
     if (it != g_pipelines.end()) {
         pl = it->second;
         // a failed build is retried a few times on later frames (see kCompileAttempts)
-        if (pl->status.load(std::memory_order_acquire) != CS_FAILED || !retry_due(pl))
+        if (pl->status.load(std::memory_order_acquire) != CS_FAILED || !retry_due(pl, g_draw_must_run))
             return wait_compiled(pl->status) ? pl->state : nil;
         LOG("[gfx] retrying pipeline %016llx (attempt %d of %d)", (unsigned long long)h, pl->attempts + 1, kCompileAttempts);
         pl->status = CS_PENDING;
@@ -1501,6 +1528,9 @@ void report_skips() {
     if (n) LOG("[gfx] skipped draws:%s", buf);
     LOG("[gfx] %zu shaders, %zu pipelines; ms decompile %.0f, msl %.0f, pipeline %.0f", g_shaders.size(), g_pipelines.size(),
         g_t_decompile, g_t_msl, g_t_pipeline);
+    if (g_must_run_waits)
+        LOG("[gfx] draws that waited for their compile (targets not redrawn every frame): %llu, %.0f ms in all",
+            (unsigned long long)g_must_run_waits, g_must_run_wait_ms);
     extern uint64_t g_stat_full_checks, g_stat_uploads, g_stat_invalidates, g_stat_invalidated_surfaces;
     extern uint64_t g_stat_hashed_bytes;
     uint64_t faults, protectedPages;
@@ -1541,9 +1571,25 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     }
     Shader* vs = get_shader(regs, true, fs, fsKey);
     Shader* ps = get_shader(regs, false, fs, fsKey);
-    retry_failed_compile(vs);
-    retry_failed_compile(ps);
-    if (!vs || !ps || vs->state == CS_FAILED || ps->state == CS_FAILED) { g_skip[SK_NO_SHADER]++; return; }
+    if (!vs || !ps || !vs->dec || !ps->dec) { g_skip[SK_NO_SHADER]++; return; }  // translation failed
+    // must this draw run even if its compile takes longer than the budget? (see wait_compiled)
+    const LatteContextRegister& lcr = *(const LatteContextRegister*)regs;
+    uint8_t mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
+    {
+        auto notRedrawn = [](uint32_t addr) {
+            auto it = g_target_drawn.find(addr);
+            return it == g_target_drawn.end() || it->second + 1 < R.frame;
+        };
+        bool must = false;
+        for (int i = 0; i < 8 && !must; i++)
+            if ((mask & (1 << i)) && regs[mmCB_COLOR0_BASE + i]) must = notRedrawn(regs[mmCB_COLOR0_BASE + i]);
+        if (!must && LatteMRT::GetActiveDepthBufferMask(lcr) && regs[mmDB_DEPTH_BASE]) must = notRedrawn(regs[mmDB_DEPTH_BASE]);
+        g_draw_must_run = must;
+    }
+    struct MustRunReset { ~MustRunReset() { g_draw_must_run = false; } } mustRunReset;
+    retry_failed_compile(vs, g_draw_must_run);
+    retry_failed_compile(ps, g_draw_must_run);
+    if (vs->state == CS_FAILED || ps->state == CS_FAILED) { g_skip[SK_NO_SHADER]++; return; }
     compile_deferred(vs);
     compile_deferred(ps);
     if (!wait_compiled(vs->state) || !wait_compiled(ps->state)) {
@@ -1552,10 +1598,8 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     }
     rprof::mark(rprof::kShader);
 
-    const LatteContextRegister& lcr = *(const LatteContextRegister*)regs;
     Surface* colors[8] = {};
     uint32_t colorSlices[8] = {}, depthSlice = 0;
-    uint8_t mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
     for (int i = 0; i < 8; i++)
         if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i]);
     Surface* depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(regs, &depthSlice) : nullptr;
@@ -1710,6 +1754,9 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
                         baseVertex:baseVertex
                       baseInstance:0];
     }
+    for (int i = 0; i < 8; i++)
+        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]] = R.frame;
+    if (depth && regs[mmDB_DEPTH_BASE]) g_target_drawn[regs[mmDB_DEPTH_BASE]] = R.frame;
     // debug: WWHD_DUMP_DRAWS=frame:i,j,k dumps color target 0 after those draws
     static uint64_t dumpFrame = ~0ull;
     static std::set<uint64_t> dumpDraws = [] {
