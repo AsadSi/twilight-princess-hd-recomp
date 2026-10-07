@@ -8,8 +8,8 @@
 // Only a front end. Everything the installation does (keys, extraction, recompiling, compiling,
 // the app, save import) is tools/installer/setup.py, which this program runs as a child process
 // through the release's own launcher ("Install Wind Waker HD.command" or install.sh; they also fetch Python
-// where needed) or, on Windows, directly with the pinned embeddable Python this program fetches itself
-// (python_fetch_win.cpp), with --gui-protocol: JSON lines on the child's stdout (events) and stdin (requests).
+// where needed) or, on Windows, directly with the embeddable Python the release ships in tools\python
+// (console_setup_win.cpp), with --gui-protocol: JSON lines on the child's stdout (events) and stdin (requests).
 // See tools/installer/README.md.
 //
 // Keys: a pasted Wii U common key is sent once over the stdin pipe and the buffer is cleared;
@@ -20,7 +20,7 @@
 //   --screenshots DIR    where --automate / --self-test write PNG screenshots
 //   --self-test          start setup.py, wait for its hello, render the welcome screen, exit 0
 //   --console-setup ARGS (Windows, first argument only) the setup in the console window this program was
-//                        started from: fetch Python, run setup.py ARGS, exit with its exit code
+//                        started from: run setup.py ARGS with the bundled Python, exit with its exit code
 //                        (tools\Setup in a console window.bat)
 // With SDL_VIDEO_DRIVER=offscreen the window is never shown (software rendering).
 #include <SDL3/SDL.h>
@@ -43,7 +43,7 @@
 #ifdef _WIN32
 #include <windows.h>
 
-#include "python_fetch_win.h"
+#include "console_setup_win.h"
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -951,14 +951,7 @@ static void run_queue() {
     else if (a == "quit") A.exit_code = 0;
 }
 
-#ifdef _WIN32
-static void pump_python_fetch();
-#endif
-
 static void pump_child() {
-#ifdef _WIN32
-    pump_python_fetch();
-#endif
     run_queue();
     A.child.poll();
     while (!A.child.lines.empty()) {
@@ -1017,7 +1010,6 @@ static void screen_starting() {
     ImGui::Spacing();
     mark(1);
     ImGui::TextUnformatted("Preparing the installer...");
-    muted("The first start on Windows downloads a small private copy of Python (11 MB).");
     if (!A.log.empty()) log_pane(260);
 }
 
@@ -1665,91 +1657,20 @@ static std::string package_version() {
     return m.str("version");
 }
 
-#ifdef _WIN32
-// toolchains.json: python.windows (URL, SHA-256, folder name)
-static bool read_python_pin(const std::string& pkg, PythonPin& pin, std::string& err) {
-    std::string path = pkg + "tools\\installer\\toolchains.json";
-    J t;
-    if (!parse_json(read_file(path), t)) return err = "cannot read " + path, false;
-    const J* py = t.get("python");
-    const J* win = py ? py->get("windows") : nullptr;
-    if (!win) return err = "no python.windows entry in " + path, false;
-    pin.url = win->str("url"), pin.sha256 = win->str("sha256"), pin.dir = win->str("dir");
-    if (pin.url.empty() || pin.sha256.empty() || pin.dir.empty()) return err = "incomplete python.windows entry in " + path, false;
-    return true;
-}
-
-// Windows: Python is fetched on a thread of its own while the window shows "Preparing the installer..."
-struct PythonFetch {
-    std::mutex mu;
-    std::vector<std::string> lines;  // progress, for the log pane
-    bool done = false, ok = false;
-    std::string python, err;
-    std::string pkg;
-    PythonPin pin;
-    SDL_Thread* thread = nullptr;
-};
-static PythonFetch& g_fetch = *new PythonFetch;  // never destroyed: closing the window may end the program mid-download
-static std::string g_python;                       // python.exe, once fetched
-
-static int SDLCALL python_fetch_thread(void*) {
-    std::string python, err;
-    bool ok = fetch_python(g_fetch.pkg, g_fetch.pin, python, err, [](const std::string& l) {
-        std::lock_guard<std::mutex> lk(g_fetch.mu);
-        g_fetch.lines.push_back(l);
-    });
-    std::lock_guard<std::mutex> lk(g_fetch.mu);
-    g_fetch.ok = ok, g_fetch.python = python, g_fetch.err = err, g_fetch.done = true;
-    return 0;
-}
-
-static void python_fetch_failed(const std::string& err) {
-    addlog("");
-    addlog("Setup could not get Python: " + err);
-    addlog("Check your internet connection and run the setup again.");
-    fail("Setup could not get Python: " + err,
-         "Check your internet connection and open Wind Waker HD again. You can also run the setup in a terminal: "
-         SETUP_IN_TERMINAL " in the release folder. If that fails too, click \"Copy log\" and attach the log to a bug "
-         "report.");
-}
-
-static void start_child();
-
-static void start_python_fetch() {
-    go(Screen::Starting);
-    std::string err;
-    if (!read_python_pin(A.pkg, g_fetch.pin, err)) return python_fetch_failed(err);
-    g_fetch.pkg = A.pkg;
-    g_fetch.thread = SDL_CreateThread(python_fetch_thread, "python-fetch", nullptr);
-    if (!g_fetch.thread) python_fetch_failed(std::string("could not start a thread: ") + SDL_GetError());
-}
-
-// each frame: progress lines into the log; when done, start setup.py (or say why not)
-static void pump_python_fetch() {
-    if (!g_fetch.thread) return;
-    bool done;
-    {
-        std::lock_guard<std::mutex> lk(g_fetch.mu);
-        for (auto& l : g_fetch.lines) addlog(l);
-        g_fetch.lines.clear();
-        done = g_fetch.done;
-    }
-    if (!done) return;
-    SDL_WaitThread(g_fetch.thread, nullptr);
-    g_fetch.thread = nullptr;
-    if (!g_fetch.ok) return python_fetch_failed(g_fetch.err);
-    g_python = g_fetch.python;
-    start_child();
-}
-#endif
-
 static void start_child() {
     std::vector<std::string> args;
 #if defined(__APPLE__)
     args = {"/bin/bash", A.pkg + "tools/Setup in Terminal.command"};
 #elif defined(_WIN32)
-    if (g_python.empty()) return start_python_fetch();  // first: Python (downloaded once, then found)
-    args = {g_python, A.pkg + "tools\\installer\\setup.py"};
+    // the official embeddable Python shipped in the release (tools\python; no download, no script host)
+    if (!have_bundled_python(A.pkg)) {
+        fail("Setup could not start: " + bundled_python(A.pkg) + " is missing.",
+             "The release is incomplete: unzip it again (the whole zip, keeping its folders) and start Wind Waker "
+             "HD.exe from the unzipped folder.",
+             A.pkg);
+        return;
+    }
+    args = {bundled_python(A.pkg), A.pkg + "tools\\installer\\setup.py"};
     SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "PYTHONDONTWRITEBYTECODE", "1", true);
 #else
     args = {"/bin/sh", A.pkg + "tools/setup-in-terminal.sh"};
@@ -1866,10 +1787,7 @@ static bool game_ready(const std::string& pkg, const std::vector<std::string>& p
 int main(int argc, char** argv) {
 #ifdef _WIN32
     if (argc > 1 && !strcmp(argv[1], "--console-setup")) {
-        std::string pkg = find_package().pkg, err;
-        PythonPin pin;
-        bool have_pin = !pkg.empty() && read_python_pin(pkg, pin, err);
-        return console_setup(pkg, have_pin ? &pin : nullptr, err, std::vector<std::string>(argv + 2, argv + argc));
+        return console_setup(find_package().pkg, std::vector<std::string>(argv + 2, argv + argc));
     }
 #endif
     std::string automate;

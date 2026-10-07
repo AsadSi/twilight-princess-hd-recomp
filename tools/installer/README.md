@@ -18,7 +18,7 @@ A release folder contains `portable.txt`. Then everything stays in `<release>/da
 | `data/user/` | settings, controls, graphics options, save states, shader caches (`host::portable_user_dir()`) |
 | `data/captures/` | crash logs (the game runs in `data/`) |
 | `data/install.json`, `data/setup.log` | what was prepared (paths inside `data/` relative, so the folder can move), and the setup log |
-| `data/toolchain/`, `data/python/` | the downloaded compiler (Windows, Linux; removable at the end) and Python (Windows, or Linux without Python 3) |
+| `data/toolchain/`, `data/python/` | the downloaded compiler (Windows, Linux; removable at the end) and Python (Linux without Python 3; the Windows release ships its Python in `tools/python`) |
 
 Runtime side: a `portable.txt` next to the game executable makes `host::config_dir()` return
 `<folder>/user` (`runtime/src/platform/host.h`); `main.cpp` points the macOS-only paths (save states,
@@ -35,7 +35,7 @@ Start menu, applications menu) are only created when the player asks for one.
 | `toolchains.json` | pinned compilers and Python downloads (URL + SHA-256); CI builds with the same ones |
 | `gui/setup_gui.cpp` | **Wind Waker HD**, the program a release starts: first-start setup, then the game launcher (SDL3 + Dear ImGui) |
 | `install-macos.command` | setup in Terminal, macOS (shipped as `tools/Setup in Terminal.command`) |
-| `install-windows.bat` | setup in a console window, Windows (`tools/Setup in a console window.bat`): runs `Wind Waker HD.exe --console-setup`, which fetches the pinned embeddable Python and runs `setup.py` in that console |
+| `install-windows.bat` | setup in a console window, Windows (`tools/Setup in a console window.bat`): runs `Wind Waker HD.exe --console-setup`, which runs `setup.py` in that console with the bundled Python (`tools/python`) |
 | `install-linux.sh` | setup in a terminal, Linux (`tools/setup-in-terminal.sh`; falls back to a pinned standalone Python) |
 | `test_setup.py` | unit tests of the helpers (`python3 tools/installer/test_setup.py`) |
 
@@ -51,8 +51,8 @@ the game without a console window and exits). Otherwise, or with Shift held at s
 Windows) or `--setup`, it shows the setup.
 
 The setup is only a front end: it runs the release's terminal setup with `--gui-protocol` as a child
-process (so Python is found or fetched exactly as in the terminal setup; on Windows it fetches the
-pinned Python itself, see below, and starts `setup.py` with it directly) and talks to `setup.py`
+process (so Python is found or fetched exactly as in the terminal setup; on Windows it starts
+`setup.py` directly with the Python the release ships, see below) and talks to `setup.py`
 over its stdin/stdout. Screens: welcome (or, when installed: play / update / repair / reinstall /
 import saves or settings / open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
 (disc images only: disc key found next to the image or chosen; common key as a file or pasted into a hidden field), installation
@@ -82,20 +82,27 @@ statically on macOS and Windows (pinned source, release toolchain); Linux uses t
 release ships in `sdk/runtime`. The ImGui SDL3 and SDL_Renderer backends are the unmodified ones of
 the vendored ImGui release.
 
-## Windows: Python without PowerShell
+## Windows: the bundled Python
 
-`Wind Waker HD.exe` gets the pinned embeddable Python (`python.windows` in `toolchains.json`) itself
-(`gui/python_fetch_win.cpp`): WinHTTP download (system proxy settings), SHA-256 check with Windows CNG
-against the pin, unpacked with zlib (`gui/unzip_min.cpp`; `python.exe` written last) into
-`<data>\python\<dir>`, where `<data>` is `%WWHD_DATA_DIR%`, the release folder's `data` (portable
-release) or `%LOCALAPPDATA%\WWHD`. The window does this on a thread while it shows "Preparing the
-installer..."; `--console-setup ARGS` (the first argument; used by `tools\Setup in a console window.bat`)
-does the same in the console it was started from and then runs `setup.py ARGS` there. `setup.py` uses
-the Windows API through ctypes for its file dialogs and shortcuts. Until 0.2.6 this was a PowerShell
-script started with `-ExecutionPolicy Bypass` that also removed the "mark of the web" from every file in
-the release folder; antivirus heuristics read that as a dropper (issue #58). Nothing needs the mark
-removed: SmartScreen asks once for `Wind Waker HD.exe` and remembers "Run anyway", and programs started
-with CreateProcess (Python, the extractor, the compiler, the game) and DLLs are not checked for it.
+The Windows release ships the official embeddable Python (`python.windows` in `toolchains.json`)
+unmodified in `tools/python`: the release workflow downloads the pinned zip, `tools/release/package.py
+--windows-python` checks it against the pin and every file against `tools/release/python-windows-files.json`
+and unpacks it, and `tools/release/guard.py` allows exactly those files there. Its programs and DLLs keep
+the Python Software Foundation's signature (the release workflow checks it); its license is in
+`third-party-licenses/Python.txt`. It lives in the release folder, not in the data folder, because it belongs
+to the release (like `tools/` and `sdk/`): the same place works for portable and per-user (`%LOCALAPPDATA%\WWHD`)
+installations and for `--data-dir`/`WWHD_DATA_DIR`, and a newer release brings its own.
+
+`Wind Waker HD.exe` starts `tools\python\python.exe tools\installer\setup.py --gui-protocol` directly
+(`gui/console_setup_win.cpp`); `--console-setup ARGS` (the first argument; used by
+`tools\Setup in a console window.bat`) runs `setup.py ARGS` in the console it was started from. If
+`tools\python` is missing, both say that the release is incomplete and should be unzipped again. The program
+contains no download code and starts no script host; `setup.py` uses the Windows API through ctypes for its
+file dialogs and shortcuts. Until 0.2.6 a PowerShell script started with `-ExecutionPolicy Bypass` removed
+the "mark of the web" from every file in the release folder and downloaded Python; antivirus heuristics read
+that as a dropper (issue #58). Nothing needs the mark removed: SmartScreen asks once for `Wind Waker HD.exe`
+and remembers "Run anyway", and programs started with CreateProcess (Python, the extractor, the compiler,
+the game) and DLLs are not checked for it.
 
 ## Linux on x86-64 and arm64
 

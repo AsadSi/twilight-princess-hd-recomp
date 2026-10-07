@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for the installer's helpers (no game files, no network): python3 test_setup.py"""
 import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -230,7 +231,7 @@ class Arch(unittest.TestCase):
 
 class NoScriptHost(unittest.TestCase):
     """Antivirus heuristics read "unsigned program starts PowerShell" as a dropper (issue #58): the Windows setup
-    uses the Windows API instead (Wind Waker HD.exe fetches Python, setup.py uses ctypes)."""
+    uses the Windows API instead (the release ships Python, setup.py uses ctypes)."""
 
     def test_no_powershell(self):
         here = os.path.dirname(os.path.abspath(__file__))
@@ -251,6 +252,43 @@ class NoScriptHost(unittest.TestCase):
             self.assertEqual(head[:4], b"\x4c\x00\x00\x00")  # a shell link header
             self.assertEqual(head[4:20], bytes.fromhex("0114020000000000c000000000000046"))  # its CLSID
             setup.win_shortcut(link, sys.executable, workdir=d)  # replaces it
+
+
+class BundledPython(unittest.TestCase):
+    """The Windows release ships the pinned embeddable Python in tools/python; guard.py allows exactly its files."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release"))
+        import guard
+        self.guard = guard
+        with open(guard.PYTHON_FILES) as f:
+            self.expected = json.load(f)
+
+    def test_manifest_matches_pin(self):
+        pin = setup.load_toolchains()["python"]["windows"]
+        self.assertEqual(self.expected["sha256"], pin["sha256"])
+        self.assertEqual(self.expected["url"], pin["url"])
+        for name in ("python.exe", "pythonw.exe", "python3.dll", "LICENSE.txt"):
+            self.assertIn(name, self.expected["files"])
+
+    def test_guard_rejects_other_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            py = os.path.join(d, "WindWakerHD-x", "tools", "python")
+            os.makedirs(py)
+            with open(os.path.join(py, "python.exe"), "wb") as f:
+                f.write(b"MZ not the real one")
+            with open(os.path.join(py, "dropper.exe"), "wb") as f:
+                f.write(b"MZ")
+            problems, _ = self.guard.scan(d)
+            text = "\n".join(problems)
+            self.assertIn("python.exe: differs", text)
+            self.assertIn("dropper.exe: not a file", text)
+            self.assertIn("lacks files", text)
+
+    def test_windows_finds_bundled_python(self):
+        # what the GUI and --console-setup start (tools/installer/gui/console_setup_win.cpp)
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui", "console_setup_win.cpp")) as f:
+            self.assertIn('"tools\\\\python\\\\python.exe"', f.read())
 
 
 class NonInteractive(unittest.TestCase):

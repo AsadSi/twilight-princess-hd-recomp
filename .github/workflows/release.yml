@@ -305,11 +305,23 @@ jobs:
           ctest --test-dir build/rel --output-on-failure
           python tools/installer/test_setup.py
 
+      - name: Pinned embeddable Python, shipped in the release (tools/installer/toolchains.json)
+        # the setup runs with it (tools/python); the release itself downloads no Python (issue #58)
+        run: |
+          read -r URL SUM < <(python -c "
+          import json; p=json.load(open('tools/installer/toolchains.json'))['python']['windows']
+          print(p['url'], p['sha256'])" | tr -d '\r')
+          T="$(cygpath -m "$RUNNER_TEMP")"
+          curl -fsSL -o "$T/python-embed.zip" "$URL"
+          echo "$SUM  $T/python-embed.zip" | sha256sum -c -
+          echo "WIN_PY_ZIP=$T/python-embed.zip" >> "$GITHUB_ENV"
+
       - name: Package
         run: |
           W="$(cygpath -m "$PWD")"  # native Windows Python cannot open /d/a/... paths
           python tools/release/package.py --build build/rel --platform windows-x86_64 --version "$VERSION" \
             --out dist --toolchain llvm-mingw-20260922 --setup-gui build/rel/wwhd-setup.exe \
+            --windows-python "$WIN_PY_ZIP" \
             --runtime-file build/rel/SDL3.dll \
             --license "SDL3 (zlib)=$W/build/rel/_deps/sdl3-src/LICENSE.txt" \
             --license "Vulkan-Headers (Apache-2.0)=$VULKAN_DIR/LICENSE.md" \
@@ -338,6 +350,19 @@ jobs:
               if ($enc.GetString($bytes).IndexOf($word, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "Wind Waker HD.exe contains '$word'" }
             }
           }
+          # no download code: no network library among its imports (import names are ASCII)
+          $ascii = [Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($dll in 'winhttp.dll', 'wininet.dll', 'urlmon.dll', 'ws2_32.dll', 'bcrypt.dll') {
+            if ($ascii.IndexOf($dll, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "Wind Waker HD.exe imports $dll" }
+          }
+          # the bundled Python is the official one, unmodified: its programs and DLLs keep the PSF signature
+          foreach ($f in 'python.exe', 'pythonw.exe', 'python3.dll', 'python313.dll') {
+            $sig = Get-AuthenticodeSignature (Join-Path $pkg "tools\python\$f")
+            "tools\python\$f`: $($sig.Status), $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
+              throw "tools\python\$f does not carry a valid PSF signature"
+            }
+          }
           # version information, a manifest and no debug sections (cmake/WindowsResources.cmake, WWHD_STRIP_RELEASE)
           foreach ($f in 'Wind Waker HD.exe', 'tools\bin\wwhd-extract.exe') {
             $p = Join-Path $pkg $f
@@ -349,7 +374,7 @@ jobs:
             if ($text.IndexOf('requestedExecutionLevel') -lt 0) { throw "$f has no application manifest" }
           }
 
-      - name: Installer self-test, setup in a console window (Python fetched by Wind Waker HD.exe, toolchain download)
+      - name: Installer self-test, setup in a console window (bundled Python, toolchain download)
         # the .bat as a player starts it (it runs "Wind Waker HD.exe --console-setup"); no input
         shell: cmd
         run: |
@@ -361,8 +386,7 @@ jobs:
         run: |
           $pkg = $env:WWHD_PKG
           $data = $env:WWHD_DATA_DIR
-          $pins = Get-Content -Raw (Join-Path $pkg 'tools\installer\toolchains.json') | ConvertFrom-Json
-          if (-not (Test-Path (Join-Path $data "python\$($pins.python.windows.dir)\python.exe"))) { throw "Python was not fetched" }
+          if (Test-Path (Join-Path $data 'python')) { throw "the setup downloaded a Python (it should use tools\python)" }
           if (-not (Test-Path (Join-Path $data 'install.json'))) { throw "the console setup did not finish" }
           $exe = Join-Path $data 'bin\wwhd.exe'
           if (-not (Test-Path (Join-Path $data 'bin\SDL3.dll'))) { throw "SDL3.dll was not installed" }
@@ -380,14 +404,14 @@ jobs:
           $null = $g.Handle  # keeps the process handle so ExitCode is available after it exits
           if (-not $g.WaitForExit(600000)) { $g.Kill(); throw "the setup program did not finish its self-test" }
           if ($g.ExitCode -ne 0) { throw "setup program self-test failed ($($g.ExitCode))" }
-          # the window fetching Python itself (a data folder without Python)
+          # the window on a fresh data folder: setup.py starts with the bundled Python, nothing is downloaded
           $env:WWHD_DATA_DIR = Join-Path $env:RUNNER_TEMP 'data-gui'
           $g = Start-Process -FilePath (Join-Path $pkg 'Wind Waker HD.exe') `
             -ArgumentList '--self-test', '--data-dir', $env:WWHD_DATA_DIR -PassThru
           $null = $g.Handle
-          if (-not $g.WaitForExit(600000)) { $g.Kill(); throw "the setup program did not finish its self-test (Python download)" }
-          if ($g.ExitCode -ne 0) { throw "setup program self-test with Python download failed ($($g.ExitCode))" }
-          if (-not (Test-Path (Join-Path $env:WWHD_DATA_DIR "python\$($pins.python.windows.dir)\python.exe"))) { throw "the window did not fetch Python" }
+          if (-not $g.WaitForExit(600000)) { $g.Kill(); throw "the setup program did not finish its self-test (fresh data folder)" }
+          if ($g.ExitCode -ne 0) { throw "setup program self-test on a fresh data folder failed ($($g.ExitCode))" }
+          if (Test-Path (Join-Path $env:WWHD_DATA_DIR 'python')) { throw "the window downloaded a Python" }
 
       - uses: actions/upload-artifact@v4
         with:

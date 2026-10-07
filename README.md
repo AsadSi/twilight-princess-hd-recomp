@@ -328,8 +328,8 @@ First start, per system:
   When setup cannot continue it says what failed and what to do, and writes it to
   `data/setup-window.log` (or `~/Library/Logs/Wind Waker HD setup.log` when the folder is not writable).
 - **Windows**: the release is not code-signed, so SmartScreen may say "Windows protected your PC":
-  **More info › Run anyway**. The first start downloads Python (11 MB) and the compiler (llvm-mingw,
-  190 MB) into the release folder, SHA-256 checked, no administrator rights; at the end you can remove
+  **More info › Run anyway**. Python comes with the release (`tools/python`, the official embeddable
+  Python). The first start downloads the compiler (llvm-mingw, 190 MB) into the release folder, SHA-256 checked, no administrator rights; at the end you can remove
   the compiler again (it is only needed to repair, and downloaded again then).
 - **Linux**: start `wind-waker-hd` (or `Wind Waker HD.desktop`; some desktops ask to allow launching
   it first). It uses your Python 3 and downloads the compiler (zig, 55 MB; the x86-64 or arm64 build
