@@ -10,13 +10,26 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
-### Next update (unreleased, on `devel`)
+### v0.2.4
 
-- **Less CPU work per frame with the Vulkan renderer on macOS:** vertex, index and uniform data the
-  game does not change are kept on the GPU instead of being copied again for every draw (and again for
-  every 60 fps in-between frame). Measured on Outset Island and Windfall: 6-17% less render-thread
-  time and 43-64% less data uploaded per frame. Windows, Linux and Android testers can try it with
-  `WWHD_VK_BUFFER_CACHE=1`; see `docs/vulkan.md` ("Guest buffer cache") for what to report.
+- **Smoother 60 fps on slower PCs (Vulkan):** the render thread no longer waits for the GPU after
+  every frame on Windows, Linux and macOS (the way Android already worked), so CPU and GPU work in
+  parallel. Where the render thread is the limit, this is the difference between slow motion and
+  full speed: in our load tests the game went from 35–40 fps with only a third to half of the 60 fps
+  in-between frames drawn to a steady ~59 fps with almost all of them, at full game speed. Without
+  a frame limit it renders 13–53% more frames per second, depending on the scene. (Issues #7, #44)
+- **Less CPU work per frame (Vulkan):** 15 renderer shortcuts that were Android-only are now on
+  everywhere (8–14% less render-thread time), and on macOS vertex, index and uniform data the game
+  does not change stay on the GPU instead of being copied again for every draw (another 6–17% less
+  render-thread time and 43–64% less data uploaded per frame). Windows, Linux and Android players
+  can try that cache with `WWHD_VK_BUFFER_CACHE=1`; `docs/vulkan.md` ("Guest buffer cache") says
+  what to report.
+- **Performance report** (settings overlay → **Graphics** → **Copy performance report**): copies a
+  breakdown of the render thread's time per frame to the clipboard, for bug reports about speed.
+- **macOS: setup works when the app is opened straight from the downloaded folder** (issue #48).
+  Every setup error now says what failed, what to do, and where the log is.
+- **Sound in GamePad-only mode** (Off-TV Play, the Minus button): the game's sound now plays through
+  your speakers instead of going silent (issue #49).
 
 ### v0.2.3
 
