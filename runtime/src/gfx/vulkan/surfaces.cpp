@@ -634,7 +634,7 @@ static Surface* rescale(Surface* s) {
 // then through the plain one (issue #53). Each format gets its own image here, so before one is
 // used, take over the texels of a more recent compatible one (a raw copy, as the memory is shared).
 static Surface* adopt_newer_alias(Surface* s) {
-    if(!s||!s->image||s->isDepth||s->fmt.compressed||s->fmt.convert!=Convert::NONE)return s;
+    if(!s||!s->formatViews||!s->image)return s;  // the common case: one view per address, nothing to do
     Surface* newest=nullptr;
     auto range=R.surfaces.equal_range(s->addr);
     for(auto it=range.first;it!=range.second;++it) {
@@ -693,6 +693,16 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     s->format=d.format;s->dim=d.dim;s->tileMode=d.tileMode;s->swizzle=d.swizzle;s->isDepth=d.isDepth;
     s->fmt=format_info(d.format,d.isDepth);create_surface_image(s.get(),forRendering);
     auto* raw=s.get();R.surfaces.emplace(d.addr,std::move(s));
+    // format views of one guest surface (adopt_newer_alias): flag them once, so lookups stay cheap
+    if(!raw->isDepth&&!raw->fmt.compressed&&raw->fmt.convert==Convert::NONE) {
+        auto views=R.surfaces.equal_range(d.addr);
+        for(auto it=views.first;it!=views.second;++it) {
+            Surface* o=it->second.get();
+            if(o!=raw&&!o->isDepth&&!o->fmt.compressed&&o->fmt.convert==Convert::NONE&&o->format!=raw->format&&(o->format&0x3F)==(raw->format&0x3F)&&
+               o->fmt.hostBytesPerBlock==raw->fmt.hostBytesPerBlock)
+                o->formatViews=raw->formatViews=true;
+        }
+    }
     if(!raw->isDepth&&static_cast<Latte::E_HWTILEMODE>(raw->tileMode)==Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED)R.linearTargets.push_back(raw);
     return forRendering?adopt_newer_alias(raw):raw;
 }

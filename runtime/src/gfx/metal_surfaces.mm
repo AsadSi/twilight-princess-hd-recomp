@@ -297,7 +297,7 @@ void resample(id<MTLTexture> src, id<MTLTexture> dst, const FormatInfo& fmt, uin
 // then through the plain one (issue #53). Each format gets its own texture here, so before one is
 // used, take over the texels of a more recent compatible one (a raw copy, as the memory is shared).
 static Surface* adopt_newer_alias(Surface* s) {
-    if (!s || !s->tex || s->isDepth || s->fmt.compressed || s->fmt.convert != Convert::NONE) return s;
+    if (!s || !s->formatViews || !s->tex) return s;  // the common case: one view per address, nothing to do
     if (R.binding) return s;  // a texture looked up again while binding to the open encoder: no blits now
     Surface* newest = nullptr;
     auto range = R.surfaces.equal_range(s->addr);
@@ -392,6 +392,16 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
             s->isDepth ? " depth" : "", (unsigned long)s->tex.width, (unsigned long)s->tex.height);
     Surface* raw = s.get();
     R.surfaces.emplace(d.addr, std::move(s));
+    // format views of one guest surface (adopt_newer_alias): flag them once, so lookups stay cheap
+    if (!raw->isDepth && !raw->fmt.compressed && raw->fmt.convert == Convert::NONE) {
+        auto views = R.surfaces.equal_range(d.addr);
+        for (auto it = views.first; it != views.second; ++it) {
+            Surface* o = it->second.get();
+            if (o != raw && !o->isDepth && !o->fmt.compressed && o->fmt.convert == Convert::NONE && o->format != raw->format &&
+                (o->format & 0x3F) == (raw->format & 0x3F) && o->fmt.hostBytesPerBlock == raw->fmt.hostBytesPerBlock)
+                o->formatViews = raw->formatViews = true;
+        }
+    }
     if (!raw->isDepth && (Latte::E_HWTILEMODE)raw->tileMode == Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED) R.linearTargets.push_back(raw);
     return forRendering ? adopt_newer_alias(raw) : raw;
 }
