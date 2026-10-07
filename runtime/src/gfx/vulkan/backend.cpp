@@ -1413,8 +1413,13 @@ void swap() {
       }
       intervalCount=0;slowIntervals=0;
       auto ss=vk::shader_stats();
-      LOG("[vulkan shaders] lookups %llu last hits %llu variants %llu compiles %llu total compile %.1f ms",
-          (unsigned long long)ss.lookups,(unsigned long long)ss.lastHits,(unsigned long long)ss.variantHits,(unsigned long long)ss.compiles,ss.compileNs/1e6);
+      LOG("[vulkan shaders] lookups %llu last hits %llu variants %llu compiles %llu total compile %.1f ms; %llu programs, %llu keys, %llu shaders (%llu keys shared)",
+          (unsigned long long)ss.lookups,(unsigned long long)ss.lastHits,(unsigned long long)ss.variantHits,(unsigned long long)ss.compiles,ss.compileNs/1e6,
+          (unsigned long long)ss.programs,(unsigned long long)ss.variantKeys,(unsigned long long)ss.shaders,(unsigned long long)ss.variantAliases);
+      if (ss.verifyChecks || ss.verifySplitKeys)
+        LOG("[vulkan shader key verify] %llu pre-narrowing keys checked, %llu violations, %llu split; %.1f ms",
+            (unsigned long long)ss.verifyChecks,(unsigned long long)ss.verifyViolations,
+            (unsigned long long)ss.verifySplitKeys,ss.verifyNs/1e6);
       LOG("[vulkan shader disk] hits %llu; memory reuses %llu; SPIR-V compiles %llu %.1f ms; decompile %.1f ms; loads %llu %.1f ms; saves %llu worker %.1f ms %.2f MiB; snapshots %.1f ms",
           (unsigned long long)ss.diskHits,(unsigned long long)ss.spirvReuseHits,(unsigned long long)ss.spirvCompiles,ss.spirvCompileNs/1e6,
           ss.decompileNs/1e6,(unsigned long long)ss.diskLoads,ss.diskLoadNs/1e6,
