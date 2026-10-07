@@ -5,6 +5,7 @@
 #define VK_USE_PLATFORM_METAL_EXT  // VK_EXT_metal_surface: AppKit views' CAMetalLayers
 #endif
 #include "backend.h"
+#include "buffer_cache.h"
 #include "render_prof.h"
 #include "present.h"
 #include "gfx/display.h"
@@ -659,6 +660,8 @@ static void cleanup_submission(Renderer::Submission& slot) {
     vkFreeMemory(R.device, b.memory, nullptr);
   }
   slot.garbageBuffers.clear();
+  buffer_cache_free(slot.garbageCacheRegions);
+  slot.garbageCacheRegions.clear();
   for (auto &i : slot.garbageImages) {
     for (auto v : i.views)
       if (v)
@@ -699,6 +702,7 @@ static void activate_submission(size_t index) {
   R.uploadBlocks=std::move(slot.uploadBlocks);
   R.garbageBuffers=std::move(slot.garbageBuffers);
   R.garbageImages=std::move(slot.garbageImages);
+  R.garbageCacheRegions=std::move(slot.garbageCacheRegions);
   R.recording=false;R.rendering=false;R.passTracked=false;
 }
 static void drain_submissions() {
@@ -743,6 +747,7 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
   slot.uploadBlocks=std::move(R.uploadBlocks);
   slot.garbageBuffers=std::move(R.garbageBuffers);
   slot.garbageImages=std::move(R.garbageImages);
+  slot.garbageCacheRegions=std::move(R.garbageCacheRegions);
   slot.pending=true;
   if (asynchronous) {
     activate_submission((R.activeSubmission+1)%R.submissions.size());
@@ -754,11 +759,13 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
 void flush_async() {
   // Deferred objects may reference earlier queued work even if this slot has
   // no draw commands. Submit an empty command buffer to retire them in order.
-  if (!R.recording && (!R.garbageBuffers.empty() || !R.garbageImages.empty())) command_buffer();
+  if (!R.recording && (!R.garbageBuffers.empty() || !R.garbageImages.empty() ||
+                       !R.garbageCacheRegions.empty())) command_buffer();
   submit(VK_NULL_HANDLE,VK_NULL_HANDLE,true);
 }
 void flush() {
-  if (!R.recording && (!R.garbageBuffers.empty() || !R.garbageImages.empty())) command_buffer();
+  if (!R.recording && (!R.garbageBuffers.empty() || !R.garbageImages.empty() ||
+                       !R.garbageCacheRegions.empty())) command_buffer();
   submit();
   drain_submissions();
 }
@@ -1318,6 +1325,7 @@ void swap() {
   set_present_plan(nullptr);
   std::atomic_ref<uint64_t>(R.frame).fetch_add(1);
   R.completed = R.frame;
+  buffer_cache_end_frame();
   report_gpu_timestamps();
   perf_hint::frame_done();
   checkpoint_pipeline_cache();
@@ -1399,6 +1407,7 @@ void swap() {
             (unsigned long long)faults,(unsigned long long)protectedPages);
         checks=g_stat_full_checks;uploads=g_stat_uploads;
       }
+      buffer_cache_report(double(R.frame-frame));
       // CPU-only reports leave per-draw counters/comparison clocks disabled.
       if (perf_enabled()) {
       double frames = double(R.frame-frame);

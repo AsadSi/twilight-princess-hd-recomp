@@ -1,6 +1,7 @@
 #include "mods/cemu_pack.h"
 // Guest surfaces backed by Vulkan images. LatteAddrLib supplies guest tiling geometry.
 #include "backend.h"
+#include "buffer_cache.h"
 #include "render_prof.h"
 #include "settings.h"
 #include "sparse_hash_memo.h"
@@ -809,6 +810,7 @@ void copy_surface(uint32_t src,uint32_t srcMip,uint32_t srcSlice,uint32_t dst,ui
     copy_surface_impl(src,srcMip,srcSlice,dst,dstMip,dstSlice);
 }
 void invalidate(uint32_t flags,uint32_t addr,uint32_t size) {
+    buffer_cache_guest_invalidate(flags,addr,size);
     ++g_stat_invalidates;if(!(flags&2)||size>=0x10000000)return;
     uint64_t end=uint64_t(addr)+size;
     for(auto& [base,s]:R.surfaces) {

@@ -4,6 +4,7 @@
 #include "Cafe/HW/Latte/ISA/LatteReg.h"
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "backend.h"
+#include "buffer_cache.h"
 #include "render_prof.h"
 #include "runtime.h"
 #include "shaders.h"
@@ -318,6 +319,36 @@ VertexExtent indexed_vertex_extent(const void* data, size_t count,
                       : index_extent_typed<uint32_t,true>(data,count,restart,baseVertex);
   return width == 2 ? index_extent_typed<uint16_t>(data, count, restart, baseVertex)
                     : index_extent_typed<uint32_t>(data, count, restart, baseVertex);
+}
+// Index extents of buffer cache entries (buffer_cache.h): the extent of the cached bytes at base
+// vertex 0 is memoized in the entry, the draw's base vertex is applied per draw. The result equals
+// indexed_vertex_extent over the same bytes.
+VertexExtent cached_index_extent(bufcache::Entry& e, const void* data, size_t count, uint32_t width,
+                                 bool restart, int32_t baseVertex) {
+  const uint64_t key = uint64_t(count) | uint64_t(width) << 40 | uint64_t(restart) << 48;
+  if (e.memoKey != key) {
+    if (!data) return {};  // no bytes to scan: the full binding is copied (always safe)
+    const VertexExtent raw = width == 2 ? index_extent_typed<uint16_t, true>(data, count, restart, 0)
+                                        : index_extent_typed<uint32_t, true>(data, count, restart, 0);
+    e.memo[0] = raw.valid; e.memo[1] = raw.minimum; e.memo[2] = raw.maximum;
+    e.memoKey = key;
+  }
+  if (!e.memo[0]) return {};
+  const bool window = vertex_copy_window_enabled();
+  if (!baseVertex) return {true, e.memo[2], window ? e.memo[1] : 0};
+  const int64_t low = int64_t(e.memo[1]) + baseVertex, high = int64_t(e.memo[2]) + baseVertex;
+  if (low < 0 || high > UINT32_MAX) return {};
+  return {true, uint32_t(high), window ? uint32_t(low) : 0};
+}
+VkPrimitiveTopology primitive_topology(uint32_t prim) {
+  switch (prim) {
+  case 1: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  case 2: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+  case 3: case 0x12: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+  case 4: case 5: case 0x13: case 0x14: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  case 6: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+  default: throw std::runtime_error("unsupported Vulkan primitive");
+  }
 }
 uint32_t vertex_prefix_size(uint32_t declared, uint32_t stride,
                             uint64_t attributeEnd, VertexExtent extent) {
@@ -1510,7 +1541,9 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     write.descriptorCount = 1;
     return write;
   };
-  auto uniform = [&](int binding, const void *bytes, size_t size, size_t logicalSlot) {
+  // guestAddr: a guest uniform block (bytes == mem::ptr(guestAddr)), served by the buffer cache if on
+  auto uniform = [&](int binding, const void *bytes, size_t size, size_t logicalSlot,
+                     uint32_t guestAddr = 0) {
     if (binding < 0)
       return;
     if (size > R.properties.limits.maxUniformBufferRange)
@@ -1528,7 +1561,11 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     auto fresh = [&](const void* source, size_t length) {
       return snapshot(source, length, R.properties.limits.minUniformBufferOffsetAlignment);
     };
-    const auto b = reuseUniforms
+    UploadSlice cachedSlice;
+    const bool cached = guestAddr && buffer_cache_enabled() &&
+        cached_guest_range(guestAddr, uint32_t(size), rprof::kUpUbo, cachedSlice);
+    const auto b = cached ? cachedSlice
+        : reuseUniforms
         ? uniformCache.get(R.device, R.submissionGeneration,
                            (sh->vertex ? 0 : 17) + logicalSlot, bytes, size, fresh)
         : fresh(bytes, size);
@@ -1596,7 +1633,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       uint32_t addr = r[block + i * 7];
       uint32_t size = std::min<uint32_t>(r[block + i * 7 + 1] + 1, 0x10000);
       uniform(m.uniformBuffersBindingPoint[i], addr ? mem::ptr(addr) : nullptr,
-              size, size_t(i));
+              size, size_t(i), addr);
       if (addr) rprof::guest_read(rprof::kUpUbo, addr, size);
     }
   rprof::mark(rprof::kUniforms);
@@ -1794,7 +1831,25 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   const bool guestWrap = indexAddr && (indexType == 4 || indexType == 9) &&
       uint64_t(indexAddr) + guestBytes > 0x100000000ull;
   VkPrimitiveTopology topology;
-  if (specializeIndices && !nativeIndices && !guestWrap) {
+  // Converted (big-endian, fan, quad, loop, other restart marker) index data from the buffer cache:
+  // keyed by everything the conversion reads; a hit skips the conversion.
+  bufcache::Entry* convertedEntry = nullptr;
+  bool convertedHit = false;
+  if (indexAddr && !nativeIndices && !guestWrap && buffer_cache_enabled() &&
+      guestBytes <= (8u << 20) && uint64_t(indexAddr) + guestBytes <= 0x100000000ull) {
+    const bufcache::Key key{indexAddr, bufcache::kIndexConverted,
+        uint64_t(count) | uint64_t(prim & 0xff) << 32 | uint64_t(indexType & 0xff) << 40 |
+            uint64_t(stripRestart) << 48 | uint64_t(specializeIndices) << 49,
+        stripRestart ? restartIndex : 0};
+    switch (buffer_cache().lookup(key, uint32_t(guestBytes), convertedEntry)) {
+    case bufcache::kHit: convertedHit = true; break;
+    case bufcache::kMiss: break;  // armed: convert below, then upload
+    case bufcache::kBypass: convertedEntry = nullptr; break;
+    }
+  }
+  if (convertedHit && !buffer_cache_verify()) {
+    topology = primitive_topology(prim);
+  } else if (specializeIndices && !nativeIndices && !guestWrap) {
     switch (prim) {
     case 1: topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
     case 2: topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
@@ -1879,6 +1934,24 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     for (uint32_t i = 0; i < count; i++)
       indices[i] = idx(i);
   }
+  }
+  if (convertedEntry) {
+    const bool hostStrip = topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP ||
+                           topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    if (!convertedHit) {
+      if (indices.empty() ||
+          !buffer_cache().upload(*convertedEntry, indices.data(), uint32_t(indices.size() * 4))) {
+        convertedEntry = nullptr;
+      } else {
+        rprof::add_upload(rprof::kUpIndex, indices.size() * 4);
+        cached_index_extent(*convertedEntry, indices.data(), indices.size(), 4, hostStrip, 0);
+      }
+    } else if (buffer_cache_verify()) {
+      uint32_t diff = 0;
+      if (convertedEntry->outSize != indices.size() * 4 ||
+          !buffer_cache().verify(*convertedEntry, indices.data(), uint32_t(indices.size() * 4), &diff))
+        buffer_cache_mismatch("converted indices", *convertedEntry, uint32_t(indices.size() * 4), diff);
+    }
   }
   rprof::mark(rprof::kIndices);
   const auto &lcr = *reinterpret_cast<const LatteContextRegister *>(r);
@@ -2128,13 +2201,26 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   const bool hostRestart = topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP ||
                            topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
   VertexExtent vertexExtent;
+  const void* nativeIndexData = nullptr;  // the bytes of nativeIndexSlice, on the CPU
   if (nativeIndices) {
     const uint32_t indexBytes = indexType == 0 ? 2 : 4;
-    nativeIndexSlice = snapshot(mem::ptr(indexAddr), size_t(count) * indexBytes, 4);
+    bufcache::Entry* indexEntry = nullptr;
+    if (buffer_cache_enabled() && uint64_t(count) * indexBytes <= (8u << 20) &&
+        cached_native_indices(indexAddr, count * indexBytes, nativeIndexSlice, indexEntry)) {
+      nativeIndexData = indexEntry->shadow.data();
+      vertexExtent = cached_index_extent(*indexEntry, nativeIndexData, count, indexBytes,
+                                         hostRestart, int32_t(baseVertex));
+    } else {
+      nativeIndexSlice = snapshot(mem::ptr(indexAddr), size_t(count) * indexBytes, 4);
+      nativeIndexData = nativeIndexSlice.mapped;
+      vertexExtent = indexed_vertex_extent(nativeIndexData, count,
+                                           indexBytes, hostRestart,
+                                           int32_t(baseVertex));
+    }
     rprof::guest_read(rprof::kUpIndex, indexAddr, uint64_t(count) * indexBytes);
-    vertexExtent = indexed_vertex_extent(nativeIndexSlice.mapped, count,
-                                         indexBytes, hostRestart,
-                                         int32_t(baseVertex));
+  } else if (convertedEntry) {
+    vertexExtent = cached_index_extent(*convertedEntry, nullptr, convertedEntry->outSize / 4, 4,
+                                       hostRestart, int32_t(baseVertex));
   } else if (!indices.empty()) {
     vertexExtent = indexed_vertex_extent(indices.data(), indices.size(), 4,
                                          hostRestart, int32_t(baseVertex));
@@ -2149,8 +2235,8 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   } else if(windowStats) {
     if(nativeIndices) {
       windowExtent=indexType==0
-        ? vertex_window_extent<uint16_t>(nativeIndexSlice.mapped,count,hostRestart,int32_t(baseVertex))
-        : vertex_window_extent<uint32_t>(nativeIndexSlice.mapped,count,hostRestart,int32_t(baseVertex));
+        ? vertex_window_extent<uint16_t>(nativeIndexData,count,hostRestart,int32_t(baseVertex))
+        : vertex_window_extent<uint32_t>(nativeIndexData,count,hostRestart,int32_t(baseVertex));
     } else if(!indices.empty()) {
       windowExtent=vertex_window_extent<uint32_t>(indices.data(),indices.size(),hostRestart,int32_t(baseVertex));
     } else if(count && uint64_t(baseVertex)+count-1<=UINT32_MAX) {
@@ -2200,7 +2286,9 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
         (nativeIndices || !indices.empty()) && supported && rate &&
         attributeEnd && stride && extent.valid && vertexExtent.valid &&
         windowEnd<=copied && windowBegin<windowEnd && windowBegin!=0;
-    auto b = copyWindow
+    UploadSlice b;
+    if (!buffer_cache_enabled() || !cached_guest_range(addr, copied, rprof::kUpVertex, b))
+      b = copyWindow
         ? vertex_window_snapshot(g.attributeBufferIndex,addr,copied,
                                  uint32_t(windowBegin),uint32_t(windowEnd-windowBegin))
         : vertex_snapshot(g.attributeBufferIndex, addr, copied,
@@ -2227,6 +2315,12 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     vkCmdBindIndexBuffer(cmd, nativeIndexSlice.buffer, nativeIndexSlice.offset,
                          indexType == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, count, instances, 0, int32_t(baseVertex), 0);
+  } else if (convertedEntry) {
+    const uint32_t converted = convertedEntry->outSize / 4;
+    auto b = buffer_cache_slice(*convertedEntry, convertedEntry->outSize);
+    rprof::guest_read(rprof::kUpIndex, indexAddr, guestBytes);
+    vkCmdBindIndexBuffer(cmd, b.buffer, b.offset, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cmd, converted, instances, 0, int32_t(baseVertex), 0);
   } else if (indices.empty())
     vkCmdDraw(cmd, count, instances, baseVertex, 0);
   else {

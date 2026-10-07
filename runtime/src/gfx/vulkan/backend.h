@@ -12,6 +12,7 @@
 #include <vector>
 #include "formats.h"
 #include "api.h"
+#include "buffer_cache_core.h"
 namespace gfxvk {
 struct Buffer { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceMemory memory=VK_NULL_HANDLE; void* mapped=nullptr; VkDeviceSize size=0; };
 struct UploadSlice { VkBuffer buffer=VK_NULL_HANDLE; VkDeviceSize offset=0,size=0; void* mapped=nullptr; };
@@ -108,6 +109,7 @@ struct Renderer {
  uint64_t vertexDeclaredBytes=0,vertexCopiedBytes=0;
  uint64_t vertexReuseChecks=0,vertexReuseHits=0,vertexReuseBytes=0,vertexReuseCompareNs=0;
  std::vector<Buffer> garbageBuffers;
+ std::vector<bufcache::Region> garbageCacheRegions; // buffer cache regions replaced while recording
  struct RetiredImage { VkImage image;VkDeviceMemory memory;std::vector<VkImageView> views; }; std::vector<RetiredImage> garbageImages;
  // Each submission retains its pools, upload bytes and deferred objects until
  // its fence completes. The fields above alias the active recording slot.
@@ -128,6 +130,7 @@ struct Renderer {
   std::vector<UploadBlock> uploadBlocks;
   std::vector<Buffer> garbageBuffers;
   std::vector<RetiredImage> garbageImages;
+  std::vector<bufcache::Region> garbageCacheRegions;
  };
  std::array<Submission,4> submissions{};
  size_t activeSubmission=0;
