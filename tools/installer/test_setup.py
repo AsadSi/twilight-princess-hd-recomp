@@ -300,5 +300,144 @@ class NonInteractive(unittest.TestCase):
         self.assertFalse(ui.yesno("q", True, noninteractive=False))
 
 
+def _game_folder(root, title_id, packs, extra=()):
+    """A SYNTHETIC game folder: meta.xml with a title id, dummy files named like the language packs
+    (a SARC tag and made-up bytes, no game data)."""
+    os.makedirs(os.path.join(root, "meta"), exist_ok=True)
+    with open(os.path.join(root, "meta", "meta.xml"), "w") as f:
+        f.write('<menu><title_id type="hexBinary" length="8">%s</title_id></menu>' % title_id)
+    pack = os.path.join(root, "content", "Common", "Pack")
+    os.makedirs(pack, exist_ok=True)
+    for name in packs:
+        with open(os.path.join(pack, name), "wb") as f:
+            f.write(b"SARC synthetic " + name.encode())
+    for rel, data in extra:
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+        with open(os.path.join(root, rel), "wb") as f:
+            f.write(data)
+
+
+EU_PACKS = ["permanent_2d_EuEnglish.pack", "permanent_2d_EuFrench.pack", "permanent_2d_EuGerman.pack",
+            "permanent_2d_EuItalian.pack", "permanent_2d_EuSpanish.pack"]
+
+
+class LanguageSources(unittest.TestCase):
+    """setup --language-source on synthetic folders (untested with real European/Japanese files)."""
+
+    def test_titles(self):
+        self.assertEqual(setup.language_source_region("0005000010143600"), "EU")
+        self.assertEqual(setup.language_source_region("0005000010143400"), "JP")
+        with self.assertRaisesRegex(setup.SetupError, "USA game"):
+            setup.language_source_region("0005000010143500")
+        with self.assertRaisesRegex(setup.SetupError, "update"):
+            setup.language_source_region("0005000e10143600")
+        with self.assertRaisesRegex(setup.SetupError, "not the European or Japanese"):
+            setup.language_source_region("000500001010ec00")
+        with self.assertRaisesRegex(setup.SetupError, "not the European or Japanese"):
+            setup.language_source_region(None)
+
+    def test_kind(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(setup.language_source_kind(d), "folder")
+        self.assertEqual(setup.language_source_kind("/x/eu.WUA"), "archive")
+        self.assertEqual(setup.language_source_kind("/x/eu.wux"), "image")
+        with self.assertRaises(setup.SetupError):
+            setup.language_source_kind("/x/eu.zip")
+
+    def test_folder_european(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, data = os.path.join(d, "eur"), os.path.join(d, "data")
+            _game_folder(src, "0005000010143600", EU_PACKS + ["permanent_2d_EuRussian.pack"],
+                         extra=[("code/cking.rpx", b"synthetic code"), ("content/Common/Pack/permanent_3d.pack", b"SARC 3d"),
+                                ("content/Common/Layout/Title_00.szs", b"synthetic")])
+            os.makedirs(data)
+            (m,) = setup.add_language_source(("folder", src), data)
+            self.assertEqual(m["region"], "EU")
+            self.assertEqual([p["language"] for p in m["packs"]], ["English", "French", "German", "Italian", "Spanish"])
+            dst = os.path.join(data, "game-lang", "EU")
+            taken = sorted(os.path.relpath(os.path.join(dp, f), dst).replace(os.sep, "/")
+                           for dp, _, fs in os.walk(dst) for f in fs)
+            self.assertEqual(taken, sorted(["content/Common/Pack/" + n for n in EU_PACKS] +
+                                           ["language-source.json", "meta/meta.xml"]))  # nothing else, no code
+            german = [p for p in m["packs"] if p["language"] == "German"][0]
+            self.assertEqual(german["sha256"], hashlib.sha256(b"SARC synthetic permanent_2d_EuGerman.pack").hexdigest())
+            self.assertFalse(os.path.exists(os.path.join(data, "game-lang", "EU.partial")))
+            self.assertEqual([x["region"] for x in setup.language_sources(data)], ["EU"])
+            # again: replaces the earlier one
+            setup.add_language_source(("folder", os.path.join(src, "content")), data)  # a subfolder is taken up
+            self.assertEqual(len(setup.language_sources(data)), 1)
+            setup.remove_language_source(data, "eu")
+            self.assertEqual(setup.language_sources(data), [])
+            with self.assertRaises(setup.SetupError):
+                setup.remove_language_source(data, "EU")
+            with self.assertRaises(setup.SetupError):
+                setup.remove_language_source(data, "../game")
+
+    def test_folder_japanese_any_case(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, data = os.path.join(d, "jpn"), os.path.join(d, "data")
+            _game_folder(src, "0005000010143400", [])
+            os.rename(os.path.join(src, "content", "Common"), os.path.join(src, "content", "COMMON"))
+            with open(os.path.join(src, "content", "COMMON", "Pack", "PERMANENT_2D_JPJAPANESE.PACK"), "wb") as f:
+                f.write(b"SARC synthetic jp")
+            os.makedirs(data)
+            (m,) = setup.add_language_source(("folder", src), data)
+            self.assertEqual((m["region"], [p["language"] for p in m["packs"]]), ("JP", ["Japanese"]))
+
+    def test_folder_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = os.path.join(d, "data")
+            os.makedirs(data)
+            usa = os.path.join(d, "usa")
+            _game_folder(usa, "0005000010143500", ["permanent_2d_UsEnglish.pack"])
+            with self.assertRaisesRegex(setup.SetupError, "USA game"):
+                setup.add_language_source(("folder", usa), data)
+            empty = os.path.join(d, "empty")
+            _game_folder(empty, "0005000010143600", ["permanent_2d_UsEnglish.pack"])
+            with self.assertRaisesRegex(setup.SetupError, "no language packs"):
+                setup.add_language_source(("folder", empty), data)
+            bad = os.path.join(d, "bad")
+            _game_folder(bad, "0005000010143600", [])
+            with open(os.path.join(bad, "content", "Common", "Pack", "permanent_2d_EuGerman.pack"), "wb") as f:
+                f.write(b"not a pack")
+            with self.assertRaisesRegex(setup.SetupError, "not a language pack"):
+                setup.add_language_source(("folder", bad), data)
+            self.assertEqual(os.listdir(os.path.join(data, "game-lang")), [])  # nothing left behind
+
+    def test_image_and_archive_take_only_language_files(self):
+        """The extractor is asked for the language files only (wwhd-extract --only), for the right title."""
+        calls = []
+
+        def fake_extract(image, keys, out, title=None, only=None):
+            calls.append((image, title, list(only or [])))
+            _game_folder(out, "0005000010143600" if title != "0005000010143400_v0" else "0005000010143400",
+                         EU_PACKS[:2] if title != "0005000010143400_v0" else ["permanent_2d_JpJapanese.pack"])
+
+        def fake_archive_info(path, title=setup.SUPPORTED_TITLE):
+            self.assertIsNone(title)
+            return "wrong_title", "", {"titles": [
+                {"id": "0005000010143500", "version": 0, "folder": "0005000010143500_v0", "files": 1, "bytes": 1},
+                {"id": "0005000010143600", "version": 0, "folder": "0005000010143600_v0", "files": 1, "bytes": 1},
+                {"id": "0005000010143400", "version": 0, "folder": "0005000010143400_v0", "files": 1, "bytes": 1}]}
+        saved = setup.run_extract, setup.archive_info
+        setup.run_extract, setup.archive_info = fake_extract, fake_archive_info
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                ms = setup.add_language_source(("image", os.path.join(d, "eu.wux")), d, keys=setup.Keys(),
+                                               info={"title_id": "0005000010143600"})
+                self.assertEqual(ms[0]["region"], "EU")
+                self.assertEqual(calls[-1], (os.path.join(d, "eu.wux"), None, setup.LANGUAGE_SOURCE_FILES))
+                with self.assertRaisesRegex(setup.SetupError, "USA game"):
+                    setup.add_language_source(("image", "usa.wux"), d, keys=setup.Keys(),
+                                              info={"title_id": "0005000010143500"})
+                ms = setup.add_language_source(("archive", os.path.join(d, "both.wua")), d)
+                self.assertEqual([m["region"] for m in ms], ["EU", "JP"])  # the USA title is left alone
+                self.assertEqual([c[1] for c in calls[-2:]], ["0005000010143600_v0", "0005000010143400_v0"])
+                self.assertEqual([m["region"] for m in setup.language_sources(d)], ["EU", "JP"])
+        finally:
+            setup.run_extract, setup.archive_info = saved
+        self.assertEqual(setup.LANGUAGE_SOURCE_FILES, ["content/Common/Pack/permanent_2d_*.pack", "meta/meta.xml"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

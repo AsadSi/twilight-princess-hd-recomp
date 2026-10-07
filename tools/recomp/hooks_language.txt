@@ -1,0 +1,3 @@
+# Language sources (runtime/src/language_region.cpp, docs/language-packs.md): the region and language of
+# a European or Japanese language pack are stored after the USA game's own reader of the console language.
+025F9448  # SysSetting::update: reads cafe.language into the system setting object (0x101F4BAC)

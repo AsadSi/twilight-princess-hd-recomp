@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "../game_languages.h"
 #include "../runtime.h"
 
 namespace game_font {
@@ -85,6 +86,8 @@ bool sarc_find(const uint8_t* h, size_t n, const char* name, size_t* off, size_t
 
 // the language pack the game loads for this console language (US, EU and JP discs prefix the region)
 fs::path find_pack(int language, std::string* why) {
+    // a language source's pack (game_languages.h) is the one the game reads this run
+    if (const game_lang::Start s = game_lang::current(); s.pack) return fs::path(s.pack->host);
     static const char* const kWords[] = {"japanese", "english", "french", "german", "italian", "spanish",
                                          "chinese", "korean", "dutch", "portuguese", "russian", "chinese"};
     const std::string word = language >= 0 && language < 12 ? kWords[language] : "english";
