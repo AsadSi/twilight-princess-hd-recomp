@@ -247,6 +247,64 @@ roughly 4,124 calls per frame in the saved scene while retaining fresh byte chec
 State memo differential QA passed 100,000 cases with UBSan. ASan could not run:
 a process sample showed a runtime initializer deadlock before `main`.
 
+## Guest buffer cache (opt-in)
+
+`WWHD_VK_BUFFER_CACHE=1` replaces the per-draw copies of guest vertex arrays, index arrays and uniform
+blocks into the upload arena with persistent GPU copies keyed by guest address
+(`runtime/src/gfx/vulkan/buffer_cache_core.h`, glue in `buffer_cache.cpp`). It is off by default.
+
+- **Validity without hashing.** An entry is current while none of its pages has a newer stamp in the
+  page write tracker (`runtime/src/write_watch.h`, shared with the texture checks): the upload arms
+  (write-protects) the range before reading it, and the first CPU write to such a page faults once and
+  stamps it. Kernel writes are bracketed by `HostWrite` (FSReadFile). Explicit guest signals stamp a
+  separate hint array that only the buffer cache reads: `DCFlushRange`, `DCFlushRangeNoSync`,
+  `DCStoreRange`, `DCStoreRangeNoSync` and `GX2Invalidate` of attribute or uniform buffers (in command
+  order). A save-state load drops every entry. Nothing writes guest memory from the GPU (no stream-out;
+  render targets stay GPU images). Checking an entry costs one atomic load when nothing was stamped
+  anywhere since its last check, otherwise one stamp comparison per page.
+- **What is cached.** Vertex-array prefixes, guest uniform blocks (FULL_CBANK shaders), native index
+  data (with a CPU shadow and a memoized index extent, so draws never rescan it) and converted index
+  data (big-endian, fans, quads, loops, other restart markers: a hit skips the conversion). A request
+  with the same start and at most the cached size hits; a longer one uploads the longer range; ranges
+  with other starts are separate entries. Packed uniform variables stay in the arena.
+- **Dynamic ranges.** A range re-uploaded because of writes three times, each within four frames of the
+  previous upload, is no longer armed and takes the arena path; it is tried again after 64 frames,
+  doubling up to 2048.
+- **Memory.** 32 MiB host-visible blocks, device-local when the device offers it (unified memory,
+  resizable BAR or the 256 MiB BAR window, of which at most half is used). `WWHD_VK_BUFFER_CACHE_MB`
+  sets the budget (default 256). Replaced regions are retired with the recording submission and freed
+  after its fence. Entries unused for 1800 frames are evicted, the least recently used ones when over
+  budget.
+- **Verify mode.** `WWHD_VK_BUFFER_CACHE_VERIFY=1` (implies the cache) compares every hit with freshly
+  read guest bytes (converted indices: a fresh conversion) and logs `VERIFY MISMATCH` with address and
+  size; a difference caused by a write racing the check (newer stamp) is counted as "raced" instead.
+- `WWHD_VK_BUFFER_CACHE_HINTS=0` ignores the DCFlush/GX2Invalidate hints (write faults only).
+
+With `WWHD_VK_CPU_ONLY_STATS=1` the 120-frame report adds a `[vulkan buffer cache]` line: lookups,
+hit rate, uploads, stale entries, dynamic bypasses, resident MiB, hints and protect failures; the
+`[vulkan textures]` line shows the page write faults (textures and buffers together).
+
+Measured 2026-10-07 on an Apple M3 Max (Vulkan via MoltenVK), against the then-new desktop defaults
+(lazy DrawDone, async present, the 15 CPU paths), 6 interleaved runs per variant, hidden windows,
+`tools/bench/run_bench.py` (state load at frame 450, 40 s scripted walk), medians:
+
+| Scene, mode | Render-thread CPU ms/frame off → on | Swaps/s off → on | Uploads MiB/frame off → on |
+| --- | --- | --- | --- |
+| Outset, 30 fps uncapped | 5.05 → 4.65 | 190.5 → 197.1 | 18.1 → 10.3 |
+| Windfall, 30 fps uncapped | 5.32 → 4.41 | 187.5 → 210.2 | 25.7 → 9.2 |
+| Outset, 60 fps paced | 5.32 → 4.98 | 59.7 → 59.7 | 18.2 → 10.3 (hold frames too) |
+| Windfall, 60 fps paced | 5.48 → 4.75 | 59.7 → 59.7 | 25.9 → 9.3 (hold frames too) |
+
+Page write faults rise from about 2 to 9-15 per frame (about 3.7 µs each on this machine). With an
+artificial 10 ms render-thread load (Windfall, paced 60, visible windows) the cache raised swaps/s from
+57.8 to 59.2 and drawn in-between frames from 99.2% to 100%, and lowered the p95 swap interval from
+20.6 to 19.0 ms. The snapshot-reuse defaults (`WWHD_VK_REUSE_VERTEX_SNAPSHOTS`,
+`WWHD_VK_VERTEX_HISTORY_REUSE`, `WWHD_VK_REUSE_UNIFORM_SNAPSHOTS`) are complementary: the cache supersedes
+them for the ranges it serves; they still trim the arena copies of dynamic ranges (turning them off with
+the cache on costs 0.06-0.2 ms/frame). What remains in the arena (about 8.5 MiB/frame of vertex data)
+is ranges the game rewrites every frame; they were invalidated by write faults, not by the hints.
+Verify mode found 0 mismatches in 142 million checked hits (330 s per scene, 30 and 60 fps).
+
 ## Live graphics controls
 
 In the macOS app the Graphics and Display menus and their keys work as with Metal. The SDL game window
