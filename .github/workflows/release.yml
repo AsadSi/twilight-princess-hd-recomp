@@ -419,6 +419,43 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  # Internal monitor: uploads every release zip and the Windows "Wind Waker HD.exe" to VirusTotal and writes
+  # the results to the job summary and vt-report.json. It never fails the release and publishes nothing; the
+  # publish job does not wait for it. Without the VT_API_KEY secret (forks, pull requests) it only says so.
+  virustotal:
+    needs: [version, macos, linux, windows]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 45
+    env:
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
+      # later: put the report links into the release notes (not wired up; keep "false")
+      VT_LINKS_IN_RELEASE_NOTES: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: VirusTotal scan (monitor only)
+        continue-on-error: true
+        run: |
+          if [ -n "$VT_API_KEY" ]; then echo "::add-mask::$VT_API_KEY"; fi
+          files=(dist/*.zip)
+          for z in dist/*windows*.zip; do [ -f "$z" ] && files+=("$z:Wind Waker HD.exe"); done
+          python3 tools/release/virustotal.py --out vt-report.json --summary "$GITHUB_STEP_SUMMARY" --timeout 600 "${files[@]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: vt-report
+          path: vt-report.json
+          if-no-files-found: ignore
+
   publish:
     needs: [version, macos, linux, windows]
     runs-on: ubuntu-24.04
