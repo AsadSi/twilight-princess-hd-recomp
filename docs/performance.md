@@ -99,6 +99,84 @@ directory) to check that the run still renders correctly. The "Sort by top of st
 `sample.txt` shows where the CPU time goes. `run.log` prints the shader and pipeline counts every
 few seconds.
 
+### Fixed-scene benchmark
+
+`tools/bench/run_bench.py` runs the game headless (or with `--visible` windows, which presentation
+and vsync pacing need) from a save state with scripted input, one game at a time, with a fresh copy
+of the save and its own caches and settings files. A/B variants run interleaved:
+
+```sh
+tools/bench/run_bench.py --binary build/cmake/wwhd --state-dir my_states --scene outset \
+    --fps 60 --renderer vulkan --runs 6 --out build/bench/sync \
+    --variant old:WWHD_VK_LAZY_DRAW_DONE=0,WWHD_VK_ASYNC_PRESENT=0 --variant new:
+```
+
+`--state-dir` holds `slot<N>.bin` files made with the game's save-state keys (outset: slot 3,
+windfall: slot 2, or `--slot`). `--fps 30|60|true60`, `--uncapped` (throughput), `--renderer metal`.
+The state is loaded at TV frame 450 (A presses from frame 120 skip the intro), the input starts 200
+frames later and is timed in game seconds, so 30 and 60 fps runs see the same input. Each run's
+`[prof]` reports (render-thread profiler, `docs/vulkan.md`) after two warm-up windows are averaged;
+`summary.json` / `summary.csv` hold the per-variant median, min, max and spread of frame time,
+swaps/s, logic steps/s, render-thread CPU and per-phase ms, GPU waits, game-thread waits, uploads by
+kind, unique guest bytes and draw classes. The load average before and after each run is recorded.
+
+## Desktop CPU/GPU overlap and CPU path defaults (2026-10-07)
+
+Apple M3 Max, MoltenVK, Vulkan renderer, `tools/bench/run_bench.py`, Outset (slot 3) and Windfall
+(slot 2) saved scenes, 40 s of scripted walking, variants interleaved, medians [min..max] over 4-6
+runs per variant. "old" = `WWHD_VK_LAZY_DRAW_DONE=0 WWHD_VK_ASYNC_PRESENT=0` (the previous desktop
+behaviour: vkDeviceWaitIdle at every GX2DrawDone, a drained queue at every present).
+
+**Lazy DrawDone and asynchronous presentation** (visible windows):
+
+| Scene | old | new |
+|---|---|---|
+| Outset 60 fps (vsync) | 59.35 swaps/s, GPU wait 3.36 ms/frame, game waits 6.22 ms at DrawDone | 59.49, 0.37 ms, 3.20 ms |
+| Windfall 60 fps (vsync) | 59.72, GPU wait 4.22 ms, render thread in ops 11.06 ms | 59.74, 0.00 ms, 6.78 ms |
+| Outset uncapped, immediate present | 102.5 [96.6..105.2] swaps/s | 115.7 [115.0..143.5] |
+| Windfall uncapped, immediate present | 103.2 [101.9..103.6] swaps/s | 157.5 [143.5..158.5] |
+| Outset paced 60 fps, render thread +7 ms | 40.3 swaps/s, 48.7% in-between frames, 27.4 steps/s | 59.2, 99.7%, 29.6 |
+| Outset paced 60 fps, render thread +8 ms | 35.3 swaps/s, 33.2% in-between frames, 27.4 steps/s | 59.05, 99.7%, 29.55 |
+
+Render-thread CPU time is unchanged; the GPU drain was idle time on both sides. The +7/+8 ms rows
+add a busy-wait to the render thread per frame (a local evaluation aid, not in the code), the regime
+of slower machines (upstream issue #7): there the old path dropped most 60 fps frames and the game
+ran 9% slow. The SDL host (Vulkan-only build, the Windows/Linux window host) shows the same:
+uncapped Outset 105.5 -> 144.1 swaps/s, GPU wait 2.96 -> 0.43 ms.
+
+**CPU paths** (`docs/vulkan.md`, all 15 off vs all on, new sync defaults, headless):
+
+| Scene | render-thread CPU off -> on | uploads MiB/frame |
+|---|---|---|
+| Outset 60 fps | 6.23 -> 5.56 ms (-10.8%) | 22.4 -> 18.6 |
+| Windfall 60 fps | 5.83 -> 5.36 ms (-8.0%) | 28.2 -> 26.3 |
+| Outset 30 fps | 7.56 -> 6.76 ms (-10.5%) | 22.5 -> 18.7 |
+| Outset uncapped | 6.37 -> 5.46 ms (-14.3%), 150 -> 166 swaps/s | 21.9 -> 18.4 |
+
+Leaving one path out (Outset 60, 2 runs each, run spread about 0.4 ms) costs: specialized index
+conversion 0.31 ms, shader state memo 0.28, uniform snapshot reuse 0.25, sampler memo 0.09, sparse
+hash memo 0.09, vertex bind skipping 0.08, redundant bind skipping 0.06, feedback image reuse 0.06,
+shader address memo 0.05, vertex snapshot reuse 0.03 (and 3.3 MiB/frame of uploads); descriptor
+ranks, vertex history reuse, fetch memo, pipeline lookaside and the shader-key dirty classifier
+are neutral within the noise (-0.06 to +0.01 ms). None costs measurably, so all 15 are defaults.
+
+Correctness: frame dumps at six points of a scripted walk (TV and GamePad) are byte-identical
+between old and new and with the CPU paths, except a 20-pixel band at the sea horizon that also
+differs between two runs of the same configuration (run-to-run nondeterminism); save state save and
+reload in-game (slot 3 -> save slot 5 -> load slot 5) works with both; Khronos validation over the
+gameplay run reports no errors (one known warning: a fragment output without attachment, also with
+the old settings); `--renderer-smoke` passes with validation in both builds, with and without the
+CPU paths.
+
+**Where the render-thread time goes** (all defaults on, Outset 60 fps, per frame; `[prof]` lines):
+draws 5.3 ms of 6.5 ms in ops (3,230 draws, 1.74 us each), register writes 0.9 ms (39,000 writes).
+Per draw phase: submit/draw command 1.03 ms (includes the batched queue submissions), shader lookup
+0.62, uniforms 0.63, vertex snapshots 0.62, textures 0.44, pass 0.40, pipeline 0.38, descriptors
+0.37, record 0.31, indices 0.23, targets 0.20. Uploads are 18.6 MiB per frame, 15.7 of them vertex
+copies, but the copied guest ranges hold only 2.2 MiB of unique bytes; an interpolation hold frame
+copies the same 18.6 MiB again. 55% of Outset draws (12% on Windfall) change only buffer pointers
+or ALU constants since the previous draw.
+
 ## Where the time goes
 
 Busy (non-waiting) samples in one 20 s in-game run with 60 fps interpolation on, after all the fixes

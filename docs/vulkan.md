@@ -106,8 +106,9 @@ If the loader does not discover MoltenVK, set `VK_DRIVER_FILES` to its installed
 ## Current scope
 
 This backend is under development. It records real Vulkan draw calls and translates
-Latte shaders to SPIR-V. Guest GX2Flush queues work using four fenced submission
-slots; DrawDone, readbacks and final presentation still wait for completion. Each
+Latte shaders to SPIR-V. Guest GX2Flush, GX2DrawDone and presentation queue work using four fenced
+submission slots (see "CPU/GPU overlap" below); readbacks, captures and save states wait for
+completion. Each
 slot retains its command/descriptor pools and upload arena until its fence completes,
 so memory use is higher than the original single-slot implementation.
 Geometry shaders, transform feedback, multisampled guest surfaces and some format
@@ -174,12 +175,15 @@ measured about 30 FPS with argument buffers and 30–40 FPS with direct bindings
 these are historical measurements from before the later CPU fixes. The setting is documented in
 [MoltenVK configuration parameters](https://github.com/KhronosGroup/MoltenVK/blob/main/Docs/MoltenVK_Configuration_Parameters.md).
 
-## Opt-in CPU experiments
+## CPU paths (on by default since 2026-10-07; formerly "opt-in CPU experiments")
 
-The following paths are off by default. Each requires its environment value
-to be exactly `1`; other values leave that path disabled. They can be combined,
-but timing comparisons should use the same binary, guarded saved scene, graphics
-settings, warmed caches, and a quiet host, with validation disabled.
+The following paths are on by default on every platform (`runtime/src/main.cpp`,
+`default_vulkan_cpu_paths`; before 2026-10-07 only in the Android port). Each is active only when its
+environment value is exactly `1`; set it to `0` to turn that path off. Together they cut the
+render-thread CPU time by 8-14% on an M3 Max and by about a quarter on a Galaxy S25 Ultra; see
+`docs/performance.md` ("Desktop CPU/GPU overlap and CPU path defaults") for the per-path
+measurements. Timing comparisons should use the same binary, saved scene, graphics settings, warmed
+caches and a quiet host, with validation disabled.
 
 For timing with detailed per-draw instrumentation disabled, unset
 `WWHD_VK_STATS` and set `WWHD_VK_CPU_ONLY_STATS=1`. This reports render-thread
@@ -296,6 +300,24 @@ printed LR/SP values do not establish that deeper guest stack frames match. Load
 later can succeed if the worker threads reach compatible waits. Failed loads do not
 bypass these checks or establish a valid benchmark starting point.
 
+## CPU/GPU overlap: lazy DrawDone and asynchronous presentation (all platforms)
+
+Since 2026-10-07 every platform uses the two paths that were Android defaults before:
+
+- `WWHD_VK_LAZY_DRAW_DONE` (default on, `0` restores the wait): GX2DrawDone queues the work instead
+  of waiting for an idle device. The renderer copies all guest data (vertices, indices, uniform
+  blocks, textures) into fenced upload slices when it records the work and never writes GPU results
+  back to guest memory, so the game only needs its commands executed, which `render_sync` already
+  waits for (Cemu's GX2DrawDone waits for its GPU thread in the same way). Save states still wait
+  for the idle GPU.
+- `WWHD_VK_ASYNC_PRESENT` (default on, `0` restores the drain): the presentation submission goes into
+  the submission ring and `swap()` does not wait for the GPU, so the render thread records frame N+1
+  while the GPU draws frame N. Both window hosts (SDL and the macOS AppKit host). Captures, frame and
+  present dumps and the automatic GamePad overlay's signatures read back through a waiting flush.
+
+The Metal renderer keeps its GX2DrawDone wait: it binds large vertex buffers straight from guest
+memory. See `docs/performance.md` ("Desktop CPU/GPU overlap defaults") for the measurements.
+
 ## Draw batching (all platforms)
 
 Every platform defaults to submitting after 2,048 guest draws, with at most three
@@ -316,7 +338,7 @@ Vulkan defaults now select command-buffer prefill mode 3, asynchronous batches o
 2,048 draws with a cap of three extra submissions per frame, and precise vsync
 sleeping. Explicit environment overrides take precedence. Windows/Linux defaults
 remain unchanged and further device testing there is deferred. Vertex snapshot
-reuse remains an opt-in experiment on every platform.
+reuse is on by default on every platform since 2026-10-07 (see "CPU paths").
 
 | Option | Behavior and default |
 | --- | --- |
@@ -324,12 +346,11 @@ reuse remains an opt-in experiment on every platform.
 | `MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS` | macOS defaults to `3`; an explicit MoltenVK override, including `0`, is respected. Normal macOS render batches use an autorelease pool. Other platforms receive no application override. |
 | `WWHD_VK_DRAW_BATCH` | Defaults to `2048` when unset, on every platform. Set `0` to disable. Positive decimal values up to 1,048,576 select the batch size; malformed or out-of-range values disable batching. |
 | `WWHD_VK_DRAW_BATCH_CAP` | Accepts `1`, `2`, or `3`. When unset, defaults to `3`. An explicitly invalid value falls back to `2`. Has no effect with batching disabled. |
-| `WWHD_VK_REUSE_VERTEX_SNAPSHOTS=1` | Reuse a bounded vertex snapshot only after exact guest-byte comparison within the same fenced submission generation. Off by default; comparison overhead can outweigh saved copies. |
+| `WWHD_VK_REUSE_VERTEX_SNAPSHOTS=1` | Reuse a bounded vertex snapshot only after exact guest-byte comparison within the same fenced submission generation. On by default since 2026-10-07 (`0` turns it off); measured as a small net CPU gain and 3.3 MiB/frame fewer uploads on Outset. |
 
 Draw batching keeps the four-slot fence retirement contract. More submissions can
 reduce the final GPU tail, but add attachment LOAD/STORE boundaries and descriptor
-cache resets, and can wait when the ring wraps. DrawDone, capture/readback, and final
-presentation still drain work. Use matching camera views and warm caches for
+cache resets, and can wait when the ring wraps. Capture/readback and save states still drain work. Use matching camera views and warm caches for
 comparisons, and keep validation runs separate from timing runs.
 
 On Apple M3 Max, warm static-view, camera-sweep, and character movement/swimming
@@ -410,6 +431,32 @@ tested.
 For an isolated capture, set `WWHD_CAPTURE_PATH` to the PNG output path and
 `WWHD_CAPTURE` to the renderer frame number (default120). Keep these artifacts
 private; they contain game imagery.
+
+## Render-thread profiler
+
+`runtime/src/render_prof.h` (both renderers) is on by default and cheap (`WWHD_PROFILE=0` turns it
+off). Every 120 frames it builds a report that `WWHD_PROFILE=1`, `WWHD_VK_STATS` or
+`WWHD_VK_CPU_ONLY_STATS=1` log as `[prof]` lines, and that the settings overlay's
+**Copy performance report** button (Graphics tab) puts on the clipboard:
+
+- frame time, swaps/s, logic steps/s, render-thread CPU, time in GX2 ops and idle;
+- ms per frame per op and, sampled on one draw in 64, per draw phase (shader lookup, index
+  conversion, targets, pipeline, uniforms, textures, descriptors, pass, recording, vertex
+  snapshots, draw/submit);
+- render-thread waits for the GPU and the swapchain; game-thread waits for the render thread
+  (DrawDone, CopySurface, flips);
+- uploads per frame by kind (vertex, index, uniform blocks, packed uniforms, texture staging; logic
+  and interpolation hold frames apart) and, on one frame in 16, the unique guest bytes those
+  copies read;
+- draw classes: draws with no register change since the previous draw, draws where only ALU
+  constants, uniform-block or vertex-buffer words changed (continued-draw candidates), and the most
+  written other registers;
+- Vulkan shader translations: new programs vs. new variants, and which state words differ from the
+  nearest existing variant of the same program (texture/sampler words of units the shader samples
+  vs. units it does not).
+
+`tools/bench/run_bench.py` runs fixed scenes from a save state and summarizes these reports (see
+`docs/performance.md`, "How to profile").
 
 ## Optional performance diagnostics
 
