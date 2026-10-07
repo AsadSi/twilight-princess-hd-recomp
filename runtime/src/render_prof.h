@@ -28,6 +28,7 @@ enum Sync : int { kSyncDrawDone, kSyncCopySurface, kSyncFlip, kSyncOther, kSyncs
 
 bool enabled();
 uint64_t now_ns();
+uint64_t thread_cpu_ns();  // CPU time of the calling thread (0: not available)
 
 // ---- render thread
 extern bool g_draw_sampled;  // the current draw is sampled (phase marks are recorded)

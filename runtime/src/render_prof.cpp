@@ -48,7 +48,7 @@ uint64_t now_ns() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch()).count();
 }
-static uint64_t thread_cpu_ns() {
+uint64_t thread_cpu_ns() {
 #ifdef _WIN32
     FILETIME c, e, k, u;
     if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
