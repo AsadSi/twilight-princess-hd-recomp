@@ -342,14 +342,13 @@ static uint32 unpack_struct(const uint32* words, uint32 count, int slot) {
     return addr;
 }
 
+// Vulkan: GX2DrawDone queues the work instead of waiting for an idle device (the default on every
+// platform since 2026-10-07; WWHD_VK_LAZY_DRAW_DONE=0 restores the full wait). The Metal renderer
+// reads large vertex buffers straight from guest memory, so it keeps the real GPU wait.
 static bool lazy_draw_done() {
     static const bool on = [] {
         const char* e = getenv("WWHD_VK_LAZY_DRAW_DONE");
-#ifdef __ANDROID__
         return render::vulkan() && (!e || atoi(e) != 0);
-#else
-        return render::vulkan() && e && atoi(e) != 0;
-#endif
     }();
     return on;
 }
@@ -400,9 +399,10 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
     case OP_DRAW_DONE:
         // The Vulkan renderer never writes GPU results back to guest memory (guest data is copied
         // into fenced upload slices when work is recorded), so GX2DrawDone needs this op executed
-        // (render_sync in the HLE), not an idle GPU. WWHD_VK_LAZY_DRAW_DONE=1 (the default in the
-        // Android port) queues the work instead of waiting for the whole device every frame.
-        if (lazy_draw_done()) render::guest_flush();
+        // (render_sync in the HLE), not an idle GPU. Lazy DrawDone (lazy_draw_done(), the default)
+        // queues the work instead of waiting for the whole device every frame. A payload word of 1
+        // (save states) always waits for the idle GPU.
+        if (lazy_draw_done() && !(n && p[0])) render::guest_flush();
         else render::wait_idle();
         break;
     case OP_SWAP:
@@ -832,7 +832,7 @@ HLE(gx2, GX2SampleBottomGPUCycle) { if (arg(c, 0)) st64(arg(c, 0), timebase::gue
 // the game is frozen between frames: finish all queued GPU work and let pending flips execute, so no
 // command reads guest memory while it is replaced and the swap/flip counts agree
 void gx2_ss_drain() {
-    emit_host(OP_DRAW_DONE, {});
+    emit_host(OP_DRAW_DONE, {1});  // full GPU wait, also with lazy DrawDone
     render_sync(kSyncSaveState);
     for (int i = 0; i < 300; i++) {
         {

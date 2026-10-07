@@ -961,20 +961,16 @@ static bool SDLCALL lifecycle_watch(void *, SDL_Event *event) {
   return true;
 }
 #endif
-// Asynchronous presentation (WWHD_VK_ASYNC_PRESENT=1, the default on Android): the presentation
-// submission goes into the four-slot ring like GX2Flush work instead of waiting for the GPU, and the
-// SDL host's swap() does not drain the queue, so the render thread records frame N+1 while the GPU
-// draws frame N. Each frame in flight has its own acquire semaphore (reused only after the submission
-// that waited on it retired) and each swapchain image its own render-finished semaphore. Captures
-// keep the waiting path.
+// Asynchronous presentation (the default on every platform since 2026-10-07; WWHD_VK_ASYNC_PRESENT=0
+// restores the waiting path): the presentation submission goes into the four-slot ring like GX2Flush
+// work instead of waiting for the GPU, and swap() does not drain the queue, so the render thread
+// records frame N+1 while the GPU draws frame N. Each frame in flight has its own acquire semaphore
+// (reused only after the submission that waited on it retired) and each swapchain image its own
+// render-finished semaphore. Captures and frame dumps keep the waiting path.
 static bool async_present() {
   static const bool on = [] {
     const char *e = std::getenv("WWHD_VK_ASYNC_PRESENT");
-#ifdef __ANDROID__
     return !e || std::atoi(e) != 0;
-#else
-    return e && std::atoi(e) != 0;
-#endif
   }();
   return on;
 }
@@ -1278,16 +1274,14 @@ void swap() {
   present(R.tv);
   if (plan.drc_window)
     present(R.drc);
-#ifdef WWHD_SDL_HOST
   // asynchronous presentation: queued like GX2Flush work, the ring's fences retire it (the automatic
-  // overlay's signatures are read back right away, so those frames wait)
+  // overlay's signatures are read back right away, so those frames wait; present dumps and captures
+  // read back through flush()). Both window hosts: the AppKit host presents to its CAMetalLayers
+  // through the same swapchain path.
   if (async_present() && !sampled[0])
     flush_async();
   else
     flush();
-#else
-  flush();
-#endif
   if (sampled[0]) {
     std::vector<float> d = read_signature(0), t = sampled[1] ? read_signature(1) : std::vector<float>{};
     gfx::display_auto_signature(d, sampled[1] ? &t : nullptr, R.frame + 1);
