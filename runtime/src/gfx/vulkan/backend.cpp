@@ -20,6 +20,7 @@
 #include "platform/input_sdl.h"
 #include <SDL3/SDL_vulkan.h>
 #endif
+#include "platform/display_rate.h"
 #include "platform/host.h"
 #include "platform/perf_hint.h"
 #include "runtime.h"
@@ -50,7 +51,7 @@
 #include <vulkan/vulkan_beta.h>
 
 namespace gx2 { uint64_t flips_presented(); void checkpoint_vulkan_caches(); }
-namespace interp { int mode(); }
+#include "../../interp.h"
 
 namespace gfxvk {
 Renderer R;
@@ -937,6 +938,9 @@ static void make_swapchain(Screen &s) {
         offeredNames.c_str(), chosen != wanted ? " - the requested mode is not offered" : "");
   s.presentMode = chosen;
   s.presentWanted = wanted;
+  // frame interpolation caps 120/240 fps to the display's refresh rate only when presenting waits
+  // for it (interp::output_fps)
+  if (&s == &R.tv) interp::set_present_vsync(chosen == kPresentFifo);
   ci.clipped = VK_TRUE;
   ci.oldSwapchain = s.swapchain;
   VkSwapchainKHR sc;
@@ -2385,6 +2389,11 @@ void run_main_loop() {
     overlay::set_density(SDL_GetWindowPixelDensity(R.tv.window));
     auto now = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(now - titleTime).count();
+    static auto polled = now;  // twice a second: frame interpolation's cap (and Android's display mode)
+    if (now - polled >= std::chrono::milliseconds(500) || polled == now) {
+      polled = now;
+      display_rate::poll(R.tv.window);
+    }
     if (elapsed >= 0.5 && !input::text_prompt_active()) {
       uint64_t frames = gx2::flips_presented();
       if (exitFrame && frame_count() >= exitFrame) {
@@ -2393,9 +2402,9 @@ void run_main_loop() {
       char title[160];
       int mode = interp::mode();
       std::snprintf(title, sizeof title,
-          "The Legend of Zelda: The Wind Waker HD (Vulkan) — %.0f fps%s · %gx%s",
+          "The Legend of Zelda: The Wind Waker HD (Vulkan) — %.0f fps%s%s · %gx%s",
           double(frames - titleFrames) / elapsed,
-          mode == 2 ? " · true 60" : mode == 1 ? " · 60 fps" : "",
+          mode ? " · " : "", mode ? interp::mode_name() : "",
           double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");
       SDL_SetWindowTitle(R.tv.window, title);
       titleFrames = frames;
