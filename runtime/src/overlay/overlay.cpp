@@ -145,8 +145,8 @@ struct Ui {
     int frame_i = 0;
     double last_present = 0;
     // language (applies on the next start)
-    int language = -1;
-    int language_at_start = -1;  // the language this start runs with
+    int language = -1;           // the saved text variant (game_languages.h): language code and region
+    int language_region = 0;
     bool linearized = false;
     bool just_opened = false;
     bool list_view = false;  // Controls: the table instead of the drawing
@@ -831,7 +831,7 @@ void package_controls() {
     ImGui::EndDisabled();
     note("Your active profile is protected from deletion.");
     heading("Installed packages");
-    note("Install a local package, a content/ mod folder or ZIP, or a replacement .pack file.");
+    note("Install a local package, a content/ mod folder or ZIP, or a Cemu graphic pack.");
     if (ImGui::Button("Choose package…")) hostui::choose_mod_source(false, [](std::string path) {
         std::lock_guard guard(picker_mutex); picked = std::move(path);
     });
@@ -1257,43 +1257,40 @@ void tab_controls() {
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
 }
 
-int saved_language() {
-    std::string v;
-    if (hostui::get("language", v) && !v.empty()) {
-        int l = atoi(v.c_str());
-        if (l >= 0 && l < game_lang::kLanguages) return l;
-    }
-    return 1;
-}
-
-void choose_language(int language) {
-    U.language = language;
-    hostui::post([language] { hostui::set("language", std::to_string(language)); });
+void choose_language(const game_lang::Variant& v) {
+    U.language = v.language;
+    U.language_region = v.region;
+    hostui::post([v] {
+        hostui::set("language", std::to_string(v.language));
+        hostui::set("language_region", game_lang::region_code(v.region));
+    });
 }
 
 void tab_about() {
     const char* env = getenv("WWHD_LANGUAGE");
     const bool env_set = env && *env;
+    const game_lang::Variant& now = game_lang::current();
     if (U.language < 0) {
-        U.language = saved_language();
-        U.language_at_start = game_lang::started();  // the game reads it early in the boot
-        if (U.language_at_start < 0) U.language_at_start = game_lang::usable(env_set ? atoi(env) : U.language);
+        std::string l, r;
+        hostui::get("language", l);
+        hostui::get("language_region", r);
+        const game_lang::Variant& v = l.empty() ? now : game_lang::choose(atoi(l.c_str()), r);
+        U.language = v.language;
+        U.language_region = v.region;
     }
-    heading("Console language (applies on the next start)");
-    note("The game shows its text in English, French or Spanish, by the console language.");
+    heading("Text language (applies on the next start)");
+    note("Every language the disc carries. The game is told a console of that language's region.");
     ImGui::BeginDisabled(env_set);
-    for (int i : game_lang::available()) {
-        if (i != game_lang::available().front()) ImGui::SameLine();
-        if (radio(game_lang::name(i), U.language == i)) choose_language(i);
+    int k = 0;
+    for (const game_lang::Variant& v : game_lang::variants()) {
+        if (k++ % 2) ImGui::SameLine(ImGui::GetFontSize() * 16);
+        if (radio(v.name, U.language == v.language && U.language_region == v.region)) choose_language(v);
     }
     ImGui::EndDisabled();
     if (env_set)
         note("WWHD_LANGUAGE=%s is set for this start and takes precedence.", env);
-    else if (!game_lang::is_available(U.language))
-        warn("%s is saved, which the game doesn't show: it runs in English.", game_lang::name(U.language));
-    else if (U.language != U.language_at_start)
-        warn("%s is saved. Restart the game to apply it: the game reads the console language only when it starts.",
-             game_lang::name(U.language));
+    else if (U.language != now.language || U.language_region != now.region)
+        warn("Restart the game to apply it: the game reads the console language only when it starts.");
     heading("About");
     ImGui::Text("The Legend of Zelda: Twilight Princess HD - recompiled (%s host, %s renderer)", hostui::name(),
                 render::api_name(render::active()));
@@ -1304,10 +1301,6 @@ void tab_about() {
     note("Settings overlay: F1, or hold Select / press Home on a controller. Esc, F1 or B closes. "
 #endif
          "L / R switch tabs on a controller. The game keeps running and sees no input while this menu is open.");
-    note("When the game asks for text (your name), a text window appears over the game: type on the keyboard "
-         "(Enter = OK, Esc = Cancel), click the on-screen keys, or use a controller: D-pad / left stick choose a key, "
-         "A types it, B deletes, X adds a space, Y is Shift, L / R switch between letters, accents and symbols, "
-         "Start confirms.");
     note("Built with Dear ImGui %s (MIT License, Omar Cornut and contributors).", IMGUI_VERSION);
 }
 

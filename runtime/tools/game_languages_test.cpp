@@ -1,16 +1,22 @@
-// Tests the console languages TP HD shows its text in (game_languages.cpp) and the language a start
-// gets for one it doesn't show.
+// Tests the text variants (game_languages.cpp): the region a language gets, region codes, a language the game
+// lacks, and WWHD_LANGUAGE / WWHD_LANGUAGE_REGION.
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include "game_languages.h"
+namespace hostui { bool get(const char*, std::string&) { return false; } }
+void log_msg(const char*, ...) {}
 int main() {
-    assert((game_lang::available() == std::vector<int>{1, 2, 5}));
-    assert(game_lang::is_available(1) && game_lang::is_available(5) && !game_lang::is_available(3) && !game_lang::is_available(0));
-    assert(game_lang::usable(2) == 2 && game_lang::usable(3) == 1 && game_lang::usable(10) == 1);
-    assert(std::string(game_lang::name(11)) == "Chinese (Taiwan)" && std::string(game_lang::name(12)) == "?");
-    assert(game_lang::started() == -1);
-    game_lang::set_started(5);
-    assert(game_lang::started() == 5);
-    std::puts("game_languages_test: ok");
+    using namespace game_lang;
+    assert(variants().size() == 9);
+    assert(choose(3, "").region == kEurope && std::string(choose(3, "").name) == "German");
+    assert(choose(1, "").region == kUsa && choose(1, "eu").region == kEurope && choose(2, "Europe").region == kEurope);
+    assert(choose(0, "us").region == kJapan);  // Japanese text only with the Japanese region
+    assert(choose(7, "").language == 1 && choose(7, "").region == kUsa);  // Korean: English
+    assert(region_from_code("EUR") == kEurope && region_from_code("x") == 0 && std::string(region_code(kJapan)) == "jp");
+    setenv("WWHD_LANGUAGE", "5", 1);
+    setenv("WWHD_LANGUAGE_REGION", "eu", 1);
+    assert(current().language == 5 && current().region == kEurope);
+    puts("game_languages_test: variants, regions, fallback, environment passed");
 }

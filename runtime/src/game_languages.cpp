@@ -1,33 +1,67 @@
-// The console languages TP HD shows its text in (game_languages.h).
+// The languages TP HD shows its text in (game_languages.h).
 #include "game_languages.h"
 
-#include <algorithm>
-#include <atomic>
+#include <cctype>
+#include <cstdlib>
+
+#include "overlay/hostui.h"
+#include "runtime.h"
 
 namespace game_lang {
-namespace {
 
-const char* const kNames[kLanguages] = {"Japanese", "English", "French", "German", "Italian", "Spanish",
-                                        "Chinese", "Korean", "Dutch", "Portuguese", "Russian", "Chinese (Taiwan)"};
-std::atomic<int> g_started{-1};
+const char* region_code(int region) { return region == kJapan ? "jp" : region == kEurope ? "eu" : "us"; }
 
-}  // namespace
-
-const char* name(int language) { return language >= 0 && language < kLanguages ? kNames[language] : "?"; }
-
-const std::vector<int>& available() {
-    static const std::vector<int> languages = {1, 2, 5};
-    return languages;
+int region_from_code(const std::string& code) {
+    std::string s;
+    for (char c : code) s += (char)tolower((unsigned char)c);
+    if (s == "jp" || s == "jpn" || s == "japan") return kJapan;
+    if (s == "us" || s == "usa") return kUsa;
+    if (s == "eu" || s == "eur" || s == "europe") return kEurope;
+    return 0;
 }
 
-bool is_available(int language) {
-    const auto& a = available();
-    return std::find(a.begin(), a.end(), language) != a.end();
+const std::vector<Variant>& variants() {
+    static const std::vector<Variant> v = {
+        {1, kUsa, "English (North America)"}, {1, kEurope, "English (Europe)"},
+        {2, kUsa, "French (North America)"},  {2, kEurope, "French (Europe)"},
+        {5, kUsa, "Spanish (Latin America)"}, {5, kEurope, "Spanish (Europe)"},
+        {3, kEurope, "German"},               {4, kEurope, "Italian"},
+        {0, kJapan, "Japanese"},
+    };
+    return v;
 }
 
-int usable(int language) { return is_available(language) ? language : 1; }
+const Variant& choose(int language, const std::string& region) {
+    const int r = region_from_code(region);
+    const Variant* first = nullptr;
+    for (const Variant& v : variants()) {
+        if (v.language != language) continue;
+        if (v.region == r) return v;
+        if (!first) first = &v;
+    }
+    return first ? *first : variants().front();
+}
 
-int started() { return g_started.load(std::memory_order_acquire); }
-void set_started(int language) { g_started.store(language, std::memory_order_release); }
+const Variant& current() {
+    static const Variant& v = [&]() -> const Variant& {
+        std::string language, region;
+        const char* why = "WWHD_LANGUAGE";
+        if (const char* e = getenv("WWHD_LANGUAGE"); e && *e) {
+            language = e;
+            if (const char* r = getenv("WWHD_LANGUAGE_REGION")) region = r;
+        } else if (hostui::get("language", language) && !language.empty()) {
+            hostui::get("language_region", region);
+            why = "saved setting";
+        }
+        char* end = nullptr;
+        const long code = language.empty() ? 1 : strtol(language.c_str(), &end, 10);
+        if (!language.empty() && (*end || code < 0 || code >= kLanguages))
+            LOG("[config] language %s (%s) is not a language code 0..11; using English", language.c_str(), why);
+        const Variant& out = choose(language.empty() || *end || code < 0 || code >= kLanguages ? 1 : (int)code, region);
+        LOG("[config] text language: %s (%s)", out.name, language.empty() ? "default" : why);
+        return out;
+    }();
+    return v;
+}
 
 }  // namespace game_lang

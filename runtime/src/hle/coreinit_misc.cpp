@@ -97,38 +97,8 @@ static void report(const std::string& s) {
     LOG("[game] %s", t.c_str());
 }
 
-// Console language for UCReadSysConfig("cafe.language"): WWHD_LANGUAGE=<Wii U code> (0 ja, 1 en,
-// 2 fr, 3 de, 4 it, 5 es, 6 zh, 7 ko, 8 nl, 9 pt, 10 ru, 11 zh-TW), else the setting saved by the
-// settings overlay (hostui "language"; read once at start). Unset, out of range or not a number:
-// English. One the game shows no text for on this console (game_languages.h) becomes English, as the
-// game itself would show it.
-static uint32_t console_language() {
-    static const uint32_t lang = [] {
-        const char* why = "WWHD_LANGUAGE";
-        std::string saved;
-        const char* e = getenv("WWHD_LANGUAGE");
-        if ((!e || !*e) && hostui::get("language", saved)) {
-            e = saved.c_str();
-            why = "saved setting";
-        }
-        long v = 1;
-        if (e && *e) {
-            char* end = nullptr;
-            v = strtol(e, &end, 10);
-            if (*end || v < 0 || v >= game_lang::kLanguages) {
-                LOG("[config] language %s (%s) is not a language code 0..11; using English", e, why);
-                v = 1;
-            } else {
-                LOG("[config] console language %ld (%s)", v, why);
-            }
-        }
-        const int use = game_lang::usable((int)v);
-        if (use != v) LOG("[config] the game has no %s text on a USA console; it gets English", game_lang::name((int)v));
-        game_lang::set_started(use);
-        return (uint32_t)use;
-    }();
-    return lang;
-}
+// Console language for UCReadSysConfig("cafe.language"): the chosen text variant's (game_languages.h)
+static uint32_t console_language() { return (uint32_t)game_lang::current().language; }
 
 HLE(coreinit, OSReport) {
     GuestArgs a;
@@ -313,11 +283,12 @@ HLE(coreinit, bspGetHardwareVersion) { st32(arg(c, 0), 0x11000000); ret(c, 0); }
 // ---------------------------------------------------------------- MCP (title and system settings)
 HLE(coreinit, MCP_Open) { ret(c, 1); }
 HLE(coreinit, MCP_Close) { ret(c, 0); }
-HLE(coreinit, MCP_GetSysProdSettings) {  // (handle, MCPSysProdSettings*): a USA console
+HLE(coreinit, MCP_GetSysProdSettings) {  // (handle, MCPSysProdSettings*): an NTSC console of the text's region
     uint32_t out = arg(c, 1);
     memset(mem::ptr(out), 0, 0x46);
-    st32(out + 0x00, 2);  // product area: USA
-    st32(out + 0x08, 2);  // game region: USA
+    const uint32_t area = (uint32_t)game_lang::current().region;  // the region of the chosen text variant
+    st32(out + 0x00, area);  // product area
+    st32(out + 0x08, area);  // game region
     memcpy(mem::ptr(out + 0x10), "NTSC", 4);
     ret(c, 0);
 }
