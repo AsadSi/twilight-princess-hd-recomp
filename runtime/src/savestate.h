@@ -59,8 +59,8 @@ struct Reader {
 // ---- UI / test API (any thread) ----
 // Full states only: slotN.bin, the whole running game (~300 MB of guest memory, contains game code
 // and data: never share it). Wind Waker's portable states were built on its save functions and are
-// gone; SlotInfo keeps its fields for the menus. Requests are served by service(), which TP HD does
-// not call yet (no frame-boundary hook), so they stay pending.
+// gone; SlotInfo keeps `portable` for the menus. Requests are served by service(), which the
+// frame-loop hook calls at the top of main01's loop (site_02AF0EDC in interp.cpp).
 constexpr int kSlots = 5;
 struct SlotInfo {
     bool used = false;
@@ -69,8 +69,6 @@ struct SlotInfo {
     std::string when;  // local time of the save
     std::string area;  // stage name, if known
     std::string path;  // the slot's file
-    bool older_other = false;  // the slot also has an older file of the other kind (kept, never deleted)
-    uint64_t older_bytes = 0;
 };
 SlotInfo slot_info(int slot);           // 1..5 (101..103: crash recovery's automatic states, crashrec.h)
 void request_save(int slot);

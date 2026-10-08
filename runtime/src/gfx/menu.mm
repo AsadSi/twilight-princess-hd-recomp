@@ -203,15 +203,15 @@ static void choose_renderer(render::Api a) {
         it.enabled = info[i].used && info[i].compatible;
         it.toolTip = i == 1 ? @"In game: F1 (or \u2318,) opens the settings overlay (Saves)" : [NSString stringWithFormat:@"Shortcut in game: F%d", i];
     }
-    // full save states (savestate.h): off by default, for debugging
+    // full save states (savestate.h): always on, TP HD has no other kind
     [m addItem:[NSMenuItem separatorItem]];
     NSMenuItem* fs = [m addItemWithTitle:@"Full Save States (large, contain game data, don't share)" action:@selector(toggleFullStates:)
                            keyEquivalent:@""];
     fs.target = self;
     fs.state = ss::full_states() ? NSControlStateValueOn : NSControlStateValueOff;
     fs.enabled = !ss::full_states_forced();
-    fs.toolTip = @"For debugging: Save makes a snapshot of the whole running game (about 300 MB). Off: Save makes a small "
-                 @"portable state (progress and position, no game data) that can be attached to bug reports.";
+    fs.toolTip = @"Always on: Twilight Princess HD has only full save states, snapshots of the whole running game. "
+                 @"They contain game code and data: never attach them to a bug report.";
     // crash recovery (crashrec.cpp): automatic states every few minutes + recorded input
     [m addItem:[NSMenuItem separatorItem]];
     NSMenuItem* cr = [m addItemWithTitle:[NSString stringWithFormat:@"Crash Recovery (automatic state every %d min)",
@@ -374,7 +374,7 @@ void install_menu(NSWindow* tv) {
     inItem.submenu = in;
     install_display_menu(bar);  // Display: full screen, scaling, GamePad screen mode (display.mm)
 
-    // Save States: 5 slots (savestate.cpp); Shift+F1..F5 save, F1..F5 load
+    // Save States: 5 slots (savestate.cpp); Shift+F1..F5 save, F2..F5 load (F1: the settings overlay)
     NSMenuItem* ssItem = [bar addItemWithTitle:@"Save States" action:nil keyEquivalent:@""];
     NSMenu* sm = [[NSMenu alloc] initWithTitle:@"Save States"];
     sm.autoenablesItems = NO;

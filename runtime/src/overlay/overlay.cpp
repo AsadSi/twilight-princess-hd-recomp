@@ -434,12 +434,8 @@ void tab_saves() {
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
     const bool full = ss::full_states();
-    if (full)
-        note("Full save states: the whole running game (large, contain game data: never share them). Shift+F1..F5 save in "
-             "game, F2..F5 load (F1 opens this menu).");
-    else
-        note("A save state keeps your progress and where Link stands (a few KB, no game data). Loading enters that place "
-             "with that progress; enemies and cutscenes start fresh. Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu).");
+    note("A save state is the whole running game, restored exactly (large, contains game data: never share it). "
+         "Shift+F1..F5 save in game, F2..F5 load slots 2 to 5; slot 1 loads here (F1 opens this menu).");
     if (ImGui::BeginTable("slots", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Saved");
@@ -458,15 +454,6 @@ void tab_saves() {
                 if (!s.portable) d += "  (full)";
                 if (!s.compatible) d += "  (incompatible)";
                 ImGui::TextUnformatted(d.c_str());
-                if (s.older_other && s.portable) {
-                    // decision: an older full state stays on disk; say so (it is large and must not be shared)
-                    ImGui::TextDisabled("also holds an older full state (slot%d.bin, %.0f MB)", i, s.older_bytes / 1048576.0);
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Kept on disk, not loaded: the newer portable state is. It contains game data: "
-                                          "don't share it. Delete it in the states folder if you no longer need it.");
-                } else if (s.older_other) {
-                    ImGui::TextDisabled("also holds an older portable state (slot%d.wwstate)", i);
-                }
             }
             ImGui::TableNextColumn();
             if (ImGui::Button("Save")) {
@@ -498,11 +485,10 @@ void tab_saves() {
     help("Copies the path of your save folder: attach its files to the bug report.");
     note("States folder: %s", ss::states_dir().c_str());
     bool fs;
-    if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
+    if (check("Full save states (large, contain game data, don't share)", full, &fs, !ss::full_states_forced()))
         ss::set_full_states(fs);
-    help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
-                                  : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
-                                    "These files contain game code and data: never attach them to a bug report.");
+    help("Always on: Twilight Princess HD has only full save states. They contain game code and data: never attach "
+         "them to a bug report.");
     heading("Crash Recovery");
     bool on;
     if (check("Crash Recovery (automatic state every few minutes)", crashrec::enabled(), &on)) crashrec::set_enabled(on);

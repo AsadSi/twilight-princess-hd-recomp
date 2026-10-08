@@ -4,7 +4,7 @@
 // The recompiled game runs on host threads with native call stacks, so a snapshot can only be taken
 // (and restored) when every guest thread is at a point whose complete state is guest memory, its Cpu
 // registers and the HLE objects:
-//   - the game's main thread at the top of the per-frame function (0203593C; interp.cpp calls
+//   - the game's main thread at the top of main01's frame loop (02AF0EDC; interp.cpp calls
 //     service() there), which requests the save/load;
 //   - every other guest thread parked in an HLE wait (OSReceiveMessage, OSWaitEvent, OSLockMutex,
 //     OSSleepThread, OSSleepTicks, GX2WaitForVsync, ...: park_wait in threads.cpp). A parked thread

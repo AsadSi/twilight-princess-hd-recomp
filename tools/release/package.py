@@ -14,7 +14,7 @@ there:
   - link: the exact link line of the wwhd executable, with the runtime's object files and static
     libraries copied into sdk/ and libgamecode.a replaced by the player's own.
 
-Output: OUT_DIR/WindWakerHD-VERSION-NAME/ and OUT_DIR/WindWakerHD-VERSION-NAME.zip.
+Output: OUT_DIR/TwilightPrincessHD-VERSION-NAME/ and OUT_DIR/TwilightPrincessHD-VERSION-NAME.zip.
 """
 import argparse
 import hashlib
@@ -333,7 +333,7 @@ def main():
     a = ap.parse_args()
 
     build = os.path.abspath(a.build)
-    name = "WindWakerHD-%s-%s" % (a.version, a.platform)
+    name = "TwilightPrincessHD-%s-%s" % (a.version, a.platform)
     pkg = os.path.join(os.path.abspath(a.out), name)
     if os.path.exists(pkg):
         shutil.rmtree(pkg)

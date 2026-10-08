@@ -271,7 +271,7 @@ class BundledPython(unittest.TestCase):
 
     def test_guard_rejects_other_files(self):
         with tempfile.TemporaryDirectory() as d:
-            py = os.path.join(d, "WindWakerHD-x", "tools", "python")
+            py = os.path.join(d, "TwilightPrincessHD-x", "tools", "python")
             os.makedirs(py)
             with open(os.path.join(py, "python.exe"), "wb") as f:
                 f.write(b"MZ not the real one")
