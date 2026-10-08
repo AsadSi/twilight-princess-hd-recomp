@@ -823,6 +823,10 @@ HLE(gx2, GX2DebugTagUserStringVA) {}
 HLE(gx2, GX2TempDumpResources) {}
 HLE(gx2, GX2TempGetResourceCount) { ret(c, 0); }
 HLE(gx2, GX2RSetAllocator) {}  // no GX2R buffer calls are imported
+HLE(gx2, GX2RGetDebugOptions) { ret(c, 0); }
+// the renderer takes MSAA from the surfaces, and hi-stencil is the hardware's early stencil reject
+HLE(gx2, GX2SetAAMode) {}
+HLE(gx2, GX2SetHiStencilInfo) {}
 HLE(gx2, GX2Shutdown) {}
 HLE(gx2, GX2SetTVGamma) {}
 HLE(gx2, GX2SetDRCGamma) {}

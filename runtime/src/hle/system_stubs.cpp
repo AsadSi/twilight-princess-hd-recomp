@@ -222,6 +222,7 @@ HLE(vpadbase, VPADBASEGetHeadphoneStatus) { ret(c, 0); }
 HLE(sysapp, SYSLaunchSettings) { ret(c, 0); }
 // launched directly, with no arguments: the caller's request slots keep their null data
 HLE(sysapp, SYSGetArguments) { ret(c, 0); }
+HLE(sysapp, SYSSwitchToEManual) {}  // there is no electronic manual to open
 
 // ---- erreula (looked up through OSDynLoad): the error viewer is never shown
 HLE(erreula, ErrEulaSetVersion__3RplFi) {}
