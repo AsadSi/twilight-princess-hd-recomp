@@ -58,7 +58,7 @@ def read_state(path):
 def cmd_info(a):
     st = read_state(a.state)
     for k in ("title_id", "title_version", "runtime", "created", "player_name", "stage", "room", "start_point",
-              "start_room", "layer", "link_pos", "link_angle_y", "on_ship", "time_of_day", "date"):
+              "start_room", "layer", "link_pos", "link_angle_y", "on_ship", "has_ship", "ship_pos", "ship_angle_y", "time_of_day", "date"):
         print("%-14s %s" % (k, st[k]))
     print("%-14s %d" % ("quest_log", int(st["file_slot"]) + 1))
     import hd_save_info
