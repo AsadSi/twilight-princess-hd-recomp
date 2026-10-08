@@ -943,10 +943,12 @@ void tab_mods() {
             if (!search.PassFilter(searchable.c_str())) continue;
             ++shown;
             ImGui::PushID(entry.id);
+            ImGui::BeginDisabled(!entry.available);
             if (ImGui::Checkbox("##enabled", &on)) {
                 std::string id = entry.id;
                 hostui::post([id, on] { mods::manager::set_enabled(id, on); });
             }
+            ImGui::EndDisabled();
             ImGui::SameLine();
             if (ImGui::Selectable(entry.name, selected == entry.id)) selected = entry.id;
             ImGui::PopID();
@@ -957,6 +959,7 @@ void tab_mods() {
             ImGui::TextUnformatted(entry->name);
             note("%s · Built in · %s", entry->category, entry->enabled() ? "Enabled" : "Disabled");
             ImGui::TextWrapped("%s", entry->description);
+            if (!entry->available) note("Not available in Twilight Princess HD yet: this Wind Waker mod needs hooks into TP HD's code.");
             if (const char* override = std::getenv(entry->startup_env))
                 note("%s=%s overrides the saved choice at startup.", entry->startup_env, override);
             if (entry->restart_required) note("Restart the game after changing this mod.");

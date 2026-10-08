@@ -436,6 +436,11 @@ void install_menu(NSWindow* tv) {
            @"Door events (walk-in, opening, closing) run at 4x speed");
     toggle(gp, @"Fast scene changes", ^BOOL { return mods::fast_scenes(); }, ^(BOOL on) { mods::set_fast_scenes(on); },
            @"Fades and loading between areas run at 4x speed; the scenes themselves are not sped up");
+    // all of these are Wind Waker mods that need TP HD hooks first (mods/manager.cpp: available)
+    gp.autoenablesItems = NO;
+    for (NSMenuItem* it in gp.itemArray) it.enabled = NO;
+    [gp insertItemWithTitle:@"Not available in Twilight Princess HD yet" action:nil keyEquivalent:@"" atIndex:0].enabled = NO;
+    [gp insertItem:[NSMenuItem separatorItem] atIndex:1];
     gpItem.submenu = gp;
 
     // Save States: 5 slots (savestate.cpp); Shift+F1..F5 save, F1..F5 load
