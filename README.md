@@ -715,6 +715,13 @@ Off-TV Play).
 and the renderer are remembered in `~/Library/Application Support/wwhd/display.plist`
 (delete it to reset).
 
+Closing the TV window (its close button or **⌘W**) quits the game, as on Linux and Windows; closing
+the GamePad window only hides it (**⌘G** brings it back). While a save file is being played, closing
+the TV window or **⌘Q** first asks *Quit Wind Waker HD?*: **Quit**, **Cancel** (keep playing), or
+**Save State and Quit**, which writes save state slot 1 (Save States menu) and then quits. On the
+title screen and the file select, before a file is loaded, it quits without asking.
+`WWHD_QUIT_PROMPT=0` turns the question off; scripted and hidden test runs never ask.
+
 ## Notes
 
 - Shaders are translated on first use and cached in `~/Library/Caches/wwhd/shaders.bin`; later
@@ -725,7 +732,7 @@ and the renderer are remembered in `~/Library/Application Support/wwhd/display.p
   `WWHD_DRC_MODE=window|pip|auto|off|gamepad`, `WWHD_FULLSCREEN=0|1` (the TV window starts windowed / in
   full screen this time instead of as it was left; that session's full screen is not remembered), `WWHD_ASPECT=16:9|window|16:10|21:9|32:9|<w:h>`,
   `WWHD_AUDIO_VOLUME=0..1`, `WWHD_AUDIO_OUTPUT=auto|tv|gamepad` (the host plays the TV's sound, plus the GamePad's in Off-TV Play: auto; or only one of them), `WWHD_SHADER_CACHE=<file>|0`, `WWHD_AO_MODE=0..2`, `WWHD_AO_HIRES=0|1`, `WWHD_ANISO=0|1`, `WWHD_RES_SCALE=1|1.5|2|3`,
-  `WWHD_FXAA=0|1`, `WWHD_INTERP=1`, `WWHD_INTERP_FPS=60|120|240` (frame interpolation at that rate),
+  `WWHD_FXAA=0|1`, `WWHD_QUIT_PROMPT=0` (macOS: quit without asking, also during a game), `WWHD_INTERP=1`, `WWHD_INTERP_FPS=60|120|240` (frame interpolation at that rate),
   `WWHD_INTERP_PACED=0|1`, `WWHD_TRUE60=1` (start values for the Graphics menu; they
   override the remembered choices); `WWHD_DISPLAY_HZ=n` replaces the detected display refresh rate
   that 120/240 fps are capped to (0: no cap); `WWHD_UNCAPPED=1` starts with the debug switch

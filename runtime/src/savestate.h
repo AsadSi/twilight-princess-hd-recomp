@@ -3,6 +3,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -65,6 +66,10 @@ struct SlotInfo {
 };
 SlotInfo slot_info(int slot);           // 1..5 (101..103: crash recovery's automatic states, crashrec.h)
 void request_save(int slot);
+// request_save, and `done` once the slot file is written (ok) or the save gave up (message in `why`);
+// it runs on a background thread or the game thread. A later request for another slot replaces it
+void request_save(int slot, std::function<void(bool ok, const std::string& why)> done);
+bool in_gameplay();                     // a save file is being played (quit_prompt.h: gameplay_stage)
 void request_load(int slot);
 std::string states_dir();               // where slots live (created on first use)
 std::string last_message();             // short status for the title bar ("" when stale)

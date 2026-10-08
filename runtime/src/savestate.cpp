@@ -51,6 +51,7 @@
 
 #include "runtime.h"
 #include "crashrec.h"
+#include "quit_prompt.h"
 #include "rumble.h"
 
 // module sections
@@ -167,6 +168,8 @@ std::mutex g_io;  // one slot file operation at a time
 std::string g_message;
 std::chrono::steady_clock::time_point g_message_time;
 std::atomic<int> g_save_req{0};
+int g_done_slot = 0;                       // request_save(slot, done): whose `done` is waiting
+std::function<void(bool, const std::string&)> g_done;
 std::shared_ptr<Snapshot> g_load_ready;   // decompressed, waiting for the frame boundary
 std::atomic<bool> g_loading{false};       // a slot file is being read
 int g_attempts = 0;
@@ -183,6 +186,17 @@ void message(const char* fmt, ...) {
     std::lock_guard<std::mutex> lk(g_mu);
     g_message = buf;
     g_message_time = std::chrono::steady_clock::now();
+}
+
+// the waiting `done` of request_save(slot, done), taken out (empty if it is for another slot)
+std::function<void(bool, const std::string&)> take_done(int slot) {
+    std::lock_guard<std::mutex> lk(g_mu);
+    if (g_done_slot != slot) return {};
+    g_done_slot = 0;
+    return std::move(g_done);
+}
+void report_done(int slot, bool ok, const std::string& why) {
+    if (auto d = take_done(slot)) d(ok, why);
 }
 
 std::string state_dir() {
@@ -485,6 +499,7 @@ bool do_save(int slot) {
         threads::thaw();
         if (++g_attempts < 30) return false;
         if (!is_auto(slot)) message("Slot %d: not saved (game busy:%s)", slot, busy.c_str());
+        report_done(slot, false, "game busy:" + busy);
         return true;
     }
     gx2_ss_drain();
@@ -493,6 +508,7 @@ bool do_save(int slot) {
         threads::thaw();
         if (++g_attempts < 30) return false;
         if (!is_auto(slot)) message("Slot %d: not saved (%s)", slot, why.c_str());
+        report_done(slot, false, why);
         return true;
     }
     auto payload = std::make_shared<Writer>();
@@ -539,7 +555,7 @@ bool do_save(int slot) {
     if (!is_auto(slot)) render::request_tv_dump(slot_path(slot, "png"), 0);
     else crashrec::on_auto_saved(slot - crashrec::kAutoBase);
     // compress and write in the background; the game continues
-    std::thread([slot, h, payload, stage] {
+    std::thread([slot, h, payload, stage, done = take_done(slot)] {
         auto t1 = std::chrono::steady_clock::now();
         bool ok;
         {
@@ -550,6 +566,7 @@ bool do_save(int slot) {
         struct stat st{};
         stat(slot_path(slot).c_str(), &st);
         LOG("[savestate] slot %d: %s (%.1f MB on disk, %.0f ms)", slot, ok ? "written" : "WRITE FAILED", st.st_size / 1048576.0, ms);
+        if (done) done(ok, ok ? "" : "write failed");
         if (is_auto(slot)) return;  // automatic states stay quiet
         std::lock_guard<std::mutex> lk(g_mu);
         g_message = ok ? "Saved to slot " + std::to_string(slot) + (stage.empty() ? "" : " (" + area_label(stage.c_str()) + ")")
@@ -673,6 +690,21 @@ void request_save(int slot) {
     if ((slot < 1 || slot > kSlots) && !is_auto(slot)) return;
     g_save_req = slot;
 }
+
+void request_save(int slot, std::function<void(bool ok, const std::string& why)> done) {
+    if ((slot < 1 || slot > kSlots) && !is_auto(slot)) {
+        if (done) done(false, "no such slot");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_done_slot = slot;
+        g_done = std::move(done);
+    }
+    g_save_req = slot;
+}
+
+bool in_gameplay() { return quitprompt::gameplay_stage(stage_name()); }
 
 void request_load(int slot) {
     if ((slot < 1 || slot > kSlots) && !is_auto(slot)) return;

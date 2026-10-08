@@ -1,5 +1,6 @@
-// Menu bar: app menu (Quit) and a Graphics menu to switch fixes and enhancements while playing.
-// Each option also has a single-key shortcut in the game window.
+// Menu bar: app menu (Quit, which asks first while a game is in progress: quit_prompt.mm), a Window
+// menu (Close Window on the TV window quits the same way) and a Graphics menu to switch fixes and
+// enhancements while playing. Each option also has a single-key shortcut in the game window.
 #import <Cocoa/Cocoa.h>
 #include <Carbon/Carbon.h>  // kVK_* key codes
 #include "../input.h"
@@ -457,6 +458,17 @@ void install_menu(NSWindow* tv) {
     g_state_menu = [WWStateMenu new];
     sm.delegate = g_state_menu;
     ssItem.submenu = sm;
+
+    // Window: the standard items. Close Window (Cmd+W) on the TV window quits, asking first while a
+    // game is in progress (quit_prompt.mm); on the GamePad window it only hides it
+    NSMenuItem* winItem = [bar addItemWithTitle:@"Window" action:nil keyEquivalent:@""];
+    NSMenu* wm = [[NSMenu alloc] initWithTitle:@"Window"];
+    [wm addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+    [wm addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];
+    [wm addItem:[NSMenuItem separatorItem]];
+    [wm addItemWithTitle:@"Close Window" action:@selector(performClose:) keyEquivalent:@"w"];
+    winItem.submenu = wm;
+    NSApp.windowsMenu = wm;  // macOS lists the open windows below
 
     NSApp.mainMenu = bar;
     install_overlay_input();  // settings overlay (F1): mouse in the TV window (overlay_appkit.mm)
