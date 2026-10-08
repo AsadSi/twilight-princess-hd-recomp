@@ -1233,6 +1233,10 @@ static bool expand_indices(uint32_t prim, uint32_t count, bool indexed, Idx idx,
         o = out.data();
         for (uint32_t i = 2; i < count; i++) { *o++ = idx(0); *o++ = idx(i - 1); *o++ = idx(i); }
         return true;
+    case 0x11:  // rect list: TP HD's (its own copy shaders, e.g. the GamePad minimap) pass four corners in
+                // quad order; a rect made from three corners (the GPU computes the fourth) isn't supported yet
+        if (count != 4) goto unsupported;
+        [[fallthrough]];
     case 0x13:  // quads -> list
         type = MTLPrimitiveTypeTriangle;
         out.resize(size_t(count / 4) * 6);
@@ -1258,6 +1262,7 @@ static bool expand_indices(uint32_t prim, uint32_t count, bool indexed, Idx idx,
         if (count) out[count] = idx(0);
         return true;
     default:
+    unsupported:
     {
         static uint64_t seen = 0;  // each unsupported type logged once
         if (prim < 64 && !(seen & (1ull << prim))) seen |= 1ull << prim, LOG("[gfx] primitive type %#x not supported: draws skipped", prim);
