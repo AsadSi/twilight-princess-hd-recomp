@@ -1,0 +1,2 @@
+# Runtime hooks into Zelda.rpx (address = function entry; "@ADDR" = instruction site, runs before it).
+@02AF0EDC  # main01: top of the frame loop (interp.cpp: save states)

@@ -1,12 +1,13 @@
 // Frame rate modes (interp.h). TP HD runs at its own 30 fps: frame interpolation and true 60 were
 // Wind Waker hooks (git history before the TP HD fork), so the mode is always 0 and the setters only
-// log. One logic step is one GX2SwapScanBuffers until TP HD has a main loop hook.
+// log. One logic step is one GX2SwapScanBuffers.
 #include <atomic>
 #include <cstdlib>
 
 #include "interp.h"
 #include "mods/packages.h"
 #include "runtime.h"
+#include "savestate.h"
 
 namespace interp {
 
@@ -46,3 +47,7 @@ uint64_t logic_steps() { return g_steps.load(std::memory_order_relaxed); }
 void step_done() { mods::packages::frame(++g_steps); }  // GX2SwapScanBuffers, game thread
 
 }  // namespace interp
+
+// main01's frame loop (02AF0EDC, top of each pass): the main thread's state is all in guest memory and
+// its registers, so save states are taken and restored here (savestate.cpp)
+extern "C" void site_02AF0EDC(Cpu* c) { ss::service(c); }

@@ -9,7 +9,9 @@
 # Shots: "<t>" saves the TV image at game time t (the runtime's frame dump, scaled to 480 wide);
 # "v<t>:<seconds>" records the game window from wall-clock time t (bin/wincap, built from wincap.swift on first
 # use; needs screen recording permission).
-# Env: SAVE (save folder under build/audit/saves, default "route"), FRESH=1 starts that save folder empty.
+# Env: SAVE (save folder under build/audit/saves, default "route"), FRESH=1 starts that save folder empty,
+# LOAD=<slot> loads save state <slot> from build/audit/states at frame 60 and starts the route's clock at frame 90
+# (take one with WWHD_STATE_SAVE_AT=<frame>:<slot>).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ROUTE=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); TOTAL=$2; shift 2
@@ -39,15 +41,17 @@ while read -r RANGE WHAT X Y; do
   esac
 done < "$ROUTE"
 
+ORIGIN=1; [ -n "${LOAD:-}" ] && ORIGIN=90
 DUMPS=; CLIPS_AT=()
 for SHOT in "$@"; do
-  if [[ $SHOT == v* ]]; then CLIPS_AT+=("$SHOT"); else DUMPS+="${DUMPS:+,}$(perl -e "print int($SHOT * 30 + 1)")"; fi
+  if [[ $SHOT == v* ]]; then CLIPS_AT+=("$SHOT"); else DUMPS+="${DUMPS:+,}$(perl -e "print int($SHOT * 30 + $ORIGIN)")"; fi
 done
 
 pkill -TERM -x wwhd 2>/dev/null && sleep 2
 BEFORE=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')
 cd "$OUT"
-WWHD_TEST_ORIGIN=1 WWHD_TEST_PRESS=$PRESS WWHD_TEST_STICK=$STICK WWHD_TEST_RSTICK=$RSTICK WWHD_DUMP_FRAMES=$DUMPS \
+WWHD_STATE_DIR=$ROOT/build/audit/states WWHD_STATE_LOAD_AT=${LOAD:+60:$LOAD} \
+WWHD_TEST_ORIGIN=$ORIGIN WWHD_TEST_PRESS=$PRESS WWHD_TEST_STICK=$STICK WWHD_TEST_RSTICK=$RSTICK WWHD_DUMP_FRAMES=$DUMPS \
   "$APP" --game "$ROOT/game" --save "$SAVEDIR" > log.txt 2>&1 &
 PID=$!; disown $PID; START=$(date +%s)
 elapsed_lt() { perl -MTime::HiRes=time -e "exit !(time - $START < $1)"; }
@@ -68,7 +72,7 @@ kill -9 $PID 2>/dev/null
 rm -f frame_*_drc.png
 for SHOT in "$@"; do
   [[ $SHOT == v* ]] && continue
-  F=frame_$(perl -e "print int($SHOT * 30 + 1)").png
+  F=frame_$(perl -e "print int($SHOT * 30 + $ORIGIN)").png
   [ -f "$F" ] && sips -Z 480 "$F" --out "t$SHOT.png" >/dev/null && rm "$F" || echo "no frame for ${SHOT}s"
 done
 AFTER=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')

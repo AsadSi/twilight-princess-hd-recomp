@@ -1,0 +1,5 @@
+# From save state 1 (first control near Link's house): walk and turn.
+0-6 STICK 0 1
+6-9 STICK 1 0
+9-15 STICK 0 1
+15-19 RSTICK 1 0
