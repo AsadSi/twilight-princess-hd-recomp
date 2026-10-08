@@ -203,6 +203,15 @@ bool blend_into(uint32_t at, const uint32_t* a, const uint32_t* b, uint32_t mats
     for (uint32_t i = 0; i < mats * 12; i++) g[i] = fb(lerp(bf(a[i]), bf(b[i]), t));
     return true;
 }
+
+// JPABaseParticle: position +0x00 (global, set by the particle calc), age +0x80; a JPANode holds it at +0x08
+// (next node +0x04)
+struct PtclPrev {
+    uint64_t pass = 0;
+    int16_t age = 0;
+    uint32_t p[3] = {};
+};
+std::unordered_map<uint32_t, PtclPrev> g_ptcls;
 }  // namespace
 
 }  // namespace interp
@@ -272,6 +281,44 @@ extern "C" void hook_02B5CF50(Cpu* c) {
     f_02B5CF50_orig(c);
     memcpy(mem::ptr(anm), g_cur.data(), n * 48);
     if (w) memcpy(mem::ptr(wev), g_cur.data() + n * 12, w * 48);
+}
+
+// JPAEmitterManager::draw(manager, draw info, group), from the painter at the start of a pass. Particles move only
+// in the particle calc of a logic pass, after its painter: so the logic pass records them as they are, and the
+// hold passes after it draw each one between that and the new step, as models are shown (a pass after their
+// viewCalc); a particle that is new, or not one step older, draws as it is. The group's emitters: use lists at +0x00, 0xC
+// apart (JSULink: emitter +0x00, next +0x0C); an emitter's particles and child particles: JPALists at +0xC8 and
+// +0xD4 (first node +0x00).
+extern "C" void f_02B17008_orig(Cpu* c);
+extern "C" void hook_02B17008(Cpu* c) {
+    using namespace interp;
+    if (!g_on) return f_02B17008_orig(c);
+    const bool rec = !g_hold;  // the painter runs before the pass's particle calc: a logic pass shows the step before
+    const float t = float(g_phase) / float(g_n + 1);
+    std::vector<std::pair<uint32_t, PtclPrev>> put_back;
+    for (uint32_t l = ld32(ld32(c->r[3]) + (c->r[5] & 0xFF) * 0xC); l; l = ld32(l + 0xC))
+        for (uint32_t list : {ld32(l) + 0xC8, ld32(l) + 0xD4})
+            for (uint32_t node = ld32(list); node; node = ld32(node + 4)) {
+                const uint32_t pt = node + 8;
+                PtclPrev cur;
+                cur.age = (int16_t)ld16(pt + 0x80);
+                read_words(pt, 3, cur.p);
+                if (rec) {
+                    cur.pass = g_records;
+                    g_ptcls[pt] = cur;
+                    continue;
+                }
+                const auto it = g_ptcls.find(pt);
+                if (it == g_ptcls.end() || it->second.pass != g_records || it->second.age + 1 != cur.age) continue;
+                const uint32_t* a = it->second.p;
+                if (std::fabs(bf(a[0]) - bf(cur.p[0])) + std::fabs(bf(a[1]) - bf(cur.p[1])) + std::fabs(bf(a[2]) - bf(cur.p[2])) > 300)
+                    continue;
+                put_back.push_back({pt, cur});
+                uint32_t* g = (uint32_t*)mem::ptr(pt);
+                for (int i = 0; i < 3; i++) g[i] = fb(lerp(bf(a[i]), bf(cur.p[i]), t));
+            }
+    f_02B17008_orig(c);
+    for (auto& [pt, cur] : put_back) memcpy(mem::ptr(pt), cur.p, 12);
 }
 
 // ---------------------------------------------------------------- the pass structure

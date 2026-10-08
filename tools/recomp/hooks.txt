@@ -5,6 +5,7 @@
 # frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
 028E13CC  # camera_draw
 02B5CF50  # J3DModel::viewCalc
+02B17008  # JPAEmitterManager::draw
 02AC08B4  # dScnPly_Draw
 02AF0A98  # main01: pad read
 02AD9F9C  # main01: audio
