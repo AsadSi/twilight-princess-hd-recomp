@@ -588,29 +588,43 @@ VkImageView sampled_texture_view(Surface* s,const uint32_t* texWords) {
     info.subresourceRange={VkImageAspectFlags(s->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,s->mips,0,layers};
     VkImageView view=VK_NULL_HANDLE;check_vk(vkCreateImageView(R.device,&info,nullptr,&view),"create sampled texture view");s->sampledViews.emplace(key,view);return view;
 }
-// ---------------------------------------------------------------- scaled depth copies without blits
+// ---------------------------------------------------------------- scaled copies without blits
 // Vulkan requires no depth/stencil format to support blits (BLIT_SRC/BLIT_DST are optional for all of
-// them), and Adreno drivers report none for some. Scaling such a surface (rescale after a resolution or
-// aspect-ratio change, a scaled GX2CopySurface) draws instead: each destination pixel takes the source
-// texel vkCmdBlitImage with VK_FILTER_NEAREST would take, written with gl_FragDepth; stencil is copied
-// one bit per pass (the pass writes its bit where the source has it, the depth pass zeroes all bits).
-// WWHD_VK_DEPTH_COPY=draw uses the draws on every device (tests; the renderer smoke test sets it).
-bool g_depthCopyDraw=[]{const char* e=getenv("WWHD_VK_DEPTH_COPY");return e&&!strcmp(e,"draw");}();
-static bool format_can_blit(VkFormat format) {
-    VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,format,&properties);
-    auto features=properties.optimalTilingFeatures;
-    return (features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)&&(features&VK_FORMAT_FEATURE_BLIT_DST_BIT);
-}
-static bool depth_copy_draws(const Surface* s) {
-    if(!s->fmt.depth)return false;
-    if(g_depthCopyDraw)return true;
-    if(format_can_blit(s->fmt.pixel))return false;
-    static std::vector<VkFormat> logged;
-    if(std::find(logged.begin(),logged.end(),s->fmt.pixel)==logged.end()) {
-        logged.push_back(s->fmt.pixel);
-        LOG("[gfx] Vulkan: depth format %d cannot be blitted on this device; scaled depth copies are drawn",int(s->fmt.pixel));
+// them), and Adreno drivers report none for some (D16_UNORM and D32_SFLOAT on the Adreno 830, issue
+// #72). Scaling such a surface (rescale after a resolution or aspect-ratio change, a scaled
+// GX2CopySurface) draws instead: each destination pixel takes the source texel vkCmdBlitImage with
+// VK_FILTER_NEAREST would take, written with gl_FragDepth; stencil is copied one bit per pass (the
+// pass writes its bit where the source has it, the depth pass zeroes all bits), so no
+// VK_EXT_shader_stencil_export is needed. Devices that can blit keep the blit.
+// Test aid: WWHD_VK_DEPTH_COPY=draw draws scaled depth copies on every device (the renderer smoke test
+// forces it too); WWHD_VK_DEPTH_COPY=none takes neither the blit nor the draw for depth, which shows
+// the last resort (clear_unscalable).
+DepthCopyOverride g_depthCopyOverride=[]{
+    const char* e=getenv("WWHD_VK_DEPTH_COPY");
+    return !e?DepthCopyOverride::None:!strcmp(e,"draw")?DepthCopyOverride::Draw:!strcmp(e,"none")?DepthCopyOverride::Unsupported:DepthCopyOverride::None;
+}();
+enum class ScaledCopy { Blit, Draw, Unsupported };
+// how a scaled copy between two surfaces of this format is done on this device (optimal tiling, as
+// every surface image is created)
+static ScaledCopy scaled_copy_mode(const FormatInfo& fmt) {
+    VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,fmt.pixel,&properties);
+    const auto features=properties.optimalTilingFeatures;
+    const bool blit=(features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)&&(features&VK_FORMAT_FEATURE_BLIT_DST_BIT);
+    // the draw samples the source (both aspects of a combined format) and renders into the destination
+    const bool draw=fmt.depth&&(features&VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)&&(features&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    ScaledCopy mode=blit?ScaledCopy::Blit:draw?ScaledCopy::Draw:ScaledCopy::Unsupported;
+    if(fmt.depth&&g_depthCopyOverride==DepthCopyOverride::Draw&&draw)mode=ScaledCopy::Draw;
+    if(fmt.depth&&g_depthCopyOverride==DepthCopyOverride::Unsupported)mode=ScaledCopy::Unsupported;
+    if(mode!=ScaledCopy::Blit) {
+        static std::vector<VkFormat> logged;
+        if(std::find(logged.begin(),logged.end(),fmt.pixel)==logged.end()) {
+            logged.push_back(fmt.pixel);
+            const char* why=blit?" (WWHD_VK_DEPTH_COPY)":"";
+            if(mode==ScaledCopy::Draw)LOG("[gfx] Vulkan: format %d: scaled depth copies are drawn, not blitted%s",int(fmt.pixel),why);
+            else LOG("[gfx] Vulkan: format %d can be neither blitted nor drawn%s; scaled copies of it are cleared or skipped",int(fmt.pixel),why);
+        }
     }
-    return true;
+    return mode;
 }
 namespace {
 struct DepthCopyParams { float scaleX,scaleY;int32_t lastX,lastY;uint32_t bit; };
@@ -782,36 +796,67 @@ static void draw_depth_copy(Surface* src,uint32_t srcLevel,uint32_t srcLayer,uin
     }
     transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
+// Last resort for a scaled copy the device can neither blit nor draw: dst is cleared (depth to the far
+// plane, stencil and colour to zero) instead of aborting the game; the game redraws its targets every
+// frame, so at worst one frame shows the cleared contents. Only a whole destination is cleared, a
+// partial one keeps its contents.
+static void clear_unscalable(Surface* dst,uint32_t dstW,uint32_t dstH) {
+    if(dstW!=dst->extent.width||dstH!=dst->extent.height)return;
+    end_encoder();
+    transition_image(dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageSubresourceRange range{dst->aspect,0,dst->mips,0,dst->arrayLayers};
+    if(dst->fmt.depth) {
+        VkClearDepthStencilValue value{1.0f,0};
+        vkCmdClearDepthStencilImage(command_buffer(),dst->image,dst->layout,&value,1,&range);
+    } else {
+        VkClearColorValue value{};
+        vkCmdClearColorImage(command_buffer(),dst->image,dst->layout,&value,1,&range);
+    }
+    transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
 void resample(Surface* src,Surface* dst,uint32_t slices,float uMax,float vMax,uint32_t dstW,uint32_t dstH) {
     if(!src||!dst||!src->image||!dst->image)throw std::runtime_error("Vulkan resample requires allocated surfaces");
     if(src->image==dst->image)throw std::runtime_error("Vulkan resample source and destination alias");
     if(src->fmt.pixel!=dst->fmt.pixel||src->imageType!=dst->imageType||src->fmt.compressed)
         throw std::runtime_error("Vulkan resample requires matching uncompressed surface formats and dimensions");
-    VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,src->fmt.pixel,&properties);
-    auto features=properties.optimalTilingFeatures;
-    const bool draw=depth_copy_draws(src);
-    if(!draw&&(!(features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)||!(features&VK_FORMAT_FEATURE_BLIT_DST_BIT)))
-        throw std::runtime_error("Vulkan device cannot blit this surface format");
     if(slices>src->arrayLayers||slices>dst->arrayLayers)throw std::runtime_error("Vulkan resample layer range exceeds surface");
     if(!dstW)dstW=dst->extent.width;if(!dstH)dstH=dst->extent.height;
     if(dstW>dst->extent.width||dstH>dst->extent.height||!(uMax>0&&uMax<=1&&vMax>0&&vMax<=1))
         throw std::runtime_error("Invalid Vulkan resample extent");
     const uint32_t srcW=std::max(1u,uint32_t(std::lround(src->extent.width*uMax))),srcH=std::max(1u,uint32_t(std::lround(src->extent.height*vMax)));
-    if(draw) {
+    const ScaledCopy mode=scaled_copy_mode(src->fmt);
+    // volumes keep their guest size (create_surface_image) and are never drawn into here
+    const bool drawable=mode==ScaledCopy::Draw&&src->imageType==VK_IMAGE_TYPE_2D&&(src->usage&VK_IMAGE_USAGE_SAMPLED_BIT)&&
+                        (dst->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    const bool sameSize=srcW==dstW&&srcH==dstH&&src->extent.depth==dst->extent.depth;
+    if(drawable&&!sameSize) {
         draw_depth_copy(src,0,0,srcW,srcH,dst,0,dstW,dstH,slices);
+        return;
+    }
+    if(mode!=ScaledCopy::Blit&&!sameSize) {
+        clear_unscalable(dst,dstW,dstH);
         return;
     }
     end_encoder();transition_image(src,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
     transition_image(dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkImageBlit region{};region.srcSubresource={VkImageAspectFlags(src->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,0,slices};
-    region.dstSubresource=region.srcSubresource;
-    region.srcOffsets[1]={int32_t(srcW),int32_t(srcH),int32_t(src->extent.depth)};
-    region.dstOffsets[1]={int32_t(dstW),int32_t(dstH),int32_t(dst->extent.depth)};
-    VkFilter filter=!src->fmt.depth&&src->fmt.kind==FormatInfo::FLOAT&&(features&VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)?VK_FILTER_LINEAR:VK_FILTER_NEAREST;
-    vkCmdBlitImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region,filter);
-    if(src->fmt.stencil) {
-        region.srcSubresource.aspectMask=region.dstSubresource.aspectMask=VK_IMAGE_ASPECT_STENCIL_BIT;
-        vkCmdBlitImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region,VK_FILTER_NEAREST);
+    if(mode!=ScaledCopy::Blit) {
+        // the same size without blits: a plain copy (transfer support is required of every surface format)
+        VkImageCopy region{};region.srcSubresource={src->aspect,0,0,slices};region.dstSubresource=region.srcSubresource;
+        region.extent={dstW,dstH,dst->extent.depth};
+        vkCmdCopyImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region);
+    } else {
+        VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,src->fmt.pixel,&properties);
+        const auto features=properties.optimalTilingFeatures;
+        VkImageBlit region{};region.srcSubresource={VkImageAspectFlags(src->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,0,slices};
+        region.dstSubresource=region.srcSubresource;
+        region.srcOffsets[1]={int32_t(srcW),int32_t(srcH),int32_t(src->extent.depth)};
+        region.dstOffsets[1]={int32_t(dstW),int32_t(dstH),int32_t(dst->extent.depth)};
+        VkFilter filter=!src->fmt.depth&&src->fmt.kind==FormatInfo::FLOAT&&(features&VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)?VK_FILTER_LINEAR:VK_FILTER_NEAREST;
+        vkCmdBlitImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region,filter);
+        if(src->fmt.stencil) {
+            region.srcSubresource.aspectMask=region.dstSubresource.aspectMask=VK_IMAGE_ASPECT_STENCIL_BIT;
+            vkCmdBlitImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region,VK_FILTER_NEAREST);
+        }
     }
     transition_image(src,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1143,8 +1188,13 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
         uint32_t sw=std::min(uint32_t(std::lround(cw*gpuSrc->sx)),std::max(gpuSrc->extent.width>>gpuLevel,1u));
         uint32_t sh=std::min(uint32_t(std::lround(ch*gpuSrc->sy)),std::max(gpuSrc->extent.height>>gpuLevel,1u));
         uint32_t tw=std::min(uint32_t(std::lround(cw*dst->sx)),dst->extent.width),th=std::min(uint32_t(std::lround(ch*dst->sy)),dst->extent.height);
-        if(!self&&(sw!=tw||sh!=th)&&depth_copy_draws(dst)) {
-            // a scaled depth copy the device cannot blit
+        const ScaledCopy mode=sw!=tw||sh!=th?scaled_copy_mode(dst->fmt):ScaledCopy::Blit;
+        if(mode!=ScaledCopy::Blit) {
+            // a scaled copy the device cannot blit: drawn for depth (draw_depth_copy); otherwise, or
+            // within one image, skipped (logged once by scaled_copy_mode), the destination keeping
+            // its contents, rather than aborting the game
+            if(mode!=ScaledCopy::Draw||self||!(gpuSrc->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||
+               !(dst->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))return;
             draw_depth_copy(gpuSrc,gpuLevel,srcSlice,sw,sh,dst,dstSlice,tw,th,1);
             mark_gpu_written(dst);
             write_back_linear_copy(dst,dstSlice,d,dbase,dstMip,dstSlice,cw,ch);
@@ -1159,8 +1209,7 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
                 VkImageCopy region{};region.srcSubresource={VkImageAspectFlags(aspect),gpuLevel,srcSlice,1};region.dstSubresource={VkImageAspectFlags(aspect),0,dstSlice,1};region.extent={sw,sh,1};
                 vkCmdCopyImage(command_buffer(),gpuSrc->image,gpuSrc->layout,dst->image,dst->layout,1,&region);
             } else {
-                VkFormatProperties fp{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,dst->fmt.pixel,&fp);
-                if(!(fp.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_SRC_BIT)||!(fp.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT))throw std::runtime_error("Vulkan device cannot scale GX2CopySurface format");
+                VkFormatProperties fp{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,dst->fmt.pixel,&fp);  // blits supported (above)
                 VkImageBlit region{};region.srcSubresource={VkImageAspectFlags(aspect),gpuLevel,srcSlice,1};region.dstSubresource={VkImageAspectFlags(aspect),0,dstSlice,1};
                 region.srcOffsets[1]={int32_t(sw),int32_t(sh),1};region.dstOffsets[1]={int32_t(tw),int32_t(th),1};
                 VkFilter filter=aspect==VK_IMAGE_ASPECT_COLOR_BIT&&dst->fmt.kind==FormatInfo::FLOAT&&(fp.optimalTilingFeatures&VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)?VK_FILTER_LINEAR:VK_FILTER_NEAREST;

@@ -21,7 +21,6 @@
 
 namespace gfxvk {
 extern uint64_t g_stat_full_checks, g_stat_uploads;
-extern bool g_depthCopyDraw;  // surfaces.cpp: scaled depth copies are drawn instead of blitted
 void request_tv_dump(const std::string&,int);
 namespace {
 void require(bool condition,const char* message) { if(!condition)throw std::runtime_error(message); }
@@ -197,7 +196,8 @@ void depth_copy_check() {
  // dst's region (0,0)-(dstW,dstH) must hold the nearest source texel of (0,0)-(srcW,srcH); outside it, `outside`
  auto check=[&](Surface& dst,uint32_t srcW,uint32_t srcH,uint32_t dstW,uint32_t dstH,uint32_t layers,const char* what,
                 float outsideDepth=0,uint8_t outsideStencil=0){
-  const float sx=float(srcW)/float(dstW),sy=float(srcH)/float(dstH);
+  // dstW/dstH 0: no region, every texel must hold `outside`
+  const float sx=dstW?float(srcW)/float(dstW):0,sy=dstH?float(srcH)/float(dstH):0;
   const uint32_t w=dst.extent.width,h=dst.extent.height;
   for(uint32_t layer=0;layer<layers;++layer) {
    const bool d16=dst.fmt.pixel==VK_FORMAT_D16_UNORM;
@@ -214,7 +214,7 @@ void depth_copy_check() {
    if(bad){fprintf(stderr,"[renderer smoke] %s: %u of %u texels differ (layer %u)\n",what,bad,w*h,layer);require(false,what);}
   }
  };
- const bool forced=g_depthCopyDraw;g_depthCopyDraw=true;
+ const auto override=g_depthCopyOverride;g_depthCopyOverride=DepthCopyOverride::Draw;
  const uint32_t sizes[3][2]={{64,37},{17,11},{40,24}};
  for(uint32_t format:{0x05u,0x0Eu,0x11u}) {
   Image src(40,24,format,true,2);require(src.s.extent.width==40&&src.s.extent.height==24,"depth copy source extent differs");
@@ -235,6 +235,22 @@ void depth_copy_check() {
   }
  }
  fprintf(stderr,"[renderer smoke] drawn depth copies (D16, D32F, D32F+S8; layers, up/down, partial) passed\n");
+ // the last resort, a device that can neither blit nor draw the format: the scaled copy clears a whole
+ // destination (depth 1, stencil 0) and leaves a partial one alone, instead of throwing
+ g_depthCopyOverride=DepthCopyOverride::Unsupported;
+ {
+  Image src(40,24,0x11,true,1);fill(src.s,1);
+  Image dst(64,37,0x11,true,1);resample(&src.s,&dst.s,1);
+  check(dst.s,40,24,0,0,1,"unscalable depth copy did not clear the destination",1.0f,0);
+  Image part(48,32,0x11,true,1);
+  transition_image(&part.s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+  VkClearDepthStencilValue value{0.75f,0x33};VkImageSubresourceRange range{part.s.aspect,0,1,0,1};
+  vkCmdClearDepthStencilImage(command_buffer(),part.s.image,part.s.layout,&value,1,&range);
+  resample(&src.s,&part.s,1,0.5f,0.75f,30,21);
+  check(part.s,20,18,0,0,1,"unscalable partial depth copy changed the destination",0.75f,0x33);
+ }
+ g_depthCopyOverride=DepthCopyOverride::Draw;
+ fprintf(stderr,"[renderer smoke] unscalable depth copies clear (whole) or keep (partial) the destination\n");
  // the resize itself: a screen-shaped depth/stencil target, then a 21:9 aspect ratio and a 2x resolution
  SurfaceDesc d;d.addr=mem::host_alloc(64*36*8,256);d.width=64;d.height=36;d.pitch=64;d.format=0x11;d.isDepth=true;d.dim=1;d.slices=1;
  Surface* target=find_or_create_surface(d,true);
@@ -249,7 +265,7 @@ void depth_copy_check() {
  check(*target,84,36,168,72,1,"depth target after a resolution change differs");
  set_frame_aspect(16.0f/9.0f);set_res_scale(1);latch_res_scale();
  require(find_or_create_surface(d,true)==target&&target->extent.width==64,"depth target did not return to its guest size");
- g_depthCopyDraw=forced;
+ g_depthCopyOverride=override;
  fprintf(stderr,"[renderer smoke] depth/stencil target resized by aspect ratio and resolution without blits passed\n");
 }
 // Volume render targets (issue #53, the Picto Box): the game renders 8x8x8 colour-grading volumes

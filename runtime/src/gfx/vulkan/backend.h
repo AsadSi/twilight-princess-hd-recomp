@@ -192,6 +192,10 @@ Surface* surface_from_depth_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_
 Surface* sampled_texture(const uint32_t*,bool);
 void upload_surface(Surface*);
 void resample(Surface*,Surface*,uint32_t slices,float uMax=1,float vMax=1,uint32_t dstW=0,uint32_t dstH=0);
+// scaled depth copies: blitted where the device can, else drawn (surfaces.cpp, issue #72);
+// WWHD_VK_DEPTH_COPY=draw / =none override this for tests
+enum class DepthCopyOverride { None, Draw, Unsupported };
+extern DepthCopyOverride g_depthCopyOverride;
 float res_scale();void set_res_scale(float);void latch_res_scale();
 uint64_t next_write_seq();
 inline void mark_gpu_written(Surface* s){s->gpuWritten=true;s->writeSeq=next_write_seq();}
