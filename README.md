@@ -10,6 +10,14 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
+### Next update
+
+- **Fixed: "Quick doors" could crash the game going through a door** (issue #61, "PROGRAM HALT
+  J3DPacket.cpp:157"; reported in Tingle's jail on Windfall). The extra game steps that make doors
+  quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
+  removed itself while a door opened was freed before its last drawn frame was done with. Deleting
+  now keeps its normal pace; doors are as quick as before.
+
 ### v0.2.7
 
 - **Fixed: taking a picture with the Picto Box crashed the game (Vulkan)** (issue #53). Right after
