@@ -367,7 +367,7 @@ static bool shift_held() {
 // ---------------------------------------------------------------------------------------------
 // state
 
-enum class Screen { Starting, NeedCLT, Menu, Welcome, Source, Keys, Installing, Error, Save, Done, Fatal };
+enum class Screen { Starting, NeedCLT, Menu, Welcome, Source, Keys, Installing, Error, Done, Fatal };
 
 static const char* screen_name(Screen s) {
     switch (s) {
@@ -379,7 +379,6 @@ static const char* screen_name(Screen s) {
     case Screen::Keys: return "keys";
     case Screen::Installing: return "installing";
     case Screen::Error: return "error";
-    case Screen::Save: return "save";
     case Screen::Done: return "done";
     case Screen::Fatal: return "fatal";
     }
@@ -406,7 +405,7 @@ struct App {
     // hello
     bool hello = false;
     std::string version, data_dir, app_dir, log_path, platform;
-    bool installed = false, game_files = false, save_exists = false;
+    bool installed = false, game_files = false;
     std::string installed_version;
 
     // requests
@@ -430,18 +429,13 @@ struct App {
     std::string result_app;
 
     // portable release
-    bool portable = false, legacy = false;
+    bool portable = false;
     std::string package, game_dir;
     double free_bytes = 0, source_bytes = 0, toolchain_bytes = 0;
     bool opt_remove_toolchain = true, opt_shortcut = false;
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
     std::string after;                                       // then: play | quit | open
     bool exec_game = false;                                  // start the game when the window has closed
-
-    // save import
-    int save_kind = 0;  // 0 none, 1 HD folder, 2 GameCube .gci, 3 earlier installation, 4 another folder
-    std::string save_path, save_msg;
-    bool confirm_replace = false;
 
     // log
     std::vector<std::string> log;
@@ -753,7 +747,7 @@ static void set_source(const std::string& path) {
 }
 
 // Any change to the key inputs makes the result of the last check stale: drop its message (neutral
-// state until the next "Check keys"). The same for the save screen's inputs.
+// state until the next "Check keys").
 static void keys_changed() {
     if (A.pending_cmd != "check_keys") A.keys_msg.clear();
 }
@@ -763,17 +757,11 @@ static void set_common_key_file(const std::string& p) { A.common_key_file = p, k
 static void set_common_mode(int m) {
     if (A.common_mode != m) A.common_mode = m, keys_changed();
 }
-static void set_save_path(const std::string& p) { A.save_path = p, A.save_msg.clear(); }
-static void set_save_kind(int k) {
-    if (A.save_kind != k) A.save_kind = k, A.save_path.clear(), A.save_msg.clear();
-}
-
 static void apply_dialog(const std::string& target, const std::string& path) {
     if (path.empty()) return;
     if (target == "source") set_source(path);
     else if (target == "disc_key") set_disc_key_file(path);
     else if (target == "common_key") set_common_key_file(path);
-    else if (target == "save") set_save_path(path);
 }
 
 static void start_install(const std::string& source) {
@@ -824,11 +812,11 @@ static void handle_reply(const J& ev) {
         if (A.source_kind == "archive")  // setup.py says which title is used and why
             A.probe_msg = ev.str("message");
         else if (A.source_kind == "folder")
-            A.probe_msg = ev.boolean("in_place") ? "Extracted game folder: The Wind Waker HD (USA). It is used where it is; "
+            A.probe_msg = ev.boolean("in_place") ? "Extracted game folder: Twilight Princess HD (USA). It is used where it is; "
                                                    "nothing is copied."
-                                                 : "Extracted game folder: The Wind Waker HD (USA)";
+                                                 : "Extracted game folder: Twilight Princess HD (USA)";
         else
-            A.probe_msg = "Wii U disc image. The game files are extracted from it into this folder (about 1.7 GB).";
+            A.probe_msg = "Wii U disc image. The game files are extracted from it into this folder (about 4.3 GB).";
     } else if (cmd == "check_keys") {
         if (ok) {
             A.keys_msg.clear();
@@ -841,13 +829,12 @@ static void handle_reply(const J& ev) {
             for (auto& s : A.steps)
                 if (s.state != 3) s.state = 2;
             A.result_app = ev.str("app");
-            A.save_exists = ev.boolean("save_exists");
             A.toolchain_bytes = ev.num("toolchain_bytes");
             A.game_dir = ev.str("game_dir", A.game_dir);
             g_exe = ev.str("exe"), g_game_dir = A.game_dir, g_data_dir = ev.str("data_dir", A.data_dir);
             A.installed = true;
             addlog("Setup finished.");
-            go(A.save_exists ? Screen::Done : Screen::Save);
+            go(Screen::Done);
         } else {
             if (A.current >= 0 && A.current < (int)A.steps.size()) A.steps[A.current].state = 3;
             A.error_msg = ev.str("message");
@@ -856,16 +843,6 @@ static void handle_reply(const J& ev) {
         }
     } else if (cmd == "remove_toolchain" || cmd == "shortcut") {
         if (!ok) addlog(ev.str("message"));
-    } else if (cmd == "import_save" || cmd == "import_existing") {
-        if (ok) {
-            A.save_msg = ev.str("message");
-            A.save_exists = true;
-            go(Screen::Done);
-        } else if (ev.str("problem") == "exists") {
-            A.confirm_replace = true;
-        } else {
-            A.save_msg = ev.str("message");
-        }
     }
 }
 
@@ -881,9 +858,7 @@ static void handle_event(const J& ev) {
         A.log_path = ev.str("log");
         A.platform = ev.str("platform");
         A.game_files = ev.boolean("game_files");
-        A.save_exists = ev.boolean("save_exists");
         A.portable = ev.boolean("portable");
-        A.legacy = ev.boolean("legacy");
         A.package = ev.str("package");
         A.game_dir = ev.str("game_dir");
         A.free_bytes = ev.num("free_bytes");
@@ -1044,7 +1019,7 @@ static void screen_clt() {
 static std::string home_folder() { return A.portable && !A.package.empty() ? A.package : A.data_dir; }
 
 static void screen_welcome() {
-    page_header("Welcome", "The Legend of Zelda: The Wind Waker HD, native PC port " + A.version);
+    page_header("Welcome", "The Legend of Zelda: Twilight Princess HD, native PC port " + A.version);
     if (A.portable) {
         ImGui::TextWrapped("The first start prepares the game once: it reads your own dump of the game and builds it for "
                            "this computer (about two minutes). Releases never contain game code, so this happens here, "
@@ -1056,7 +1031,7 @@ static void screen_welcome() {
     ImGui::Spacing();
     ImGui::TextUnformatted("You need:");
     ImGui::Bullet();
-    ImGui::TextWrapped("your Wind Waker HD (USA): a disc image (.wud/.wux), a Cemu archive (.wua), or an extracted "
+    ImGui::TextWrapped("your Twilight Princess HD (USA): a disc image (.wud/.wux), a Cemu archive (.wua), or an extracted "
                        "folder (code, content, meta);");
     ImGui::Bullet();
     ImGui::TextWrapped("for a disc image, its disc key and the Wii U common key (from your console). A Cemu archive "
@@ -1067,7 +1042,7 @@ static void screen_welcome() {
         ImGui::Bullet();
         ImGui::TextWrapped("an extracted game folder is used where it is: nothing is copied;");
         ImGui::Bullet();
-        ImGui::TextWrapped("a disc image or Cemu archive is extracted into the folder: about 1.7 GB;");
+        ImGui::TextWrapped("a disc image or Cemu archive is extracted into the folder: about 4.3 GB;");
         ImGui::Bullet();
         ImGui::TextWrapped("while preparing, about 1 GB more (removed afterwards)%s.",
 #if defined(_WIN32) || (!defined(__APPLE__))
@@ -1102,7 +1077,6 @@ static void screen_menu() {
     if (button("Repair", ImVec2(w, 0))) start_install("installed");
     muted("Rebuilds the game code from the installed game files.");
     if (button("Change the game (disc image, Cemu archive or game folder)", ImVec2(w, 0))) go(Screen::Source);
-    if (button("Import saves or settings...", ImVec2(w, 0))) go(Screen::Save);
     if (button("Open the folder", ImVec2(w, 0))) open_folder(home_folder());
     if (footer({"Quit"}) == 0) A.exit_code = 0;
 }
@@ -1279,73 +1253,10 @@ static void screen_error() {
     }
 }
 
-static void send_import(bool replace) {
-    std::string r = replace ? ",\"replace\":true" : "";
-    if (A.save_kind == 3) request("import_existing", r.empty() ? "" : r.substr(1));
-    else if (A.save_kind == 4) request("import_existing", "\"path\":" + jstr(A.save_path) + r);
-    else request("import_save", std::string("\"kind\":") + (A.save_kind == 2 ? "\"gc\"" : "\"hd\"") + ",\"path\":" +
-                                    jstr(A.save_path) + r);
-}
-
-static void screen_save() {
-    page_header("Your save (optional)", "Use a save you already have, or start a new game.");
-    static const SDL_DialogFileFilter gci[] = {{"GameCube save (.gci)", "gci"}, {"All files", "*"}};
-    if (A.save_exists) colored(MUTED, "A save is already installed. Importing replaces it; the current save is backed up first.");
-    int kind = A.save_kind;
-    radio("Start with a new save", &kind, 0);
-    radio("Wind Waker HD save (a folder with cking.sav, from Cemu or a Wii U)", &kind, 1);
-    if (A.save_kind == 1) {
-        ImGui::Indent();
-        if (button("Choose folder...##hd")) choose_folder("save");
-        if (!A.save_path.empty()) ImGui::SameLine(), ImGui::TextUnformatted(base_name(A.save_path).c_str());
-        ImGui::Unindent();
-    }
-    radio("GameCube Wind Waker save (.gci), converted to HD", &kind, 2);
-    if (A.legacy) radio("Copy saves and settings from my earlier installation (copied, not moved)", &kind, 3);
-    radio("Copy saves and settings from another Wind Waker HD folder", &kind, 4);
-    set_save_kind(kind);
-    if (A.save_kind == 2) {
-        ImGui::Indent();
-        if (button("Choose .gci file...##gc")) choose_file("save", gci, 2);
-        if (!A.save_path.empty()) ImGui::SameLine(), ImGui::TextUnformatted(base_name(A.save_path).c_str());
-        muted("Items, progress, songs and charts are carried over (tools/savegame/gc2hd.py).");
-        ImGui::Unindent();
-    }
-    if (A.save_kind == 4) {
-        ImGui::Indent();
-        if (button("Choose folder...##other")) choose_folder("save");
-        if (!A.save_path.empty()) ImGui::SameLine(), ImGui::TextUnformatted(base_name(A.save_path).c_str());
-        muted("The folder of an earlier Wind Waker HD release (it has a data folder).");
-        ImGui::Unindent();
-    }
-    if (!A.save_msg.empty()) colored(BAD, A.save_msg);
-    if (A.confirm_replace) {
-        ImGui::OpenPopup("Replace save?");
-        A.confirm_replace = false;
-    }
-    if (ImGui::BeginPopupModal("Replace save?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("A save is already installed.");
-        ImGui::TextUnformatted("Replace it? The current save is moved to a backup folder first.");
-        if (button("Replace", ImVec2(160, 0), true)) {
-            send_import(true);
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (button("Keep my save", ImVec2(160, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-    bool can = A.save_kind == 0 || A.save_kind == 3 || !A.save_path.empty();
-    int b = footer({A.save_kind == 0 ? "Continue" : "Import"}, 0, (can && !busy()) ? 0 : 1);
-    if (b == 0) {
-        if (A.save_kind == 0) go(Screen::Done);
-        else send_import(false);
-    }
-}
-
 static void screen_done() {
     page_header("Ready to play");
     mark(2);
-    ImGui::TextWrapped(A.portable ? "The game is prepared." : "The Wind Waker HD is installed.");
+    ImGui::TextWrapped(A.portable ? "The game is prepared." : "Twilight Princess HD is installed.");
     ImGui::Spacing();
     if (A.portable) {
         muted("Everything is in " + home_folder() + ".");
@@ -1366,7 +1277,6 @@ static void screen_done() {
 #endif
         muted("Game files and saves: " + A.data_dir);
     }
-    if (!A.save_msg.empty()) muted(A.save_msg);
     if (A.portable) {
         ImGui::Spacing();
         if (A.toolchain_bytes > 0) {
@@ -1694,8 +1604,8 @@ static void start_child() {
 //   {"screen": "keys", "set": {"common_mode": "file", "common_key_file": "..."}, "when_step": "compile",
 //    "idle": true, "shot": "03-keys.png", "click": "Check keys and install"}
 // "set" fields: source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
-// (file|paste), save_kind (none|hd|gc|legacy|other), save_path, open_details (true). Screenshots are PNG files
-// of the window. The run ends (exit 0) after the last step, or with exit 2 on a 45-minute timeout.
+// (file|paste), open_details (true). Screenshots are PNG files of the window. The run ends (exit 0)
+// after the last step, or with exit 2 on a 45-minute timeout.
 
 
 static void automation_frame() {
@@ -1726,9 +1636,6 @@ static void automation_frame() {
             else if (k == "disc_key_file") set_disc_key_file(v);
             else if (k == "common_key_file") set_common_key_file(v);
             else if (k == "common_mode") set_common_mode(v == "paste" ? 1 : 0);
-            else if (k == "save_kind")
-                set_save_kind(v == "hd" ? 1 : v == "gc" ? 2 : v == "legacy" ? 3 : v == "other" ? 4 : 0);
-            else if (k == "save_path") set_save_path(v);
             else if (k == "open_details") details_open = true;
         }
     }
@@ -1778,7 +1685,7 @@ static bool game_ready(const std::string& pkg, const std::vector<std::string>& p
     };
     std::string exe = resolve(st.str("exe")), game = resolve(st.str("game_dir"));
     if (exe.empty() || game.empty() || !SDL_GetPathInfo(exe.c_str(), &info) ||
-        !SDL_GetPathInfo((game + "/code/cking.rpx").c_str(), &info))
+        !SDL_GetPathInfo((game + "/code/Zelda.rpx").c_str(), &info))
         return false;
     g_exe = exe, g_game_dir = game, g_data_dir = data;
     return true;
@@ -1925,7 +1832,6 @@ int main(int argc, char** argv) {
         case Screen::Keys: screen_keys(); break;
         case Screen::Installing: screen_installing(); break;
         case Screen::Error: screen_error(); break;
-        case Screen::Save: screen_save(); break;
         case Screen::Done: screen_done(); break;
         case Screen::Fatal: screen_fatal(); break;
         }

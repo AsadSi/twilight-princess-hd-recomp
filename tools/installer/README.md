@@ -54,11 +54,9 @@ The setup is only a front end: it runs the release's terminal setup with `--gui-
 process (so Python is found or fetched exactly as in the terminal setup; on Windows it starts
 `setup.py` directly with the Python the release ships, see below) and talks to `setup.py`
 over its stdin/stdout. Screens: welcome (or, when installed: play / update / repair / reinstall /
-import saves or settings / open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
+open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
 (disc images only: disc key found next to the image or chosen; common key as a file or pasted into a hidden field), installation
-(a bar per step, an overall bar, the log under "Details"), optional save import (an HD `cking.sav`
-folder, a GameCube `.gci` converted with `tools/savegame/gc2hd.py`, or the saves and settings of an
-earlier installation or another release folder, copied), done (Play, Open folder, Quit; in a portable
+(a bar per step, an overall bar, the log under "Details"), done (Play, Open folder, Quit; in a portable
 release also: remove the downloaded compiler, add a shortcut), and error screens with Retry and Copy
 log. On macOS it first checks for Apple's Command
 Line Tools and offers Apple's installer, as the Terminal launcher does.
@@ -131,7 +129,7 @@ One JSON object per line. Events on stdout all have `"event"`:
 
 | event | fields |
 |---|---|
-| `hello` | `version`, `platform`, `data_dir`, `app_dir`, `log`, `portable`, `package`, `installed` (state or null), `game_files`, `game_dir`, `save_exists`, `legacy` (an earlier installation to copy from), `free_bytes`, `language_sources` (as the `language_sources` reply), `toolchain` |
+| `hello` | `version`, `platform`, `data_dir`, `app_dir`, `log`, `portable`, `package`, `installed` (state or null), `game_files`, `game_dir`, `free_bytes`, `toolchain` |
 | `log` | `text` (also written to `setup.log`) |
 | `plan` | `steps`: `[{id, title}]` of the installation that starts |
 | `step` | `n`, `total`, `title`, `id` (`keys`, `archive`, `folder`, `compiler`, `extract`, `copy`, `translate`, `compile`, `app`) |
@@ -146,11 +144,6 @@ Requests on stdin: `{"cmd": ..., "id": n, ...}`
 | `probe` | `path` | `kind` (`image`/`archive`/`folder`), `disc_key` (found next to the image), `common_key` (where one was found); for a folder `in_place`, `bytes`; for an archive `title`, `folder`, `bytes`, `message` (which title is used and why); problem `wrong_title` when the archive has no usable game |
 | `check_keys` | `image`, optional `disc_key_file`, `common_key_file` or `common_key_hex` | `title_id`, `files`, `bytes`; problems `disc_key_wrong`, `common_key_wrong`, `wrong_title`, ... |
 | `install` | `source` (`image`/`archive`/`folder`/`installed`), `path`, optional `jobs` | streams `plan`/`step`/`progress`/`log`, then `app`, `exe`, `data_dir`, `game_dir`, `toolchain_bytes` |
-| `import_save` | `kind` (`hd`/`gc`), `path`, optional `replace` | `message`; problem `exists` when a save is installed and `replace` is not set (with `replace`, the old save is moved to `save/user.backup-<time>` first) |
-| `import_existing` | optional `path` (another release folder; none: the earlier per-user installation), `replace` | `message` (saves and settings copied, never moved; problem `exists` as above) |
-| `language_sources` | | `sources`: `[{region (EU/JP), title_id, source, packs: [{file, language, bytes, sha256}]}]` (experimental, [docs/language-packs.md](../../docs/language-packs.md)) |
-| `add_language_source` | `path` (a European or Japanese `.wux`/`.wud`, `.wua` or extracted folder), for an image optional `disc_key_file`, `common_key_file` or `common_key_hex` | `sources` (the added ones); only `content/Common/Pack/permanent_2d_*.pack` and `meta/meta.xml` are taken, into `data/game-lang/<EU\|JP>`; problem `language_source` (e.g. the USA game, an update, no packs) or a key problem as for `check_keys` |
-| `remove_language_source` | `region` (`EU`/`JP`) | `removed` (the folder) |
 | `remove_toolchain` | | `freed` bytes |
 | `shortcut` | | `path` of the created shortcut |
 | `launch` | | starts the installed game |
@@ -167,14 +160,14 @@ A `.wua` is Cemu's Wii U archive: a [ZArchive](https://github.com/Exzap/ZArchive
 title named `<title id>_v<version>`, often the game, its update and DLC together. No keys are needed:
 the GUI skips the key screen and the terminal setup asks for none.
 
-`wwhd-extract --title 0005000010143500 info GAME.wua` lists every title folder and the one selected;
+`wwhd-extract --title 000500001019E500 info GAME.wua` lists every title folder and the one selected;
 setup then decides (`archive_choice` in `setup.py`) and logs which title it uses and why:
 
-- the game itself, `0005000010143500_v0`, is used: the port's translated code and its hooks are made
-  for version 0 of the USA game (the disc and eShop release);
-- an update (`0005000e10143500_v..`) is not used, neither its code (another version) nor its data
+- the game itself, `000500001019e500_v81`, is used: the port's translated code and its hooks are made
+  for version 81 of the USA game (the disc);
+- an update (`0005000e1019e500_v..`) is not used, neither its code (another version) nor its data
   files (they belong to the update's code); DLC or other titles are listed as not used;
-- another region, an archive with only the update, another game, or a version other than 0 stop
+- another region, an archive with only the update, another game, or a version other than 81 stop
   with an explanation.
 
 `wwhd-extract --title FOLDER --progress extract GAME.wua data/game.partial` first checks the archive's
@@ -186,16 +179,16 @@ archive written by the test) and `ArchiveTitles` in `test_setup.py`.
 
 ## Game version check
 
-The translated code and its hooks (`tools/recomp/hooks*.txt`) are made for one file: `code/cking.rpx`
-of The Wind Waker HD (USA), title 00050000-10143500, version 0. `setup.py` keeps its SHA-256
+The translated code and its hooks (`tools/recomp/hooks*.txt`) are made for one file: `code/Zelda.rpx`
+of Twilight Princess HD (USA), title 00050000-1019E500, version 81. `setup.py` keeps its SHA-256
 (`SUPPORTED_RPX_SHA256`, a checksum only: it identifies the file and contains nothing of it;
 `guard.py` flags 32-digit, key-shaped strings, not 64-digit sums) and `check_game_version` compares
 it for every source before anything is translated: an extracted folder at the "folder" step (and
 already when the window probes it), a disc image or Cemu archive right after extracting (into
 `game.partial`, which is then removed, so an earlier `game/` stays), a repair or update with the
 installed files. On a mismatch the message says what was found (another title, "an update merged in"
-when `code/app.xml` or `meta/meta.xml` give a version above 0 or the update's title id, otherwise
+when `code/app.xml` or `meta/meta.xml` give another version or the update's title id, otherwise
 "not the expected file" with the start of its SHA-256), what is needed and how to get it. Tests:
 `GameVersion` in `test_setup.py` (synthetic files; `WWHD_GAME_DIR=game` also checks your own copy).
-The recompiler reads only `code/cking.rpx` (the runtime checks at start that it matches the translated
+The recompiler reads only `code/Zelda.rpx` (the runtime checks at start that it matches the translated
 code); the other files in `code/` (`app.xml`, `cos.xml`) are metadata and are not checked.
