@@ -42,7 +42,6 @@ static void cycle_res() {
 
 
 namespace gx2 { uint64_t flips_presented(); bool uncapped(); }
-#include "../mods/mods.h"
 #include "../overlay/overlay.h"
 namespace ax { void start_sound_trace(const char* path, double seconds); }
 namespace gfx { bool menu_hotkey(uint16_t code); NSMenuItem* controls_menu_item(); /* controls_ui.mm */ void install_overlay_input(); }
@@ -306,34 +305,6 @@ static WWStateMenu* g_state_menu;
 
 static WWGraphicsMenu* g_target;
 
-// Menu items backed by two blocks: `get` gives the check mark, `set` is called with !get() on a click.
-// Used by the Gameplay menu: one line per option (see install_menu).
-@interface WWBlockItem : NSObject <NSMenuItemValidation>
-@property(copy) BOOL (^get)(void);
-@property(copy) void (^set)(BOOL);
-@end
-@implementation WWBlockItem
-- (void)act:(NSMenuItem*)item { self.set(!self.get()); update_title(); }
-- (BOOL)validateMenuItem:(NSMenuItem*)item {
-    item.state = self.get() ? NSControlStateValueOn : NSControlStateValueOff;
-    return YES;
-}
-@end
-static NSMutableArray<WWBlockItem*>* g_block_items;  // menu items hold their targets weakly
-
-// add a checkable item: toggle(menu, @"Title", ^{ return state(); }, ^(BOOL on) { set_state(on); })
-static NSMenuItem* toggle(NSMenu* m, NSString* title, BOOL (^get)(void), void (^set)(BOOL), NSString* tip = @"") {
-    WWBlockItem* t = [WWBlockItem new];
-    t.get = get;
-    t.set = set;
-    if (!g_block_items) g_block_items = [NSMutableArray new];
-    [g_block_items addObject:t];
-    NSMenuItem* it = [m addItemWithTitle:title action:@selector(act:) keyEquivalent:@""];
-    it.target = t;
-    if (tip.length) it.toolTip = tip;
-    return it;
-}
-
 static NSMenuItem* add(NSMenu* m, NSString* title, SEL action, NSString* key, NSInteger tag = 0) {
     NSMenuItem* it = [m addItemWithTitle:title action:action keyEquivalent:@""];
     it.target = g_target;
@@ -417,33 +388,6 @@ void install_menu(NSWindow* tv) {
     [in addItem:gfx::controls_menu_item()];
     inItem.submenu = in;
     install_display_menu(bar);  // Display: full screen, scaling, GamePad screen mode (display.mm)
-
-    // Gameplay: optional mods, all off by default (runtime/src/mods/; inert for TP HD until its hooks exist).
-    NSMenuItem* gpItem = [bar addItemWithTitle:@"Gameplay" action:nil keyEquivalent:@""];
-    NSMenu* gp = [[NSMenu alloc] initWithTitle:@"Gameplay"];
-    [gp addItemWithTitle:@"Camera" action:nil keyEquivalent:@""].enabled = NO;
-    toggle(gp, @"    Direct right-stick camera (no easing)", ^BOOL { return mods::direct_camera(); }, ^(BOOL on) { mods::set_direct_camera(on); },
-           @"The right stick turns the camera at a constant rate as soon as it is pushed");
-    for (float sp : {0.5f, 1.0f, 1.5f, 2.0f})
-        toggle(gp, [NSString stringWithFormat:@"        Speed %gx", sp], ^BOOL { return mods::camera_speed() == sp; }, ^(BOOL) { mods::set_camera_speed(sp); });
-    toggle(gp, @"    Mouse camera (click the picture to capture, Esc releases)", ^BOOL { return mods::mouse_camera(); },
-           ^(BOOL on) { mods::set_mouse_camera(on); }, @"Mouse turns the camera; middle click or Esc releases the pointer; left click fires an aimed item");
-    for (float se : {0.08f, 0.15f, 0.3f})
-        toggle(gp, [NSString stringWithFormat:@"        Sensitivity %s", se < 0.1f ? "low" : se < 0.2f ? "medium" : "high"],
-               ^BOOL { return mods::mouse_sensitivity() == se; }, ^(BOOL) { mods::set_mouse_sensitivity(se); });
-    toggle(gp, @"    First person on R3 / mouse wheel", ^BOOL { return mods::first_person_wheel(); }, ^(BOOL on) { mods::set_first_person_wheel(on); },
-           @"Right-stick click (keyboard V) or wheel forward enters the first-person view, wheel back leaves it");
-    [gp addItem:[NSMenuItem separatorItem]];
-    toggle(gp, @"Quick doors", ^BOOL { return mods::quick_doors(); }, ^(BOOL on) { mods::set_quick_doors(on); },
-           @"Door events (walk-in, opening, closing) run at 4x speed");
-    toggle(gp, @"Fast scene changes", ^BOOL { return mods::fast_scenes(); }, ^(BOOL on) { mods::set_fast_scenes(on); },
-           @"Fades and loading between areas run at 4x speed; the scenes themselves are not sped up");
-    // all of these are Wind Waker mods that need TP HD hooks first (mods/manager.cpp: available)
-    gp.autoenablesItems = NO;
-    for (NSMenuItem* it in gp.itemArray) it.enabled = NO;
-    [gp insertItemWithTitle:@"Not available in Twilight Princess HD yet" action:nil keyEquivalent:@"" atIndex:0].enabled = NO;
-    [gp insertItem:[NSMenuItem separatorItem] atIndex:1];
-    gpItem.submenu = gp;
 
     // Save States: 5 slots (savestate.cpp); Shift+F1..F5 save, F1..F5 load
     NSMenuItem* ssItem = [bar addItemWithTitle:@"Save States" action:nil keyEquivalent:@""];

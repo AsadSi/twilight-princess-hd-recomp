@@ -14,7 +14,6 @@ struct Entry {
     bool (*enabled)();
     void (*apply)(bool);
     bool restart_required = false;
-    bool available = false;  // works in TP HD: the Wind Waker mods need TP HD hooks first
 };
 std::span<const Entry> entries();
 const Entry* find(std::string_view id);

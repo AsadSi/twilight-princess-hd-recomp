@@ -32,8 +32,6 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
-#include "../mods/mods.h"
-#include "../mods/manager.h"
 #include "../mods/packages.h"
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
@@ -913,66 +911,9 @@ void package_controls() {
 }
 
 void tab_mods() {
-    bool v;
     heading("Mod manager");
-    note("Built-in mods are part of this recomp build. Your choices are saved; all start off by default.");
-    static ImGuiTextFilter search;
-    search.Draw("Search mods", 260);
-    static bool only_enabled = false;
-    ImGui::SameLine();
-    ImGui::Checkbox("Enabled only", &only_enabled);
-    unsigned enabled = 0;
-    for (const auto& entry : mods::manager::entries()) if (entry.enabled()) ++enabled;
-    ImGui::Text("%u of %zu enabled", enabled, mods::manager::entries().size());
-    ImGui::SameLine();
+    note("Mod packages and profiles. Twilight Princess HD has no built-in mods yet.");
     if (ImGui::Button("Disable all mods")) hostui::post([] { mods::packages::disable_all(); });
-    static std::string selected = "direct-camera";
-    if (ImGui::BeginTable("mod_catalogue", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
-        ImGui::TableSetupColumn("Mods", ImGuiTableColumnFlags_WidthStretch, 1);
-        ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        unsigned shown = 0;
-        for (const auto& entry : mods::manager::entries()) {
-            bool on = entry.enabled();
-            if (only_enabled && !on) continue;
-            std::string searchable = std::string(entry.name)+" "+entry.category+" "+entry.description;
-            if (!search.PassFilter(searchable.c_str())) continue;
-            ++shown;
-            ImGui::PushID(entry.id);
-            ImGui::BeginDisabled(!entry.available);
-            if (ImGui::Checkbox("##enabled", &on)) {
-                std::string id = entry.id;
-                hostui::post([id, on] { mods::manager::set_enabled(id, on); });
-            }
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            if (ImGui::Selectable(entry.name, selected == entry.id)) selected = entry.id;
-            ImGui::PopID();
-        }
-        if (!shown) note("No mods match your filter.");
-        ImGui::TableNextColumn();
-        if (const auto* entry = mods::manager::find(selected)) {
-            ImGui::TextUnformatted(entry->name);
-            note("%s · Built in · %s", entry->category, entry->enabled() ? "Enabled" : "Disabled");
-            ImGui::TextWrapped("%s", entry->description);
-            if (!entry->available) note("Not available in Twilight Princess HD yet: this Wind Waker mod needs hooks into TP HD's code.");
-            if (const char* override = std::getenv(entry->startup_env))
-                note("%s=%s overrides the saved choice at startup.", entry->startup_env, override);
-            if (entry->restart_required) note("Restart the game after changing this mod.");
-            if (selected == "direct-camera") {
-                float speed = mods::camera_speed();
-                if (ImGui::SliderFloat("Camera speed", &speed, .5f, 2.f, "%.2fx"))
-                    hostui::post([speed] { mods::set_camera_speed(speed); hostui::set("mod.direct-camera.speed", std::to_string(speed)); mods::packages::remember_option("direct-camera.speed", speed); });
-            } else if (selected == "mouse-camera") {
-                float sensitivity = mods::mouse_sensitivity();
-                if (ImGui::SliderFloat("Sensitivity", &sensitivity, .08f, .3f, "%.3f"))
-                    hostui::post([sensitivity] { mods::set_mouse_sensitivity(sensitivity); hostui::set("mod.mouse-camera.sensitivity", std::to_string(sensitivity)); mods::packages::remember_option("mouse-camera.sensitivity", sensitivity); });
-            }
-        }
-        ImGui::EndTable();
-    }
-    ImGui::Separator();
     package_controls();
 }
 
