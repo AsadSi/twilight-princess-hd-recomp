@@ -172,8 +172,8 @@ bool blend_cam(const CamPrev& p, const Cam& a, const Cam& b, float t, Cam& m) {
 std::unordered_map<uint32_t, CamPrev> g_cams;
 
 // ---------------------------------------------------------------- models
-// J3DModel: model data +0x04 (joint count +0x2C, envelope count +0x2E), matrix buffer +0x84 (world
-// matrices +0x0C, envelope matrices +0x10); 3x4 row-major float matrices
+// J3DModel (TP HD's layout: the decomp's less the vtable): model data +0x00 (joint count +0x24, envelope count
+// +0x26), matrix buffer +0x80 (world matrices +0x0C, envelope matrices +0x10); 3x4 row-major float matrices
 struct ModelPrev {
     uint64_t pass = 0;  // the record pass that recorded it
     uint32_t anm = 0, wev = 0, n = 0, w = 0;
@@ -242,8 +242,8 @@ extern "C" void hook_02B5CF50(Cpu* c) {
     using namespace interp;
     const uint32_t model = c->r[3];
     if (!g_on) return f_02B5CF50_orig(c);
-    const uint32_t data = ld32(model + 0x04), buf = ld32(model + 0x84);
-    const uint32_t n = data ? ld16(data + 0x2C) : 0, w = data ? ld16(data + 0x2E) : 0;
+    const uint32_t data = ld32(model), buf = ld32(model + 0x80);
+    const uint32_t n = data ? ld16(data + 0x24) : 0, w = data ? ld16(data + 0x26) : 0;
     const uint32_t anm = buf ? ld32(buf + 0x0C) : 0, wev = buf ? ld32(buf + 0x10) : 0;
     if (!anm || n == 0 || n > 512 || w > 1024 || (w && !wev)) return f_02B5CF50_orig(c);
     ModelPrev& p = g_models[model];
@@ -256,8 +256,8 @@ extern "C" void hook_02B5CF50(Cpu* c) {
         if (w) read_words(wev, w * 12, p.m.data() + n * 12);
         return;
     }
-    // blended: only from the step's "before" (the last record pass), with the same matrices
-    if (p.pass != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w) return f_02B5CF50_orig(c);
+    // blended: only from the step's "before" (the last record pass, counted once it ended), with the same matrices
+    if (p.pass + 1 != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w) return f_02B5CF50_orig(c);
     g_cur.resize((n + w) * 12);
     read_words(anm, n * 12, g_cur.data());
     if (w) read_words(wev, w * 12, g_cur.data() + n * 12);
