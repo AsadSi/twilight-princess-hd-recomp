@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 namespace mods::packages {
-inline constexpr const char* kGameId="wwhd-usa";
+inline constexpr const char* kGameId="tphd-usa";
 inline constexpr const char* kManagerVersion="1.2.0";
 struct Option {
     std::string id,name,description,type;

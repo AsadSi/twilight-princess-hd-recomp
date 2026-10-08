@@ -23,7 +23,7 @@ int main(int argc,char** argv) {
     rejects([]{cemu::expression("1/0",{});});rejects([]{cemu::expression("$missing",{});});
     auto root=fs::temp_directory_path()/"wwhd-cemu-unit-tests";fs::create_directories(root);
     auto write=[&](const std::string& text){std::ofstream(root/"rules.txt")<<text;};
-    std::string definition="[Definition]\nname = Test\ntitleIds = 0005000010143500\nversion = 4\n";
+    std::string definition="[Definition]\nname = Test\ntitleIds = 000500001019e500\nversion = 4\n";
     std::string presets="[Default]\n$scale = 1\n[Preset]\nname = Small\ncategory = Resolution\n$scale = 1\n[Preset]\nname = Large\ncategory = Resolution\n$scale = 2\n";
     std::string texture="[TextureRedefine]\nwidth = 1920\nheight = 1080\nformats = 0x80e\ntileModes = 0, 4\noverwriteWidth = 1920 * $scale\noverwriteHeight = 1080 * $scale\n";
     write(definition+presets+texture);auto pack=cemu::parse(root);
@@ -33,7 +33,7 @@ int main(int argc,char** argv) {
     rejects([&]{cemu::validate({{"a",pack,config},{"b",pack,{}}});});
     write(definition+"[TextureRedefine]\noverwriteFormat = 0x80e\n");rejects([&]{cemu::parse(root);});
     write(definition+"[Patch]\nmoduleMatches = 0x123\n");rejects([&]{cemu::parse(root);});
-    write("[Definition]\nname=Wrong\ntitleIds=10005000010143500\nversion=4\n"+presets+texture);rejects([&]{cemu::parse(root);});
+    write("[Definition]\nname=Wrong\ntitleIds=1000500001019e500\nversion=4\n"+presets+texture);rejects([&]{cemu::parse(root);});
     write(definition+presets+texture);
     std::ofstream(root/"patches.txt")<<"[Bad]\n0x1004AAF0 = .float 2\n";rejects([&]{cemu::parse(root);});fs::remove(root/"patches.txt");
     auto shader=root/"0000000000000001_0000000000000002_ps.txt";
