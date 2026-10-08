@@ -26,7 +26,9 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   not an exact snapshot (enemies, a running cutscene and other actors start fresh). The old full
   states (the whole running game, ~300 MB, contain game data: never share them) are still there for
   debugging: Saves › *Full save states*, or `WWHD_FULL_SAVE_STATES=1`. Loading a slot loads either
-  kind. See [docs/portable-save-states.md](docs/portable-save-states.md).
+  kind; an older full state in a slot is kept and the Saves tab says so. A portable state can only be
+  saved while you control Link (not during a cutscene or dialogue); one saved on the boat puts Link
+  back on the boat. See [docs/portable-save-states.md](docs/portable-save-states.md).
 - **Fixed: "Quick doors" could crash the game going through a door** (issue #61, "PROGRAM HALT
   J3DPacket.cpp:157"; reported in Tingle's jail on Windfall). The extra game steps that make doors
   quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
@@ -702,8 +704,10 @@ each slot shows its time and area. Slots are kept in `~/Library/Application Supp
 and survive restarts. By default a slot holds a **portable state** (`slotN.wwstate`, a few KB):
 your progress and Link's place, no game data, safe to attach to bug reports. Loading one works
 once a Quest Log is being played (it waits until then): the progress is put into the game and Link
-enters the saved stage at the saved spot. It is not an exact snapshot: enemies, cutscenes and other
-actors start fresh, and Link starts standing (on the sea: swimming, without the boat).
+enters the saved stage at the saved spot (on the boat if he was on it). It is not an exact snapshot:
+enemies, cutscenes and other actors start fresh. A portable state can only be saved while you
+control Link (not during cutscenes, dialogue or stage changes). A state from another Quest Log is
+loaded into the one being played, with a notice.
 **Full save states** (Save States menu or Saves tab, off by default, for debugging;
 `WWHD_FULL_SAVE_STATES=1`) save the whole running game instead (`slotN.bin`, about 270 MB) and
 restore it exactly; they contain game code and data, **never share them**. A full state made by an
