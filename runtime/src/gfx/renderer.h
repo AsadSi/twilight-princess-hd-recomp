@@ -54,10 +54,6 @@ struct Backend {
     // graphics options (Graphics menu, hotkeys)
     float (*res_scale)();          // requested internal resolution factor
     void (*set_res_scale)(float);
-    int (*ao_mode)();
-    void (*set_ao_mode)(int);
-    bool (*ao_hires)();
-    void (*set_ao_hires)(bool);
     bool (*aniso)();
     void (*set_aniso)(bool);
     bool (*fxaa)();
@@ -68,7 +64,7 @@ struct Backend {
     // version; "" before the renderer started
     std::string (*device)();
 };
-enum Feature : int { kFeatureAO, kFeatureAOHires, kFeatureAniso, kFeatureFXAA, kFeatureScaleFilter, kFeatureCapture,
+enum Feature : int { kFeatureAniso, kFeatureFXAA, kFeatureScaleFilter, kFeatureCapture,
                      kFeatureShaderHeadStart };
 
 extern const Backend* g_backend;
@@ -130,10 +126,6 @@ void shutdown();         // once, on the way out (Quit, window closed, WWHD_EXIT
 
 inline float res_scale() { return g_backend->res_scale(); }
 inline void set_res_scale(float f) { g_backend->set_res_scale(f); }
-inline int ao_mode() { return g_backend->ao_mode(); }
-inline void set_ao_mode(int m) { g_backend->set_ao_mode(m); }
-inline bool ao_hires() { return g_backend->ao_hires(); }
-inline void set_ao_hires(bool v) { g_backend->set_ao_hires(v); }
 inline bool aniso() { return g_backend->aniso(); }
 inline void set_aniso(bool v) { g_backend->set_aniso(v); }
 inline bool fxaa() { return g_backend->fxaa(); }

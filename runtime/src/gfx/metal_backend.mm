@@ -13,10 +13,6 @@ void ss_reset_surfaces();
 void request_capture();
 float res_scale();
 void set_res_scale(float f);
-int ao_mode();
-void set_ao_mode(int m);
-bool ao_hires_enabled();
-void set_ao_hires(bool v);
 bool aniso_enabled();
 void set_aniso(bool v);
 bool fxaa_enabled();
@@ -55,10 +51,6 @@ const Backend& metal_backend() {
         b.shutdown = [] {};  // the shader cache is written as it grows
         b.res_scale = gfx::res_scale;
         b.set_res_scale = gfx::set_res_scale;
-        b.ao_mode = gfx::ao_mode;
-        b.set_ao_mode = gfx::set_ao_mode;
-        b.ao_hires = gfx::ao_hires_enabled;
-        b.set_ao_hires = gfx::set_ao_hires;
         b.aniso = gfx::aniso_enabled;
         b.set_aniso = gfx::set_aniso;
         b.fxaa = gfx::fxaa_enabled;

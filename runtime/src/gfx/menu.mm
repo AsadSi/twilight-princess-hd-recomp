@@ -28,7 +28,7 @@ void set_host_setting(const char* key, const std::string& value);  // display.mm
 }  // namespace gfx
 
 // internal resolution steps (Graphics menu; R cycles)
-static const float kResScales[] = {1.0f, 1.5f, 2.0f, 3.0f};
+static const float kResScales[] = {1.0f, 4.0f / 3.0f, 1.5f, 2.0f};
 static float g_res_shown = 0;  // last value set from the UI (res_scale() lags a frame)
 static float current_res_scale() { return g_res_shown ? g_res_shown : render::res_scale(); }
 static void set_res(float f) { g_res_shown = f; render::set_res_scale(f); }
@@ -88,8 +88,6 @@ static void load_prefs() {
     if (!g_prefs) return;
     auto saved = [&](NSString* key, std::initializer_list<const char*> env) { return !env_set(env) && pref(key) != nil; };
     if (saved(@"resScale", {"WWHD_RES_SCALE"})) set_res([pref(@"resScale") floatValue]);
-    if (saved(@"aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) render::set_ao_mode([pref(@"aoMode") intValue]);
-    if (saved(@"aoHires", {"WWHD_AO_HIRES"})) render::set_ao_hires([pref(@"aoHires") boolValue]);
     if (saved(@"aniso", {"WWHD_ANISO"})) render::set_aniso([pref(@"aniso") boolValue]);
     if (saved(@"fxaa", {"WWHD_FXAA"})) render::set_fxaa([pref(@"fxaa") boolValue]);
     // frame rate: fps60 is the mode (0 30 fps, 1 frame interpolation; the key predates 120/240 fps),
@@ -103,8 +101,6 @@ static void load_prefs() {
 static void save_prefs() {
     if (!g_prefs || !g_prefs_loaded) return;
     if (!env_set({"WWHD_RES_SCALE"})) set_pref(@"resScale", @(current_res_scale()));
-    if (!env_set({"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) set_pref(@"aoMode", @(render::ao_mode()));
-    if (!env_set({"WWHD_AO_HIRES"})) set_pref(@"aoHires", @(render::ao_hires()));
     if (!env_set({"WWHD_ANISO"})) set_pref(@"aniso", @(render::aniso()));
     if (!env_set({"WWHD_FXAA"})) set_pref(@"fxaa", @(render::fxaa()));
     if (!env_set({"WWHD_INTERP", "WWHD_INTERP_FPS"})) set_pref(@"fps60", @(interp::mode()));
@@ -120,7 +116,6 @@ static void save_prefs() {
 // Every option change ends here, so this also saves them
 static void update_title() {
     save_prefs();
-    static const char* ao[3] = {"original", "centre fix", "centre + noise fix"};
     NSString* res = current_res_scale() != 1.0f ? [NSString stringWithFormat:@" \u00b7 %gx res", current_res_scale()] : @"";
     if (aspect::mode() != aspect::kOriginal) res = [res stringByAppendingFormat:@" \u00b7 %s", aspect::mode_name(aspect::mode())];
     NSString* rnd = @(render::api_name(render::active()));
@@ -129,8 +124,7 @@ static void update_title() {
     else if (render::restart_pending())
         rnd = [rnd stringByAppendingFormat:@" (%s after restart)", render::api_name(render::preferred())];
     // the middle dots of the optional parts are NSStrings: %s would read UTF-8 as Mac Roman ("¬∑")
-    NSString* t = [NSString stringWithFormat:@"%@ \u2014 %@ \u00b7 %.0f fps%@ \u00b7 AO: %s%s \u00b7 AF: %s%@%@", kTitle, rnd, g_fps, res,
-                                             ao[render::ao_mode()], render::ao_hires() ? " + full-size depth" : "",
+    NSString* t = [NSString stringWithFormat:@"%@ \u2014 %@ \u00b7 %.0f fps%@ \u00b7 AF: %s%@%@", kTitle, rnd, g_fps, res,
                                              render::aniso() ? "16x" : "game",
                                              interp::mode() ? [@" \u00b7 " stringByAppendingString:@(interp::mode_name())] : @"", render::fxaa() ? @" \u00b7 FXAA" : @""];
     if (gx2::uncapped()) t = [t stringByAppendingString:@" \u00b7 UNCAPPED (debug)"];
@@ -237,7 +231,6 @@ static WWStateMenu* g_state_menu;
 @end
 
 @implementation WWGraphicsMenu
-- (void)setAO:(NSMenuItem*)item { render::set_ao_mode((int)item.tag); update_title(); }
 - (void)toggleAniso:(NSMenuItem*)item { render::set_aniso(!render::aniso()); update_title(); }
 - (void)capture:(NSMenuItem*)item { render::request_capture(); }
 - (void)openSettings:(NSMenuItem*)item { overlay::set_open(!overlay::is_open()); }  // Cmd+, toggles
@@ -251,17 +244,12 @@ static WWStateMenu* g_state_menu;
 - (void)toggleInterpFps:(NSMenuItem*)item { interp::toggle_fps((int)item.tag); update_title(); }
 - (void)toggleDrcWindow:(NSMenuItem*)item { gfx::show_drc_window(!gfx::drc_window_shown()); }
 - (void)toggleFxaa:(NSMenuItem*)item { render::set_fxaa(!render::fxaa()); update_title(); }
-- (void)toggleHires:(NSMenuItem*)item { render::set_ao_hires(!render::ao_hires()); update_title(); }
 - (void)setRes:(NSMenuItem*)item { set_res(kResScales[item.tag]); update_title(); }
 - (void)setAspect:(NSMenuItem*)item { aspect::set_mode((int)item.tag); update_title(); }
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
     if (item.action == @selector(setRes:))
         item.state = fabsf(kResScales[item.tag] - current_res_scale()) < 0.01f ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setAspect:)) item.state = item.tag == aspect::mode() ? NSControlStateValueOn : NSControlStateValueOff;
-    if (item.action == @selector(setAO:)) {
-        item.state = item.tag == render::ao_mode() ? NSControlStateValueOn : NSControlStateValueOff;
-        return render::feature_available(render::kFeatureAO);
-    }
     if (item.action == @selector(setRenderer:)) {
         render::Api a = (render::Api)item.tag;
         item.state = a == render::preferred() ? NSControlStateValueOn : NSControlStateValueOff;
@@ -281,10 +269,6 @@ static WWStateMenu* g_state_menu;
     if (item.action == @selector(toggleFxaa:)) {
         item.state = render::fxaa() ? NSControlStateValueOn : NSControlStateValueOff;
         return render::feature_available(render::kFeatureFXAA);
-    }
-    if (item.action == @selector(toggleHires:)) {
-        item.state = render::ao_hires() ? NSControlStateValueOn : NSControlStateValueOff;
-        return render::feature_available(render::kFeatureAOHires);
     }
     if (item.action == @selector(toggleAniso:)) {
         item.state = render::aniso() ? NSControlStateValueOn : NSControlStateValueOff;
@@ -338,10 +322,10 @@ void install_menu(NSWindow* tv) {
         [g addItem:[NSMenuItem separatorItem]];
     }
     [g addItemWithTitle:@"Internal resolution (R cycles)" action:nil keyEquivalent:@""].enabled = NO;
-    add(g, @"    1x (1280x720, as on Wii U)", @selector(setRes:), @"R", 0);
-    add(g, @"    1.5x (1920x1080)", @selector(setRes:), @"R", 1);
-    add(g, @"    2x (2560x1440)", @selector(setRes:), @"R", 2);
-    add(g, @"    3x (3840x2160)", @selector(setRes:), @"R", 3);
+    add(g, @"    1x (1920x1080, as on Wii U)", @selector(setRes:), @"R", 0);
+    add(g, @"    1.33x (2560x1440)", @selector(setRes:), @"R", 1);
+    add(g, @"    1.5x (2880x1620)", @selector(setRes:), @"R", 2);
+    add(g, @"    2x (3840x2160)", @selector(setRes:), @"R", 3);
     [g addItem:[NSMenuItem separatorItem]];
     [g addItemWithTitle:@"Aspect ratio" action:nil keyEquivalent:@""].enabled = NO;
     add(g, @"    16:9 (original)", @selector(setAspect:), @"", aspect::kOriginal);
@@ -350,12 +334,6 @@ void install_menu(NSWindow* tv) {
     add(g, @"    16:10", @selector(setAspect:), @"", aspect::k16x10);
     add(g, @"    21:9", @selector(setAspect:), @"", aspect::k21x9);
     add(g, @"    32:9", @selector(setAspect:), @"", aspect::k32x9);
-    [g addItem:[NSMenuItem separatorItem]];
-    [g addItemWithTitle:@"Ambient occlusion (O cycles)" action:nil keyEquivalent:@""].enabled = NO;
-    add(g, @"    Original (as on Wii U)", @selector(setAO:), @"O", 0);
-    add(g, @"    Centre fix", @selector(setAO:), @"O", 1);
-    add(g, @"    Centre + noise fix", @selector(setAO:), @"O", 2);
-    add(g, @"Full-size occlusion depth (M)", @selector(toggleHires:), @"M");
     [g addItem:[NSMenuItem separatorItem]];
     add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");
     add(g, @"Edge smoothing, FXAA (8)", @selector(toggleFxaa:), @"8");
@@ -429,9 +407,7 @@ void menu_options_changed() { update_title(); }
 // single-key shortcuts from the game window; true if the key was used
 bool menu_hotkey(uint16_t code) {
     switch (code) {
-    case kVK_ANSI_O: if (render::feature_available(render::kFeatureAO)) render::set_ao_mode((render::ao_mode() + 1) % 3); break;
     case kVK_ANSI_N: if (render::feature_available(render::kFeatureAniso)) render::set_aniso(!render::aniso()); break;
-    case kVK_ANSI_M: if (render::feature_available(render::kFeatureAOHires)) render::set_ao_hires(!render::ao_hires()); break;
     case kVK_ANSI_6: interp::toggle_fps(60); break;
     case kVK_ANSI_8: if (render::feature_available(render::kFeatureFXAA)) render::set_fxaa(!render::fxaa()); break;
     case kVK_ANSI_R: cycle_res(); break;

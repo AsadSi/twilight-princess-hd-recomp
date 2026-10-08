@@ -575,8 +575,8 @@ void tab_graphics() {
          "title and the performance overlay. Not saved.");
 
     heading("Internal resolution");
-    static const float scales[] = {1.0f, 1.5f, 2.0f, 3.0f};
-    static const char* const names[] = {"1x  (1280x720)", "1.5x  (1920x1080)", "2x  (2560x1440)", "3x  (3840x2160)"};
+    static const float scales[] = {1.0f, 4.0f / 3.0f, 1.5f, 2.0f};
+    static const char* const names[] = {"1x  (1920x1080)", "1.33x  (2560x1440)", "1.5x  (2880x1620)", "2x  (3840x2160)"};
     float cur = hostui::res_scale();
     for (int i = 0; i < 4; i++) {
         if (i) ImGui::SameLine();
@@ -593,15 +593,6 @@ void tab_graphics() {
 
     heading("Effects");
     bool v;
-    const bool ao_ok = render::feature_available(render::kFeatureAO);
-    static const char* const ao[] = {"AO: original", "AO: centre fix", "AO: centre + noise fix"};
-    for (int i = 0; i < 3; i++) {
-        if (i) ImGui::SameLine();
-        if (radio(ao[i], render::ao_mode() == i, ao_ok)) post_changed([i] { render::set_ao_mode(i); });
-    }
-    if (check("Full-size occlusion depth", render::ao_hires(), &v, render::feature_available(render::kFeatureAOHires)))
-        post_changed([v] { render::set_ao_hires(v); });
-    ImGui::SameLine(0, 30);
     if (check("16x anisotropic filtering", render::aniso(), &v, render::feature_available(render::kFeatureAniso)))
         post_changed([v] { render::set_aniso(v); });
     ImGui::SameLine(0, 30);
