@@ -1258,7 +1258,11 @@ static bool expand_indices(uint32_t prim, uint32_t count, bool indexed, Idx idx,
         if (count) out[count] = idx(0);
         return true;
     default:
+    {
+        static uint64_t seen = 0;  // each unsupported type logged once
+        if (prim < 64 && !(seen & (1ull << prim))) seen |= 1ull << prim, LOG("[gfx] primitive type %#x not supported: draws skipped", prim);
         return false;  // rects and adjacency primitives: not supported yet
+    }
     }
     if (indexed) {
         out.resize(count);
