@@ -1,6 +1,8 @@
 # Runtime hooks into Zelda.rpx (address = function entry; "@ADDR" = instruction site, runs before it).
 @02AF0EDC  # main01: top of the frame loop (interp.cpp: save states, hold passes)
 029196A0  # dPeekZ_c::peekData: depth peeks answered from GPU readbacks (peekz.cpp)
+02AEA3E4  # bloom_c::draw: bloom strength (look.cpp)
+02A31164  # dMeter2Draw_c::draw: the HUD shown or hidden (look.cpp)
 02B34334  # J2DPane::draw: text shape and the HUD's places on wider screens (aspect.cpp)
 # frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
 028E13CC  # camera_draw

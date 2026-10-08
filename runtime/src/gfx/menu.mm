@@ -12,6 +12,7 @@
 #include "../savestate.h"
 #include "../crashrec.h"
 #include "../aspect.h"
+#include "../look.h"
 #include "renderer.h"
 #ifdef WWHD_HAS_VULKAN
 #include "vulkan/settings.h"  // Presentation (present mode), kept with the other graphics options
@@ -94,6 +95,8 @@ static void load_prefs() {
     // interpFps the interpolation's rate
     if (saved(@"interpFps", {"WWHD_INTERP_FPS"})) interp::set_fps([pref(@"interpFps") intValue]);
     if (saved(@"aspect", {"WWHD_ASPECT"})) aspect::set_mode([pref(@"aspect") intValue]);
+    if (saved(@"bloom", {"WWHD_BLOOM"})) look::set_bloom([pref(@"bloom") intValue]);
+    if (saved(@"hud", {"WWHD_HUD"})) look::set_hud([pref(@"hud") boolValue]);
     if (saved(@"fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"})) interp::set_mode([pref(@"fps60") intValue]);
 #ifdef WWHD_HAS_VULKAN
     if (saved(@"vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode([pref(@"vkPresentMode") intValue]);
@@ -107,6 +110,8 @@ static void save_prefs() {
     if (!env_set({"WWHD_INTERP", "WWHD_INTERP_FPS"})) set_pref(@"fps60", @(interp::mode()));
     if (!env_set({"WWHD_INTERP_FPS"})) set_pref(@"interpFps", @(interp::fps()));
     if (!env_set({"WWHD_ASPECT"})) set_pref(@"aspect", @(aspect::mode()));
+    if (!env_set({"WWHD_BLOOM"})) set_pref(@"bloom", @(look::bloom()));
+    if (!env_set({"WWHD_HUD"})) set_pref(@"hud", @(look::hud()));
 #ifdef WWHD_HAS_VULKAN
     if (!env_set({"WWHD_VK_PRESENT_MODE"})) set_pref(@"vkPresentMode", @(gfxvk::present_mode()));
 #endif
@@ -248,10 +253,14 @@ static WWStateMenu* g_state_menu;
 - (void)toggleFxaa:(NSMenuItem*)item { render::set_fxaa(!render::fxaa()); update_title(); }
 - (void)setRes:(NSMenuItem*)item { set_res(kResScales[item.tag]); update_title(); }
 - (void)setAspect:(NSMenuItem*)item { aspect::set_mode((int)item.tag); update_title(); }
+- (void)setBloom:(NSMenuItem*)item { look::set_bloom((int)item.tag); update_title(); }
+- (void)toggleHud:(NSMenuItem*)item { look::set_hud(!look::hud()); update_title(); }
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
     if (item.action == @selector(setRes:))
         item.state = fabsf(kResScales[item.tag] - current_res_scale()) < 0.01f ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setAspect:)) item.state = item.tag == aspect::mode() ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(setBloom:)) item.state = item.tag == look::bloom() ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(toggleHud:)) item.state = look::hud() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setRenderer:)) {
         render::Api a = (render::Api)item.tag;
         item.state = a == render::preferred() ? NSControlStateValueOn : NSControlStateValueOff;
@@ -336,6 +345,11 @@ void install_menu(NSWindow* tv) {
     add(g, @"    16:10", @selector(setAspect:), @"", aspect::k16x10);
     add(g, @"    21:9", @selector(setAspect:), @"", aspect::k21x9);
     add(g, @"    32:9", @selector(setAspect:), @"", aspect::k32x9);
+    [g addItem:[NSMenuItem separatorItem]];
+    [g addItemWithTitle:@"Bloom" action:nil keyEquivalent:@""].enabled = NO;
+    for (int b = 0; b < look::kBloomModes; b++)
+        add(g, [@"    " stringByAppendingString:@(look::bloom_name(b))], @selector(setBloom:), @"", b);
+    add(g, @"Show the HUD", @selector(toggleHud:), @"").toolTip = @"Hearts, rupees and the buttons; menus and messages always show";
     [g addItem:[NSMenuItem separatorItem]];
     add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");
     add(g, @"Edge smoothing, FXAA (8)", @selector(toggleFxaa:), @"8");

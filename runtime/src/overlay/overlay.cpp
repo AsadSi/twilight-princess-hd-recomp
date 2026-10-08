@@ -22,6 +22,7 @@
 #include "hostui.h"
 #include "controls_view.h"
 #include "../aspect.h"
+#include "../look.h"
 #include "../crashrec.h"
 #include "../game_languages.h"
 #include "../gfx/renderer.h"
@@ -596,6 +597,15 @@ void tab_graphics() {
     ImGui::SameLine(0, 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
+
+    heading("Bloom");
+    for (int b = 0; b < look::kBloomModes; b++) {
+        if (b) ImGui::SameLine();
+        if (radio(look::bloom_name(b), look::bloom() == b)) post_changed([b] { look::set_bloom(b); });
+    }
+    help("The glow around bright areas, strongest in the Twilight. Reduced halves it.");
+    if (check("Show the HUD", look::hud(), &v)) post_changed([v] { look::set_hud(v); });
+    help("Hearts, rupees, the buttons and the map icon. Menus and messages always show.");
 #ifdef WWHD_HAS_VULKAN
     heading("Presentation (Vulkan)");
     {
