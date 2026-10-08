@@ -10,8 +10,23 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
-### Next update
+### v0.2.7
 
+- **Fixed: taking a picture with the Picto Box crashed the game (Vulkan)** (issue #53). Right after
+  the shot the game renders small 3D colour-grading textures slice by slice, which the Vulkan renderer
+  did not support; on Metal the preview was black. Both renderers now render into 3D textures, and the
+  saved pictures show up in colour in the Picto Box album (they were black on both renderers before).
+- **Fixed: black shadows on macOS (Metal)** (issue #47). When macOS had to compile the game's shaders
+  from scratch (first start, or after a macOS update cleared its shader cache), the ambient-occlusion
+  pass could be skipped at the title screen while its shader was still compiling; the light buffer was
+  then created with the wrong layout and stayed wrong for the whole session, turning shadowed areas
+  black until a restart. Render targets no longer depend on that timing, and draws whose result the
+  game reuses are never skipped. A cold start now spends about 0.7 s more on the title screen once.
+- **Windows setup without PowerShell** (issue #58): the setup no longer runs a PowerShell script or
+  removes the "downloaded from the internet" mark, and `Wind Waker HD.exe` downloads nothing: the
+  official, signed embeddable Python now ships in the release (the Windows zip grows to about 19 MB).
+  The programs carry version information and a manifest. Some antivirus engines (BitDefender and
+  engines using it) may still flag the unsigned exe; that is a false positive and has been reported.
 - **120 and 240 fps** (settings overlay → **Graphics** → **Frame rate**, or the macOS Graphics
   menu): frame interpolation now also draws 3 or 7 blended frames between the game's 30 logic steps
   a second, for 120 Hz and 240 Hz displays. Camera, models, particles, sea and every other blended
@@ -32,6 +47,11 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   Metal and Vulkan; `WWHD_UNCAPPED=1` turns it on at start.
 - **Keep game speed recovers faster after a hitch** (all frame rates): one slow frame (a shader
   compile, a scene load) no longer turns the in-between frames off for several seconds.
+- **Android:** full-size occlusion depth is off by default (it halved the worst GPU waits on an
+  Adreno 830, issue #56); the settings overlay can still turn it on.
+- **Smaller fixes:** cheaper reuse checks of upload memory on Macs and integrated GPUs (follow-up to
+  the v0.2.5 fix for issue #44), time limits for the Android CI build, and "mouse as
+  gyro" no longer loses part of a movement when a frame stalls.
 
 ### v0.2.6
 
