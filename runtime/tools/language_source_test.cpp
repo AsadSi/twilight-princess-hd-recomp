@@ -19,8 +19,9 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
-namespace rtl_text { void language_pack_opened(const std::string&) {} }  // not under test
 #endif
+// hle/fs.cpp reports opened language packs to the right-to-left text support (not under test)
+namespace rtl_text { void language_pack_opened(const std::string&) {} }
 namespace fs = std::filesystem;
 namespace {
 std::map<std::string, PpcFunc>& functions() {
