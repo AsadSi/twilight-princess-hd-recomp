@@ -159,7 +159,7 @@ enabled or loaded, a confirmed one loads in a second process on the same storage
 without asking, a changed library asks again (also through a profile switch),
 removal forgets the confirmation, settings presets never ask, and the test aid
 applies without writing to `profiles.json`. The same test installs synthetic
-Cemu and content packs: legacy imports, loose `.pack` files, preset validation,
+Cemu and content packs: legacy imports, loose files, preset validation,
 replacement conflicts, the rejection of code, shader, rule and region mismatches,
 and the restart-only lifecycle; such packages never ask for a native confirmation.
 
@@ -184,18 +184,15 @@ Content packages contain no native code and never ask for a native confirmation.
 
 The importer accepts a simple `MyMod/content/...` tree, a single-pack SDCafiine
 layout, and file-only Cemu packs with Definition metadata. Explicit SDCafiine
-and Cemu title IDs must include WWHD USA `0005000010143500`. ZIP wrappers are
-accepted if they contain exactly one content directory. Multiple packs require
-selecting or extracting one pack first. Known loose pack files (including
-`permanent_3d.pack` and all nine `permanent_2d_<Us|Eu|Jp><Language>.pack`
-language packs) can also be selected directly, or imported from a folder/ZIP
-with their original filenames. They map to `Common/Pack/`. Other loose files
-are placed where the installed game has a file of the same name, when it has
-exactly one (for example `Title_00.szs` goes to `Common/Layout/`); files the
-game doesn't have (read-me texts, pictures) are not used, and the package
-description lists what was placed and what was not. A loose file whose name
-the game has several times, or an unknown `.pack`, requires an explicit
-content tree.
+and Cemu title IDs must include Twilight Princess HD USA `000500001019E500`. ZIP
+wrappers are accepted if they contain exactly one content directory. Multiple
+packs require selecting or extracting one pack first. A mod's `content` folder
+selected on its own keeps its paths. Loose files are placed where the installed
+game has a file of the same name, when it has exactly one (for example
+`Title2D.arc` goes to `res/Layout/`); files the game doesn't have (read-me
+texts, pictures) are not used, and the package description lists what was
+placed and what was not. A loose file whose name the game has several times
+(`bmgres.arc` is in every `res/Msg<suffix>/`) requires an explicit content tree.
 
 The source filename supplies a stable `content.<name>` ID, so same-named imports
 count as updates; supply an explicit manifest for a different ID, descriptive
@@ -203,20 +200,15 @@ metadata or version.
 
 ### Fan translations
 
-A fan translation is usually a replaced 2D language pack
-(`permanent_2d_<Region><Language>.pack`: every message, the fonts and the 2D
-layouts), often with a replaced title logo (`Common/Layout/Title_00.szs`).
-Install it like any content mod: choose its folder or ZIP (loose files or a
-`content/` tree) and Install package, enable it and restart. The language pack
-applies to the language of the same name whatever region its file name has: a
-translation shipped as `permanent_2d_EuEnglish.pack` (made for the European
-game) replaces English in the USA game. A pack with the exact name the game asks for always
-comes first. Choose the language the translation replaces (usually English) in
-Settings > Language. No renaming is needed, and the game folder is never
-changed. Arabic and Hebrew translations are shaped and laid out right to left
-by the port itself (docs/rtl-text.md); a Cemu code patch that such a
-translation ships for that purpose is not needed. Install only its `content`
-folder: a package with a code patch is refused as a whole (see below).
+A fan translation replaces the message archives of one language folder
+(`res/Msgus/bmgres*.arc` is English in the USA game; the game picks
+`res/Msg<suffix>/` by language and region), often with 2D layouts such as the
+title logo (`res/Layout/Title2D.arc` and its `Title2D.pack.gz` textures).
+Every language folder has the same file names, so install it as a `content/`
+tree (its folder, its `content` folder or its ZIP), enable it and restart.
+Choose the language whose folder it replaces in Settings > Language. The game
+folder is never changed. Install only its `content` folder if it ships a code
+patch: a package with one is refused as a whole (see below).
 
 These conventions follow the upstream [SDCafiine documentation](https://github.com/wiiu-env/sdcafiine_plugin)
 and [Cemu graphic-pack format](https://github.com/cemu-project/cemu_graphic_packs/wiki/How-to-create-Graphic-Packs).
@@ -235,7 +227,7 @@ An explicit package uses, for example:
   "id": "my-model",
   "name": "My local model replacement",
   "version": "1.0.0",
-  "game_id": "wwhd-usa",
+  "game_id": "tphd-usa",
   "minimum_manager_version": "1.1.0",
   "kind": "content",
   "content_dir": "content"
@@ -271,11 +263,11 @@ files are not changed, and game assets stay outside Git.
 ## Cemu graphics packs (manager 1.2)
 
 Import one Cemu pack folder or ZIP with Mods → Installed packages → Install
-package. The adapter reads `rules.txt` versions 4/5, checks the USA WWHD title
-ID, and exposes each preset category as a dropdown. Enable it and restart.
-Changing a preset, disabling or switching profiles also requires a restart. The
-active snapshot stays fixed until exit; active pack files cannot be replaced or
-removed by the manager. Cemu packs contain no native code and never ask for a
+package. The adapter reads `rules.txt` versions 4/5, checks the Twilight
+Princess HD USA title ID, and exposes each preset category as a dropdown.
+Enable it and restart. Changing a preset, disabling or switching profiles also
+requires a restart. The active snapshot stays fixed until exit; active pack
+files cannot be replaced or removed by the manager. Cemu packs contain no native code and never ask for a
 native confirmation.
 
 Supported graphics rules are width/height/depth, formats/tileModes filters and
@@ -298,9 +290,7 @@ mismatch retains the original shader, with a log diagnostic and applied/rejected
 counts in Mods. Matching a filename is not a guarantee of compatibility with
 this backend.
 
-The official WWHD Resolution pack's exact EUR/JAP/USA aspect constant patch table
-is recognized and mapped to the recomp's native projection adapter. No arbitrary
-instruction patch is applied. Other `patches.txt` contents, geometry shaders,
+No instruction patch is applied: `patches.txt`, geometry shaders,
 unsupported rules/conditions, format replacement, DLC/code/meta payloads and
 mixed content-plus-shader packs are rejected. Select a single pack rather than
 an entire Cemu pack collection. Models/UI in `content` use the separate content
@@ -308,7 +298,7 @@ replacement adapter documented above.
 
 Preset expressions support finite arithmetic, parentheses, variables,
 min/max/floor/ceil/round; missing variables and cycles are rejected. Dimension
-limits are 1–16384 and aspect ratios 1–4. Overlapping rules from different
+limits are 1–16384. Overlapping rules from different
 enabled packs and duplicate shader variants are rejected. Both imported presets
 and changes to an enabled pack are checked before saving the profile.
 

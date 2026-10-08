@@ -196,8 +196,9 @@ picture changes a lot), off, or the GamePad picture alone in the TV window. Wind
 screen and these choices are kept in `~/Library/Application Support/TPHD/display.plist`.
 
 **Mods.** The Mods tab installs mod packages from a folder or ZIP, and Cemu graphic packs made for
-TP HD (USA), with profiles. Twilight Princess HD has no built-in mods yet, no package has been tried
-with it, and content mods still expect Wind Waker's file names.
+TP HD (USA), with profiles. Content mods replace files of the game's `content/` folder by their path
+(such as `res/Msgus/bmgres.arc`). Twilight Princess HD has no built-in mods yet, and no package has
+been tried with it.
 
 **Testing aids.** `WWHD_WARP=<frame>:<stage>,<point>,<room>,<layer>` warps to any place of the
 developer map select (`tools/warplist.py` lists the 1,987 places; Ordon Village on day 1 is

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Twilight Princess HD (native PC port): first-run setup, repair and update.
+"""Twilight Princess HD (native macOS port): first-run setup, repair and update.
 
 The release contains no game files. This program builds the game on your machine from your own
 disc dump:
@@ -1564,7 +1564,7 @@ def main():
 def run(args, ui):
     ctx = Ctx(args)
     version, data_dir, game_dir = ctx.version, ctx.data_dir, ctx.game_dir
-    say("The Legend of Zelda: Twilight Princess HD - native PC port, setup %s" % version)
+    say("The Legend of Zelda: Twilight Princess HD - native macOS port, setup %s" % version)
     say("This release contains no game files. Setup builds the game from your own dump of the game.")
     say("Install folder: %s" % data_dir)
     state = ctx.state()

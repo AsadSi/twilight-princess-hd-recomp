@@ -72,17 +72,17 @@ int main(int argc, char** argv) {
         std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"cemu.test":true},"config":{"cemu.test":{"preset-0":"Double"}}}}})";
         if(backend){
             std::ofstream(pack/"0000000000000001_0000000000000002_ps.txt")<<"#version 420\nvoid main(){}\n";
-            auto content=storage/"Mods"/"content.test";fs::create_directories(content/"content"/"Common");
-            std::ofstream(content/"content"/"Common"/"test.bin")<<"synthetic content";
+            auto content=storage/"Mods"/"content.test";fs::create_directories(content/"content"/"res"/"Object");
+            std::ofstream(content/"content"/"res"/"Object"/"test.arc")<<"synthetic content";
             std::ofstream(content/"manifest.json")<<R"({"format_version":1,"id":"content.test","name":"Content","version":"1.0.0","game_id":"tphd-usa","kind":"content","content_dir":"content"})";
             std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"cemu.test":true,"content.test":true}}}})";
         }
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());initialize();
         if(backend){
-            assert(!mods::content::replacement("Common/test.bin").empty());
+            assert(!mods::content::replacement("res/Object/test.arc").empty());
             for(const auto& view:list())if(view.id=="cemu.test")assert(!view.active&&!view.compatible&&view.enabled);
             std::string error;assert(enable("cemu.test",false,error));assert(remove("cemu.test",error));
-            assert(!mods::content::replacement("Common/test.bin").empty());fs::remove_all(root);
+            assert(!mods::content::replacement("res/Object/test.arc").empty());fs::remove_all(root);
             std::cout<<"Unavailable shader backend preserves content and permits disabling shader packs\n";return 0;
         }
         uint32_t width=0,height=0;assert(mods::cemu::texture_extent(1280,720,0x80e,1,4,width,height)&&width==2560&&height==720);
@@ -96,18 +96,18 @@ int main(int argc, char** argv) {
     if(argc==2&&std::string(argv[1])=="--content-startup"){
         auto root=fs::temp_directory_path()/("wwhd-content-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         auto storage=root/"storage";auto pack=storage/"Mods"/"content.test";
-        fs::create_directories(pack/"content"/"Common");
-        std::ofstream(pack/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
+        fs::create_directories(pack/"content"/"res"/"Object");
+        std::ofstream(pack/"content"/"res"/"Object"/"fixture.arc")<<"synthetic replacement";
         fs::create_directories(pack/"content"/"res"/"Msgus");std::ofstream(pack/"content"/"res"/"Msgus"/"bmgres.arc")<<"RARCsynthetic translation";
         std::ofstream(pack/"manifest.json")<<R"({"format_version":1,"id":"content.test","name":"Test","version":"1.0.0","game_id":"tphd-usa","kind":"content","content_dir":"content"})";
         std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"content.test":true}}}})";
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());
-        assert(mods::content::replacement("/vol/content/Common/fixture.bin").empty());initialize();
-        auto file=mods::content::replacement("/vol/content/common/FIXTURE.bin");assert(file==(pack/"content"/"Common"/"fixture.bin").string());
-        assert(mods::content::replacement("Common/fixture.bin")==file);
-        for(auto path:{"/vol/save/Common/fixture.bin","/vol/code/Common/fixture.bin","/vol/contentX/Common/fixture.bin","/vol/content/../Common/fixture.bin","Common/../Common/fixture.bin","Common\\fixture.bin"})assert(mods::content::replacement(path).empty());
-        for(auto mode:{"w","a","r+","r+b","wb"})assert(mods::content::replacement("Common/fixture.bin",mode).empty());
-        assert(mods::content::replacement("Common/absent.bin").empty());
+        assert(mods::content::replacement("/vol/content/res/Object/fixture.arc").empty());initialize();
+        auto file=mods::content::replacement("/vol/content/RES/object/FIXTURE.arc");assert(file==(pack/"content"/"res"/"Object"/"fixture.arc").string());
+        assert(mods::content::replacement("res/Object/fixture.arc")==file);
+        for(auto path:{"/vol/save/res/Object/fixture.arc","/vol/code/res/Object/fixture.arc","/vol/contentX/res/Object/fixture.arc","/vol/content/../res/Object/fixture.arc","res/../res/Object/fixture.arc","res\\Object\\fixture.arc"})assert(mods::content::replacement(path).empty());
+        for(auto mode:{"w","a","r+","r+b","wb"})assert(mods::content::replacement("res/Object/fixture.arc",mode).empty());
+        assert(mods::content::replacement("res/Object/absent.arc").empty());
         // a translated message archive replaces that language's archive only
         auto translation=(pack/"content"/"res"/"Msgus"/"bmgres.arc").string();
         assert(mods::content::replacement("/vol/content/res/Msgus/bmgres.arc")==translation);
@@ -115,10 +115,10 @@ int main(int argc, char** argv) {
             assert(mods::content::replacement(std::string("/vol/content/")+other).empty());
         assert(mods::content::replacement("/vol/content/res/Msgus/bmgres.arc","wb").empty());
         std::string error;assert(list().at(0).active&&list().at(0).restart_required);assert(enable("content.test",false,error));frame(100);
-        assert(list().at(0).active&&!list().at(0).enabled);assert(mods::content::replacement("Common/fixture.bin")==file);
+        assert(list().at(0).active&&!list().at(0).enabled);assert(mods::content::replacement("res/Object/fixture.arc")==file);
         assert(!remove("content.test",error));assert(!install(pack.string(),error));
         // Profile changes also retain the startup content snapshot.
-        assert(create_profile("Other",error));assert(select_profile("Other",error));frame(101);assert(mods::content::replacement("Common/fixture.bin")==file);
+        assert(create_profile("Other",error));assert(select_profile("Other",error));frame(101);assert(mods::content::replacement("res/Object/fixture.arc")==file);
         fs::remove_all(root);std::cout<<"Startup overrides, read-only routing, boundaries, and restart lifecycle passed\n";return 0;
     }
     assert(argc == 3 || argc == 4);
@@ -241,39 +241,39 @@ int main(int argc, char** argv) {
     std::ofstream(graphics/"0000000000000001_0000000000000002_ps.txt")<<"#version 420\nvoid main(){}\n";
     assert(install(graphics.string(),error));assert(!list().at(0).compatible);
     assert(!enable(list().at(0).id,true,error));assert(remove(list().at(0).id,error));
-    auto legacy=root/"LegacyModel";fs::create_directories(legacy/"content"/"Object");
-    std::ofstream(legacy/"content"/"Object"/"test.arc")<<"synthetic model archive";
+    auto legacy=root/"LegacyModel";fs::create_directories(legacy/"content"/"res"/"Object");
+    std::ofstream(legacy/"content"/"res"/"Object"/"test.arc")<<"synthetic model archive";
     assert(install(legacy.string(),error));auto imported=list().at(0);assert(imported.id=="content.legacymodel"&&imported.restart_required&&!imported.active);assert(imported.native_confirmed&&unconfirmed_native(imported.id).empty());
     assert(enable(imported.id,true,error));frame(50);assert(!list().at(0).active); // waits for restart
-    auto second=root/"OtherModel";fs::create_directories(second/"content"/"Object");std::ofstream(second/"content"/"Object"/"test.arc")<<"synthetic conflicting archive";
+    auto second=root/"OtherModel";fs::create_directories(second/"content"/"res"/"Object");std::ofstream(second/"content"/"res"/"Object"/"test.arc")<<"synthetic conflicting archive";
     assert(install(second.string(),error));assert(!enable("content.othermodel",true,error));assert(error.find("Content file conflict")!=std::string::npos);
     assert(enable(imported.id,false,error));frame(51);assert(remove(imported.id,error));assert(remove("content.othermodel",error));
-    // A fan translation as loose files (archives the installed game has once, a read-me): each goes to its game
-    // path, the read-me is not used.
-    auto game=root/"game";for(auto dir:{"Msgus","Layout","Object","Stage"})fs::create_directories(game/"content"/"res"/dir);
-    std::ofstream(game/"content"/"res"/"Msgus"/"bmgres.arc")<<"original";std::ofstream(game/"content"/"res"/"Layout"/"Title_00.szs")<<"original";
-    std::ofstream(game/"content"/"res"/"Object"/"Twice.arc")<<"a";std::ofstream(game/"content"/"res"/"Stage"/"Twice.arc")<<"b";
+    // A fan translation's title screen as loose files (names the installed game has once, a read-me): each goes
+    // to its game path, the read-me is not used. Its message archive is in every res/Msg<suffix>/: refused loose.
+    auto game=root/"game";for(auto dir:{"Msgus","Msguk","Layout"})fs::create_directories(game/"content"/"res"/dir);
+    for(auto dir:{"Msgus","Msguk"})std::ofstream(game/"content"/"res"/dir/"bmgres.arc")<<"original";
+    std::ofstream(game/"content"/"res"/"Layout"/"Title2D.arc")<<"original";std::ofstream(game/"content"/"res"/"Layout"/"Title2D.pack.gz")<<"original";
     mods::content::set_game_root(game);
     auto translation=root/"FanTranslation";fs::create_directories(translation/"inner");
-    std::ofstream(translation/"inner"/"bmgres.arc")<<"RARCsynthetic translation";std::ofstream(translation/"Title_00.szs")<<"Yaz0logo";
+    std::ofstream(translation/"inner"/"Title2D.arc")<<"RARCsynthetic layout";std::ofstream(translation/"Title2D.pack.gz")<<"synthetic textures";
     std::ofstream(translation/"readme.txt")<<"text";
     assert(install(translation.string(),error));{auto v=list().at(0);assert(v.id=="content.fantranslation");
-        assert(v.description.find("res/Msgus/bmgres.arc")!=std::string::npos&&v.description.find("res/Layout/Title_00.szs")!=std::string::npos);
+        assert(v.description.find("res/Layout/Title2D.arc")!=std::string::npos&&v.description.find("res/Layout/Title2D.pack.gz")!=std::string::npos);
         assert(v.description.find("Not used: readme.txt")!=std::string::npos);assert(remove(v.id,error));}
-    std::ofstream(translation/"Twice.arc")<<"ambiguous";assert(!install(translation.string(),error));fs::remove(translation/"Twice.arc");
-    // the content folder of a mod selected on its own: named after the mod
-    fs::create_directories(translation/"content"/"res"/"Msgus");fs::rename(translation/"inner"/"bmgres.arc",translation/"content"/"res"/"Msgus"/"bmgres.arc");
+    std::ofstream(translation/"bmgres.arc")<<"RARCsynthetic translation";assert(!install(translation.string(),error));assert(error.find("several game files")!=std::string::npos);
+    // the content folder of a mod selected on its own: its game paths, named after the mod
+    fs::create_directories(translation/"content"/"res"/"Msgus");fs::rename(translation/"bmgres.arc",translation/"content"/"res"/"Msgus"/"bmgres.arc");
     assert(install((translation/"content").string(),error));assert(list().at(0).id=="content.fantranslation");assert(remove(list().at(0).id,error));
     mods::content::set_game_root({});
     auto invalid=root/"CodeMod";fs::create_directories(invalid/"content");std::ofstream(invalid/"content"/"dummy")<<"fixture";std::ofstream(invalid/"patches.txt")<<"code";assert(!install(invalid.string(),error));
     fs::remove(invalid/"patches.txt");fs::create_directories(invalid/"graphicPacks"/"Patch");std::ofstream(invalid/"graphicPacks"/"Patch"/"rules.txt")<<"[Definition]\ntitleIds = 000500001019e500\n";
-    std::ofstream(invalid/"graphicPacks"/"Patch"/"patch_code.asm")<<"[Code]\nmoduleMatches = 0x475BD29F\n";assert(!install(invalid.string(),error));assert(error.find("code patch")!=std::string::npos);
+    std::ofstream(invalid/"graphicPacks"/"Patch"/"patch_code.asm")<<"[Code]\n";assert(!install(invalid.string(),error));assert(error.find("code patch")!=std::string::npos);
     fs::remove_all(invalid/"graphicPacks");std::ofstream(invalid/"rules.txt")<<"[Definition]\ntitleIds = 0005000010143600\n";assert(!install(invalid.string(),error));
     std::ofstream(invalid/"rules.txt",std::ios::trunc)<<"[Definition]\ntitleIds = 000500001019e500\n[TextureRedefine]\n";assert(!install(invalid.string(),error));
     fs::remove(invalid/"rules.txt");std::ofstream(invalid/"content"/".deleted_dummy")<<"";assert(!install(invalid.string(),error));
-    auto duplicate=root/"Duplicate";fs::create_directories(duplicate/"content"/"Object");fs::create_directories(duplicate/"content"/"object");
-    std::ofstream(duplicate/"content"/"Object"/"A.bin")<<"fixture";std::ofstream(duplicate/"content"/"object"/"a.bin")<<"fixture";
+    auto duplicate=root/"Duplicate";fs::create_directories(duplicate/"content"/"res"/"Object");fs::create_directories(duplicate/"content"/"res"/"object");
+    std::ofstream(duplicate/"content"/"res"/"Object"/"A.arc")<<"fixture";std::ofstream(duplicate/"content"/"res"/"object"/"a.arc")<<"fixture";
     // A case-sensitive volume can represent the conflict; a case-insensitive volume collapses it.
-    if(std::distance(fs::directory_iterator(duplicate/"content"),fs::directory_iterator{})==2)assert(!install(duplicate.string(),error));
+    if(std::distance(fs::directory_iterator(duplicate/"content"/"res"),fs::directory_iterator{})==2)assert(!install(duplicate.string(),error));
     std::cout << "Package install, settings, profiles, dependencies, native load/config/unload passed\n";
 }

@@ -637,8 +637,7 @@ uint32_t snap_ld32(uint32_t ea) {
     return __builtin_bswap32(v);
 }
 
-namespace {
-SlotInfo full_slot_info(int slot) {
+SlotInfo slot_info(int slot) {
     SlotInfo info;
     info.path = slot_path(slot);
     FILE* f = fopen(info.path.c_str(), "rb");
@@ -664,10 +663,6 @@ SlotInfo full_slot_info(int slot) {
     }
     return info;
 }
-
-}  // namespace
-
-SlotInfo slot_info(int slot) { return full_slot_info(slot); }
 
 void request_save_full(int slot) {
     if ((slot < 1 || slot > kSlots) && !is_auto(slot)) return;
@@ -714,11 +709,6 @@ void request_load(int slot) {
         g_load_ready = s;
     }).detach();
 }
-
-// only full states: the portable ones were built on Wind Waker's save functions
-bool full_states_forced() { return true; }
-bool full_states() { return true; }
-void set_full_states(bool) {}
 
 std::string bug_report_text() {
     std::error_code ec;

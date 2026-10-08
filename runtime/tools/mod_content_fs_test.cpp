@@ -14,8 +14,6 @@
 #else
 #include <sys/mman.h>
 #endif
-// hle/fs.cpp reports opened language packs to the right-to-left text support (not under test)
-namespace rtl_text { void language_pack_opened(const std::string&) {} }
 namespace fs=std::filesystem;
 namespace {std::map<std::string,PpcFunc>& functions(){static std::map<std::string,PpcFunc> f;return f;}constexpr uint32_t base=0x10000000;}
 HleReg::HleReg(const char* lib,const char* name,PpcFunc fn){functions()[std::string(lib)+":"+name]=fn;}
@@ -49,28 +47,28 @@ int main(int argc,char** argv){
  assert(memory==address);
  auto root=fs::temp_directory_path()/("wwhd-fs-content-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
  config::game_dir=(root/"game").string();config::save_dir=(root/"save").string();
- auto original=root/"game"/"content"/"Common"/"model.bin",replacement=root/"mod"/"Common"/"model.bin";
+ auto original=root/"game"/"content"/"res"/"Object"/"model.arc",replacement=root/"mod"/"res"/"Object"/"model.arc";
  fs::create_directories(original.parent_path());fs::create_directories(replacement.parent_path());fs::create_directories(root/"game"/"code");fs::create_directories(root/"game"/"meta");fs::create_directories(root/"save"/"user");
  std::ofstream(original)<<"original";std::ofstream(replacement)<<"replacement bytes";
- std::ofstream(original.parent_path()/"other.bin")<<"fallback";std::ofstream(root/"game"/"code"/"model.bin")<<"code";std::ofstream(root/"game"/"meta"/"model.bin")<<"meta";std::ofstream(root/"save"/"user"/"model.bin")<<"save";
+ std::ofstream(original.parent_path()/"other.arc")<<"fallback";std::ofstream(root/"game"/"code"/"model.arc")<<"code";std::ofstream(root/"game"/"meta"/"model.arc")<<"meta";std::ofstream(root/"save"/"user"/"model.arc")<<"save";
  if(on)mods::content::activate(mods::content::index(root/"mod"));
  auto expected=on?"replacement bytes":"original";
- auto h=open("/vol/content/common/MODEL.bin");assert(read(h,64)==expected);close(h);
- h=open("Common/model.bin");assert(read(h,64)==expected);close(h);
- h=open("/vol/content/Common/other.bin");assert(read(h,64)=="fallback");close(h);
- for(auto volume:{"code","meta"}){h=open(std::string("/vol/")+volume+"/model.bin");assert(read(h,64)==volume);close(h);}
- h=open("/vol/save/user/model.bin");assert(read(h,64)=="save");close(h);
+ auto h=open("/vol/content/RES/object/MODEL.arc");assert(read(h,64)==expected);close(h);
+ h=open("res/Object/model.arc");assert(read(h,64)==expected);close(h);
+ h=open("/vol/content/res/Object/other.arc");assert(read(h,64)=="fallback");close(h);
+ for(auto volume:{"code","meta"}){h=open(std::string("/vol/")+volume+"/model.arc");assert(read(h,64)==volume);close(h);}
+ h=open("/vol/save/user/model.arc");assert(read(h,64)=="save");close(h);
  // Path and handle stat sizes must both report the file actually read.
- mem::write_cstr(base,"/vol/content/Common/model.bin",1024);assert(call("coreinit:FSGetStat",{0,0,base,base+2048,0})==0);assert(ld32(base+2048+0x10)==strlen(expected));
- h=open("/vol/content/Common/model.bin");assert(call("coreinit:FSGetStatFile",{0,0,h,base+2048,0})==0);assert(ld32(base+2048+0x10)==strlen(expected));
+ mem::write_cstr(base,"/vol/content/res/Object/model.arc",1024);assert(call("coreinit:FSGetStat",{0,0,base,base+2048,0})==0);assert(ld32(base+2048+0x10)==strlen(expected));
+ h=open("/vol/content/res/Object/model.arc");assert(call("coreinit:FSGetStatFile",{0,0,h,base+2048,0})==0);assert(ld32(base+2048+0x10)==strlen(expected));
  assert(read(h,3)==std::string(expected).substr(0,3));ss::Writer snapshot;fs_ss_save(snapshot);
  assert(read(h,64)==std::string(expected).substr(3));ss::Reader reader(snapshot.b.data(),snapshot.b.size());fs_ss_load(reader);assert(reader.ok&&reader.at_end());assert(read(h,64)==std::string(expected).substr(3));close(h);
  // Update/write opens bypass replacement files, including savestate reopens.
- h=open("/vol/content/Common/model.bin","r+b");assert(read(h,3)=="ori");ss::Writer update;fs_ss_save(update);ss::Reader resume(update.b.data(),update.b.size());fs_ss_load(resume);assert(read(h,64)=="ginal");close(h);
- h=open("/vol/save/user/model.bin","wb");memcpy(mem::ptr(base+8192),"safe",4);assert(call("coreinit:FSWriteFile",{0,0,base+8192,1,4,h,0})==4);close(h);assert(text(root/"save"/"user"/"model.bin")=="safe");
+ h=open("/vol/content/res/Object/model.arc","r+b");assert(read(h,3)=="ori");ss::Writer update;fs_ss_save(update);ss::Reader resume(update.b.data(),update.b.size());fs_ss_load(resume);assert(read(h,64)=="ginal");close(h);
+ h=open("/vol/save/user/model.arc","wb");memcpy(mem::ptr(base+8192),"safe",4);assert(call("coreinit:FSWriteFile",{0,0,base+8192,1,4,h,0})==4);close(h);assert(text(root/"save"/"user"/"model.arc")=="safe");
  // Directory enumeration retains original names but must describe replacement sizes.
- mem::write_cstr(base,"/vol/content/Common",1024);assert(call("coreinit:FSOpenDir",{0,0,base,base+1100,0})==0);auto dir=ld32(base+1100);bool found=false;
- while(call("coreinit:FSReadDir",{0,0,dir,base+2048,0})==0){if(mem::read_cstr(base+2048+0x64)=="model.bin"){found=true;assert(ld32(base+2048+0x10)==strlen(expected));}}
+ mem::write_cstr(base,"/vol/content/res/Object",1024);assert(call("coreinit:FSOpenDir",{0,0,base,base+1100,0})==0);auto dir=ld32(base+1100);bool found=false;
+ while(call("coreinit:FSReadDir",{0,0,dir,base+2048,0})==0){if(mem::read_cstr(base+2048+0x64)=="model.arc"){found=true;assert(ld32(base+2048+0x10)==strlen(expected));}}
  assert(found);assert(call("coreinit:FSCloseDir",{0,0,dir})==0);
  assert(text(original)=="original"&&text(replacement)=="replacement bytes");fs::remove_all(root);
 #ifdef _WIN32

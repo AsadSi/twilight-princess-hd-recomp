@@ -140,7 +140,7 @@ Pack parse(const fs::path& folder){
         if(!e.is_regular_file())continue;
         auto extension=lower(e.path().extension().string());
         require(extension!=".asm","Cemu code patches (.asm) cannot run in this port; only graphics rules and shaders are supported");
-        require(extension!=".pack"&&extension!=".bfres"&&extension!=".bflim"&&extension!=".gtx"&&extension!=".dds"&&extension!=".png"&&extension!=".rpx"&&extension!=".rpl"&&extension!=".arc"&&extension!=".szs","Cemu resource replacements need a separate content package");
+        require(extension!=".arc"&&extension!=".pack"&&extension!=".gz"&&extension!=".gtx"&&extension!=".dds"&&extension!=".png"&&extension!=".rpx"&&extension!=".rpl","Cemu resource replacements need a separate content package");
         std::smatch match;
         auto shader_name=e.path().filename().string();if(std::regex_match(shader_name,match,filename)){
             require(fs::equivalent(e.path().parent_path(),folder),"Select one Cemu pack folder; shader files must be next to rules.txt");

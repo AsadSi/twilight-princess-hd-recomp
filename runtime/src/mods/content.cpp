@@ -52,8 +52,9 @@ void import_legacy(const fs::path& stage,const std::string& source_name){
             }
         }
     }
-    // Loose files (a replaced archive such as res/Msgus/bmgres.arc): a file whose name the installed game has
-    // exactly once goes to that game path. Other files (read-me texts, pictures) are not used.
+    // Loose files (a replaced archive such as res/Layout/Title2D.arc): a file whose name the installed game has
+    // exactly once goes to that game path; names in several folders (bmgres.arc is in every res/Msg<suffix>/)
+    // need a content/ tree. Other files (read-me texts, pictures) are not used.
     std::string mapped,ignored;
     if(candidates.empty()){
         auto names=game_names();std::vector<std::pair<fs::path,std::string>> moves;

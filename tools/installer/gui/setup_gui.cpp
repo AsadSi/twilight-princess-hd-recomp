@@ -1019,7 +1019,7 @@ static void screen_clt() {
 static std::string home_folder() { return A.portable && !A.package.empty() ? A.package : A.data_dir; }
 
 static void screen_welcome() {
-    page_header("Welcome", "The Legend of Zelda: Twilight Princess HD, native PC port " + A.version);
+    page_header("Welcome", "The Legend of Zelda: Twilight Princess HD, native macOS port " + A.version);
     if (A.portable) {
         ImGui::TextWrapped("The first start prepares the game once: it reads your own dump of the game and builds it for "
                            "this computer (about two minutes). Releases never contain game code, so this happens here, "

@@ -249,14 +249,16 @@ std::vector<View> list(){std::lock_guard guard(mutex);std::vector<View> out;for(
 static bool content_name(std::string n){for(char& c:n)if(c>='A'&&c<='Z')c+='a'-'A';return n=="content";}
 bool install(const std::string& source,std::string& error){return operation(error,[&]{
     auto nonce=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());auto stage=root/(".stage-"+nonce),backup=root/(".backup-"+nonce);fs::path target;bool backed=false,moved=false;
-    try{archive::stage(fs::path(source),stage);if(!fs::exists(stage/"manifest.json")){
+    // a mod's own content folder selected on its own keeps its game paths (TP HD has the same file names in each
+    // language's folder) and is named after the mod (Arabic_Hesham/content -> Arabic_Hesham)
+    auto named=fs::path(source).lexically_normal();if(named.filename().empty())named=named.parent_path();
+    bool content_folder=content_name(named.filename().string());
+    try{archive::stage(fs::path(source),content_folder?stage/"content":stage);if(!fs::exists(stage/"manifest.json")){
         bool graphics=false;for(const auto& file:fs::recursive_directory_iterator(stage))if(file.is_regular_file()){
             auto name=file.path().filename().string();if(name.ends_with("_vs.txt")||name.ends_with("_ps.txt"))graphics=true;
             if(name=="rules.txt"){auto text=read_text(file.path());for(char& c:text)if(c>='A'&&c<='Z')c+='a'-'A';if(text.find("[preset]")!=std::string::npos||text.find("[textureredefine]")!=std::string::npos||text.find("[default]")!=std::string::npos)graphics=true;}
         }
-        // a mod's own content folder selected on its own is named after the mod (Arabic_Hesham/content -> Arabic_Hesham)
-        auto named=fs::path(source).lexically_normal();if(named.filename().empty())named=named.parent_path();
-        if(content_name(named.filename().string())&&!named.parent_path().filename().empty())named=named.parent_path();
+        if(content_folder&&!named.parent_path().filename().empty())named=named.parent_path();
         if(graphics)cemu::import_legacy(stage,named.filename().string());else content::import_legacy(stage,named.filename().string());
     }auto m=manifest(stage);require(m.problem.empty()||m.problem.starts_with("No binary for")||m.problem.starts_with("GLSL shader packs require Vulkan"),m.problem);target=root/"Mods"/m.id;auto it=records.find(m.id);require(it==records.end()||(!wanted(m.id)&&!it->second.active&&!it->second.loading),it!=records.end()&&(it->second.manifest.kind=="content"||it->second.manifest.kind=="cemu")?"Disable this content mod and restart before updating":"Disable this mod and wait for it to unload before updating");fs::create_directories(target.parent_path());if(fs::exists(target)){fs::rename(target,backup);backed=true;}fs::rename(stage,target);moved=true;m=manifest(target);Record r;r.path=target;r.manifest=std::move(m);auto installed_id=r.manifest.id;records[installed_id]=std::move(r);if(backed){std::error_code cleanup;fs::remove_all(backup,cleanup);}dirty=true;
     }catch(...){if(moved)fs::remove_all(target);if(backed)fs::rename(backup,target);if(fs::exists(stage))fs::remove_all(stage);throw;}

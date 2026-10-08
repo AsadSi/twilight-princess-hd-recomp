@@ -19,7 +19,7 @@ def main():
     status = section(text, "Status")
     with open(sums) as f:
         checksums = f.read().strip()
-    print("""**Twilight Princess HD, native PC port, %s**
+    print("""**Twilight Princess HD, native macOS port, %s**
 
 This release contains **no game files, no game code and no keys**. You need your own disc dump
 (.wux/.wud with its disc key, plus the Wii U common key from your console), a Cemu .wua archive

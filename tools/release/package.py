@@ -45,19 +45,18 @@ INSTALLER_FILES = [
     "tools/installer/README.md",
 ]
 SETUP_APP = "Twilight Princess HD"
-PORTABLE_TXT = """Twilight Princess HD (native PC port), portable release.
+PORTABLE_TXT = """Twilight Princess HD (native macOS port), portable release.
 
 Start "Twilight Princess HD". The first start prepares the game once from your own disc dump (releases never
 contain game code, so it is built here); later starts launch the game directly.
 
 Everything the setup and the game create stays in this folder (in "data"): the built game, the game
 files extracted from a disc image (an extracted game folder is used where it is), saves, settings,
-save states, shader caches, logs and the downloaded compiler. Nothing goes to your user folders
-unless you ask for a shortcut. To remove everything, delete this folder.
+save states, shader caches and logs. Nothing goes to your user folders unless you ask for a shortcut.
+To remove everything, delete this folder.
 
-Hold Shift while starting Twilight Princess HD (macOS, Windows), or start it with --setup, to repair,
-update, change the game or import saves. The same setup in a terminal: tools/Setup in Terminal.command
-(macOS), tools/Setup in a console window.bat (Windows), tools/setup-in-terminal.sh (Linux).
+Hold Shift while starting Twilight Princess HD, or start it with --setup, to repair, update or change
+the game. The same setup in a terminal: tools/Setup in Terminal.command.
 
 This file marks the folder as portable; without it, setup uses the per-user folders of earlier releases.
 """
@@ -429,7 +428,7 @@ def main():
     with open(os.path.join(licdir, "README.txt"), "w") as f:
         f.writelines(index)
     with open(os.path.join(pkg, "VERSION.txt"), "w") as f:
-        f.write("Twilight Princess HD native PC port %s (%s)\n"
+        f.write("Twilight Princess HD native macOS port %s (%s)\n"
                 "This package contains no game code, game data or keys; the installer builds the game\n"
                 "from your own disc dump on your machine.\n" % (a.version, a.platform))
 

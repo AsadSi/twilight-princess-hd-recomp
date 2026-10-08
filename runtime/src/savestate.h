@@ -59,13 +59,12 @@ struct Reader {
 // ---- UI / test API (any thread) ----
 // Full states only: slotN.bin, the whole running game (~300 MB of guest memory, contains game code
 // and data: never share it). Wind Waker's portable states were built on its save functions and are
-// gone; SlotInfo keeps `portable` for the menus. Requests are served by service(), which the
-// frame-loop hook calls at the top of main01's loop (site_02AF0EDC in interp.cpp).
+// gone. Requests are served by service(), which the frame-loop hook calls at the top of main01's
+// loop (site_02AF0EDC in interp.cpp).
 constexpr int kSlots = 5;
 struct SlotInfo {
     bool used = false;
     bool compatible = true;
-    bool portable = false;  // the slot's (newer) file is a portable state
     std::string when;  // local time of the save
     std::string area;  // stage name, if known
     std::string path;  // the slot's file
@@ -78,9 +77,6 @@ void request_save(int slot, std::function<void(bool ok, const std::string& why)>
 void request_save_full(int slot);
 bool in_gameplay();                     // a save file is being played (quit_prompt.h: gameplay_stage)
 void request_load(int slot);
-bool full_states();                     // always true
-void set_full_states(bool on);          // no-op
-bool full_states_forced();              // always true (the menu toggle is disabled)
 std::string bug_report_text();          // where the save files are, for a bug report
 std::string states_dir();               // where slots live (created on first use)
 std::string last_message();             // short status for the title bar ("" when stale)
