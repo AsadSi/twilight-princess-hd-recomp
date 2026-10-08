@@ -215,9 +215,10 @@ replaces English when English comes from a European language source
 (docs/language-packs.md). A pack with the exact name the game asks for always
 comes first. Choose the language the translation replaces (usually English) in
 Settings > Language. No renaming is needed, and the game folder is never
-changed. Translations whose text needs code changes (for example right-to-left
-scripts shipped with a Cemu code patch) can only be installed without that
-patch: see below.
+changed. Arabic and Hebrew translations are shaped and laid out right to left
+by the port itself (docs/rtl-text.md); a Cemu code patch that such a
+translation ships for that purpose is not needed. Install only its `content`
+folder: a package with a code patch is refused as a whole (see below).
 
 These conventions follow the upstream [SDCafiine documentation](https://github.com/wiiu-env/sdcafiine_plugin)
 and [Cemu graphic-pack format](https://github.com/cemu-project/cemu_graphic_packs/wiki/How-to-create-Graphic-Packs).

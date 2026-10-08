@@ -12,6 +12,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+namespace rtl_text { void language_pack_opened(const std::string&) {} }  // not under test
 #endif
 namespace fs=std::filesystem;
 namespace {std::map<std::string,PpcFunc>& functions(){static std::map<std::string,PpcFunc> f;return f;}constexpr uint32_t base=0x10000000;}

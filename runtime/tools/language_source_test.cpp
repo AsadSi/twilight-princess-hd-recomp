@@ -19,6 +19,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+namespace rtl_text { void language_pack_opened(const std::string&) {} }  // not under test
 #endif
 namespace fs = std::filesystem;
 namespace {
