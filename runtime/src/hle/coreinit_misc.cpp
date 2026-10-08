@@ -99,12 +99,9 @@ static void report(const std::string& s) {
 
 // Console language for UCReadSysConfig("cafe.language"): WWHD_LANGUAGE=<Wii U code> (0 ja, 1 en,
 // 2 fr, 3 de, 4 it, 5 es, 6 zh, 7 ko, 8 nl, 9 pt, 10 ru, 11 zh-TW), else the setting saved by the
-// settings overlay (Language tab, hostui "language"; read once at start). Unset, out of range or not
-// a number: English. A language the disc has no pack for (game_languages.h) becomes English (or the
-// disc's first language without English), as the USA game itself does with one it doesn't know.
-// WWHD_LANGUAGE_REGION=eu|jp (else the saved "language_region") takes the language from a language
-// source of that region (game_lang::source_packs(), docs/language-packs.md) when it has that
-// language; language_region.cpp then tells the game that region.
+// settings overlay (hostui "language"; read once at start). Unset, out of range or not a number:
+// English. One the game shows no text for on this console (game_languages.h) becomes English, as the
+// game itself would show it.
 static uint32_t console_language() {
     static const uint32_t lang = [] {
         const char* why = "WWHD_LANGUAGE";
@@ -125,27 +122,10 @@ static uint32_t console_language() {
                 LOG("[config] console language %ld (%s)", v, why);
             }
         }
-        // the region: WWHD_LANGUAGE_REGION, else (unless WWHD_LANGUAGE alone picked the language) the saved one
-        std::string region_text;
-        const char* env_language = getenv("WWHD_LANGUAGE");
-        if (const char* r = getenv("WWHD_LANGUAGE_REGION"); r && *r) region_text = r;
-        else if ((!env_language || !*env_language) && !hostui::get("language_region", region_text)) region_text.clear();
-        const int region = game_lang::region_from_code(region_text);
-        const game_lang::Start s = game_lang::choose((int)v, region);
-        if (s.pack) {
-            LOG("[config] %s from the language source (%s): %s%s", game_lang::name(s.language),
-                game_lang::region_name(s.region), s.pack->host.c_str(),
-                s.region == game_lang::kJapan ? " (untested with a Japanese game so far)" : "");
-        } else {
-            if (region != game_lang::kNoRegion && region != game_lang::kUsa)
-                LOG("[config] no %s language source has %s (%s); using the installed game's languages",
-                    game_lang::region_name(region), game_lang::name((int)v), game_lang::sources_dir().c_str());
-            if (s.language != v)
-                LOG("[config] %s is not on this disc (%s); the game gets %s", game_lang::name((int)v),
-                    game_lang::region().c_str(), game_lang::name(s.language));
-        }
-        game_lang::begin(s);
-        return (uint32_t)s.language;
+        const int use = game_lang::usable((int)v);
+        if (use != v) LOG("[config] the game has no %s text on a USA console; it gets English", game_lang::name((int)v));
+        game_lang::set_started(use);
+        return (uint32_t)use;
     }();
     return lang;
 }

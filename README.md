@@ -25,9 +25,6 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   1x is unchanged and there is no measurable speed cost. Shadow maps still scale with the internal
   resolution for sharp shadows; `WWHD_SHADOW_FIX=1` keeps them at the console's 1024x1024 instead,
   for soft edges that never shimmer (issue #67).
-- **More languages (experimental):** with your own dump of the European or Japanese game, the port can
-  use its text, fonts and menus: German, Italian, British English, European French and Spanish, or
-  Japanese. See [docs/language-packs.md](docs/language-packs.md).
 - **Fan translations as content mods**, including **Arabic and Hebrew** drawn right to left (issue #60),
   see [docs/mod-manager.md](docs/mod-manager.md) and [docs/rtl-text.md](docs/rtl-text.md).
 - **macOS: closing the TV window quits the game** (issue #65), as on Windows and Linux. During a game
@@ -642,8 +639,7 @@ the next start; picture scaling; the GamePad screen),
 gameplay mods and cheats (Graphics also has the Vulkan presentation mode), controls (the same controller drawing as Input > Controls…: select a
 button or chip and press the key or controller input to use; also on Windows and Linux) and the
 console language (only the languages your game contains can be chosen; the USA game has English,
-French and Spanish; experimental: German, Italian, British English or Japanese from your own European
-or Japanese copy of the game, see [docs/language-packs.md](docs/language-packs.md); fan translations
+French and Spanish; fan translations
 into Arabic or Hebrew are drawn right to left, see [docs/rtl-text.md](docs/rtl-text.md)).
 Mouse, keyboard (arrows, Enter, Esc) and controller (D-pad / stick, A, B; L / R switch tabs) all work.
 The game keeps running but gets no input while it is open; Esc, F1 or B closes it. On macOS it shows
@@ -788,7 +784,7 @@ title screen and the file select, before a file is loaded, it quits without aski
   runs replay that cache at startup.
 - [docs/performance.md](docs/performance.md) covers how to profile the port, measured fixes and
   open performance leads.
-- Useful environment variables: `WWHD_NO_AUDIO=1`, `WWHD_NO_GAMEPAD=1` (no second window), `WWHD_NO_CONTROLLERS=1` (SDL builds: ignore host game controllers), `WWHD_LANGUAGE=<code>` (console language: 1 English, 2 French, 5 Spanish, … — the USA/Asia disc carries English, French and Spanish; a language the game doesn't contain starts in English; with `WWHD_LANGUAGE_REGION=eu` or `jp` from a language source, docs/language-packs.md), `WWHD_RTL=0` / `1` (right-to-left text for Arabic and Hebrew packs off / forced on, docs/rtl-text.md),
+- Useful environment variables: `WWHD_NO_AUDIO=1`, `WWHD_NO_GAMEPAD=1` (no second window), `WWHD_NO_CONTROLLERS=1` (SDL builds: ignore host game controllers), `WWHD_LANGUAGE=<code>` (console language: 1 English, 2 French, 5 Spanish, … — the USA/Asia disc carries English, French and Spanish; a language the game doesn't contain starts in English), `WWHD_RTL=0` / `1` (right-to-left text for Arabic and Hebrew packs off / forced on, docs/rtl-text.md),
   `WWHD_DRC_MODE=window|pip|auto|off|gamepad`, `WWHD_FULLSCREEN=0|1` (the TV window starts windowed / in
   full screen this time instead of as it was left; that session's full screen is not remembered), `WWHD_ASPECT=16:9|window|16:10|21:9|32:9|<w:h>`,
   `WWHD_AUDIO_VOLUME=0..1`, `WWHD_AUDIO_OUTPUT=auto|tv|gamepad` (the host plays the TV's sound, plus the GamePad's in Off-TV Play: auto; or only one of them), `WWHD_SHADER_CACHE=<file>|0`, `WWHD_AO_MODE=0..2`, `WWHD_AO_HIRES=0|1`, `WWHD_ANISO=0|1`, `WWHD_RES_SCALE=1|1.5|2|3`,

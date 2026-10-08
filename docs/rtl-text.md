@@ -8,7 +8,7 @@ text itself.
 
 ## When it is on
 
-At start the game opens its 2D language pack (the installed game's, a language source's or a
+At start the game opens its 2D language pack (the installed game's or a
 content mod's). If that pack's message font (`CKingMsg.bffnt`) has Arabic or Hebrew letters
 (at least 20 of U+0621..U+064A or U+05D0..U+05EA), right-to-left text is on for the session and
 the log says so:

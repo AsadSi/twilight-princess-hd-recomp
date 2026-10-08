@@ -210,9 +210,7 @@ Install it like any content mod: choose its folder or ZIP (loose files or a
 `content/` tree) and Install package, enable it and restart. The language pack
 applies to the language of the same name whatever region its file name has: a
 translation shipped as `permanent_2d_EuEnglish.pack` (made for the European
-game) replaces English in the USA game, and a `permanent_2d_UsEnglish.pack`
-replaces English when English comes from a European language source
-(docs/language-packs.md). A pack with the exact name the game asks for always
+game) replaces English in the USA game. A pack with the exact name the game asks for always
 comes first. Choose the language the translation replaces (usually English) in
 Settings > Language. No renaming is needed, and the game folder is never
 changed. Arabic and Hebrew translations are shaped and laid out right to left

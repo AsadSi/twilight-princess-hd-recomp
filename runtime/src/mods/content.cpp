@@ -128,10 +128,9 @@ std::string replacement(const std::string& guest,const std::string& mode){
     auto key=lower(relative);auto it=active.find(key);if(it!=active.end())return it->second;
     // A translated 2D language pack applies to the pack of that language the game loads, whatever region its
     // file name has: a fan translation made as permanent_2d_EuEnglish.pack replaces the USA game's
-    // permanent_2d_UsEnglish.pack (and the other way round, and for a language source's pack). The game may
-    // also ask for it in another folder than Common/Pack: told the European region (language sources,
-    // game_languages.h) it reads Cafe/JP/Pack/permanent_2d_Eu<Language>.pack through its "local" file
-    // device, a folder no disc has. A pack with the exact name always comes first.
+    // permanent_2d_UsEnglish.pack (and the other way round). Told the European region, the game reads
+    // Cafe/JP/Pack/permanent_2d_Eu<Language>.pack through its "local" file device, a folder no disc has. A pack
+    // with the exact name always comes first.
     auto slash=key.rfind('/');auto file=slash==std::string::npos?key:key.substr(slash+1);
     auto language=pack_language(file);
     if(!language.empty()&&(key=="pack/"+file||key.ends_with("/pack/"+file))){
