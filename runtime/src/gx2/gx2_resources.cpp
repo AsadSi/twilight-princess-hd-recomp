@@ -33,17 +33,17 @@ HLE(gx2, GX2GetSurfaceFormatBits) {
     ret(c, GetFormatBits(f) / (IsCompressedFormat(f) ? 16 : 1));
 }
 
-// TP HD's dPeekZ (the GameCube's GXPeekZ, used by the sun's lens flare) converts the depth buffer into
-// a colour surface and reads it through a CPU-linear tiling aperture. Depth isn't read back to guest
-// memory yet, so no aperture is given: with address 0 the game reads every peek as the far plane.
-static void no_depth_peeks() {
-    static bool once = false;
-    if (!once) once = true, LOG("[gx2] tiling apertures and depth-to-texture conversion not supported: depth peeks read as far");
-}
+// TP HD's dPeekZ (the GameCube's GXPeekZ, used by the sun's lens flare) reads the depth texture made by
+// GX2ConvertDepthBufferToTextureSurface through a CPU-linear tiling aperture. Depth isn't read back to
+// guest memory yet, so no aperture is given: with address 0 the game reads every peek as the far plane.
 // (surface, level, slice, endian, u32* handle, u32* address)
-HLE(gx2, GX2AllocateTilingApertureEx) { no_depth_peeks(); st32(arg(c, 4), 0); st32(arg(c, 5), 0); }
+HLE(gx2, GX2AllocateTilingApertureEx) {
+    static bool once = false;
+    if (!once) once = true, LOG("[gx2] tiling apertures not supported: depth peeks read as far");
+    st32(arg(c, 4), 0);
+    st32(arg(c, 5), 0);
+}
 HLE(gx2, GX2FreeTilingAperture) {}
-HLE(gx2, GX2ConvertDepthBufferToTextureSurface) { no_depth_peeks(); }
 
 HLE(gx2, GX2CalcColorBufferAuxInfo) { st32(arg(c, 1), 0x1000); st32(arg(c, 2), 0x100); }
 HLE(gx2, GX2CalcDepthBufferHiZInfo) { st32(arg(c, 1), 0x1000); st32(arg(c, 2), 0x100); }

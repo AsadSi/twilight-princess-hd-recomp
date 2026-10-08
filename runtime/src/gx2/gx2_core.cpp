@@ -726,6 +726,14 @@ static void copy_surface(Cpu* c, uint32 src, uint32 srcMip, uint32 srcSlice, uin
     }
 }
 HLE(gx2, GX2CopySurface) { copy_surface(c, arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5)); }
+// (GX2DepthBuffer*, dst GX2Surface*, dstMip, dstSlice): a copy of the depth buffer's view, as Cemu.
+// TP HD samples the result (R24_X8) in its water and other depth effects, and peeks it (dPeekZ).
+HLE(gx2, GX2ConvertDepthBufferToTextureSurface) {
+    uint32 db = arg(c, 0), dst = arg(c, 1);
+    if (ld32(db + 0x24) == ld32(dst + 0x24)) return;  // same image: re-tiling in place, nothing to copy
+    uint32 mip = ld32(db + 0x74), first = ld32(db + 0x78), n = std::max<uint32>(ld32(db + 0x7C), 1);
+    for (uint32 i = 0; i < n; i++) copy_surface(c, db, mip, first + i, dst, arg(c, 2), arg(c, 3) + i);
+}
 // (src, srcMip, srcSlice, dst, dstMip, dstSlice, rectCount, GX2Rect* src rects; GX2Point* dst points on
 // the stack): as Cemu, only a rect covering the whole source at (0, 0) is copied
 HLE(gx2, GX2CopySurfaceEx) {

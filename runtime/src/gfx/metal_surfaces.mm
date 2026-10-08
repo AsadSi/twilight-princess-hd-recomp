@@ -884,6 +884,7 @@ void copy_surface_impl(uint32_t srcAddr, uint32_t srcMip, uint32_t srcSlice, uin
         dd.pitch = d->pitch;
         dd.format = (uint32_t)d->format.value();
         dd.tileMode = (uint32_t)d->tileMode.value();
+        dd.isDepth = src->isDepth;  // a depth buffer converted to a texture stays a depth image (sampled as one)
         Surface* dst = find_or_create_surface(dd, true);
         if (!dst || dst->fmt.pixel != src->fmt.pixel) return;
         end_encoder();
