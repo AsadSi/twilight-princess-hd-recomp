@@ -93,6 +93,7 @@ static void load_prefs() {
     // frame rate: fps60 is the mode (0 30 fps, 1 frame interpolation; the key predates 120/240 fps),
     // interpFps the interpolation's rate
     if (saved(@"interpFps", {"WWHD_INTERP_FPS"})) interp::set_fps([pref(@"interpFps") intValue]);
+    if (saved(@"aspect", {"WWHD_ASPECT"})) aspect::set_mode([pref(@"aspect") intValue]);
     if (saved(@"fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"})) interp::set_mode([pref(@"fps60") intValue]);
 #ifdef WWHD_HAS_VULKAN
     if (saved(@"vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode([pref(@"vkPresentMode") intValue]);
@@ -105,6 +106,7 @@ static void save_prefs() {
     if (!env_set({"WWHD_FXAA"})) set_pref(@"fxaa", @(render::fxaa()));
     if (!env_set({"WWHD_INTERP", "WWHD_INTERP_FPS"})) set_pref(@"fps60", @(interp::mode()));
     if (!env_set({"WWHD_INTERP_FPS"})) set_pref(@"interpFps", @(interp::fps()));
+    if (!env_set({"WWHD_ASPECT"})) set_pref(@"aspect", @(aspect::mode()));
 #ifdef WWHD_HAS_VULKAN
     if (!env_set({"WWHD_VK_PRESENT_MODE"})) set_pref(@"vkPresentMode", @(gfxvk::present_mode()));
 #endif

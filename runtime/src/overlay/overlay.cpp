@@ -598,8 +598,8 @@ void tab_graphics() {
     ImGui::SameLine(0, 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
-    heading("Presentation (Vulkan)");
 #ifdef WWHD_HAS_VULKAN
+    heading("Presentation (Vulkan)");
     {
         const bool vk = render::vulkan(), env = gfxvk::present_mode_from_env();
         static const char* const names[] = {"Vsync (smooth)", "Low latency", "Off (may tear)"};
@@ -624,11 +624,6 @@ void tab_graphics() {
             if (!missing.empty()) note("Not offered by this driver: %s.", missing.c_str());
         }
     }
-#else
-    ImGui::BeginDisabled();
-    radio("Vsync (smooth)", true);
-    ImGui::EndDisabled();
-    note("This build has no Vulkan renderer.");
 #endif
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);

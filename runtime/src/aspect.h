@@ -1,6 +1,8 @@
-// Aspect ratio of the TV picture (Graphics menu, WWHD_ASPECT): see aspect.cpp.
+// Aspect ratio of the TV picture (Graphics menu, WWHD_ASPECT=window|16:10|21:9|32:9): see aspect.cpp.
 #pragma once
 #include <cstdint>
+
+struct Cpu;
 
 namespace aspect {
 enum Mode : int { kOriginal = 0, kWindow, k16x10, k21x9, k32x9, kCustom, kModes };
@@ -20,5 +22,6 @@ uint64_t game_frame();                // swaps so far                      // as
 // and reports where each root went
 bool tagged_projection();                          // gx2: the vertex uniform upload in progress is one
 void layout_root_target(uint32_t root, bool tv);   // render thread (OP_LAYOUT_ROOT)
-void ss_reset();  // save state loaded: every layout recomputes its matrices once
+void ss_reset();  // save state loaded: the game's screen size is set again
+void service(Cpu* c);  // main01's frame loop: applies a changed aspect to the game (setTvSize)
 }  // namespace aspect

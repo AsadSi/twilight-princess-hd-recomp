@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "aspect.h"
 #include "interp.h"
 #include "mods/packages.h"
 #include "runtime.h"
@@ -213,10 +214,12 @@ void f_028E13CC_orig(Cpu* c);
 void f_02B5CF50_orig(Cpu* c);
 }
 
-// camera_draw(camera_process_class*)
+// camera_draw(camera_process_class*). The view's aspect comes from the game's screen aspect (1012B374, aspect.cpp)
+// each draw: the camera copies it only when it is made (028D7578), so a changed aspect reaches the 3D view at once.
 extern "C" void hook_028E13CC(Cpu* c) {
     using namespace interp;
     const uint32_t v = c->r[3];
+    st32(v + 0xD4, ld32(0x1012B374));
     if (!g_on) return f_028E13CC_orig(c);
     CamPrev& p = g_cams[v];
     const Cam cur = read_cam(v);
@@ -333,4 +336,5 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     if (g_models.size() > 4096) g_models.clear();  // models are freed with their actors: drop old records
     ss::service(c);
     warp::service(c);
+    aspect::service(c);
 }
