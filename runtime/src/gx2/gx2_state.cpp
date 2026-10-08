@@ -150,6 +150,20 @@ HLE(gx2, GX2SetPolygonOffsetReg) {
     set_reg(REGADDR::PA_SU_POLY_OFFSET_CLAMP, ld32(r + 16));
 }
 
+// (frontOffset, frontScale, backOffset, backScale, clamp): the registers hold floats, scales x16
+HLE(gx2, GX2SetPolygonOffset) {
+    auto bits = [&](int i, float k) { float f = (float)c->f[1 + i].ps0 * k; uint32 u; memcpy(&u, &f, 4); return u; };
+    set_reg(REGADDR::PA_SU_POLY_OFFSET_FRONT_SCALE, bits(1, 16));
+    set_reg(REGADDR::PA_SU_POLY_OFFSET_FRONT_OFFSET, bits(0, 1));
+    set_reg(REGADDR::PA_SU_POLY_OFFSET_BACK_SCALE, bits(3, 16));
+    set_reg(REGADDR::PA_SU_POLY_OFFSET_BACK_OFFSET, bits(2, 1));
+    set_reg(REGADDR::PA_SU_POLY_OFFSET_CLAMP, bits(4, 1));
+}
+// Cemu's renderers act only on special states 0 (fast clear), 5 and 8; TP HD sets 2, which needs nothing
+HLE(gx2, GX2SetSpecialState) {
+    if (arg(c, 0) != 2) LOG("[gx2] GX2SetSpecialState(%u, %u) ignored (lr=%08X)", arg(c, 0), arg(c, 1), c->lr);
+}
+
 HLE(gx2, GX2SetRasterizerClipControl) {
     LATTE_PA_CL_CLIP_CNTL r;
     bool raster = arg(c, 0) & 1, zclip = arg(c, 1) & 1;

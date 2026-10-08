@@ -325,6 +325,7 @@ HLE(coreinit, OSIsHomeButtonMenuEnabled) { ret(c, 1); }
 HLE(coreinit, __OSReadRegister32Ex) { ret(c, arg(c, 0) == 6 && arg(c, 1) == 0xE ? 0x08080808u : 0); }
 HLE(coreinit, __OSWriteRegister32Ex) {}
 HLE(coreinit, OSReadRegister16) { ret(c, 0); }
+HLE(coreinit, OSWriteRegister16) {}
 HLE(coreinit, OSEnforceInorderIO) {}
 HLE(coreinit, OSDriver_Register) { ret(c, 0); }
 HLE(coreinit, bspGetHardwareVersion) { st32(arg(c, 0), 0x11000000); ret(c, 0); }

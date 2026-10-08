@@ -220,4 +220,11 @@ HLE(vpadbase, VPADBASEGetHeadphoneStatus) { ret(c, 0); }
 
 // ---- sysapp
 HLE(sysapp, SYSLaunchSettings) { ret(c, 0); }
+// launched directly, with no arguments: the caller's request slots keep their null data
+HLE(sysapp, SYSGetArguments) { ret(c, 0); }
+
+// ---- erreula (looked up through OSDynLoad): the error viewer is never shown
+HLE(erreula, ErrEulaSetVersion__3RplFi) {}
+HLE(erreula, ErrEulaPlayAppearSE__3RplFb) {}
+HLE(erreula, ErrEulaJump__3RplFPCcUi) {}
 HLE(sysapp, SYSLaunchAccount) { ret(c, 0); }

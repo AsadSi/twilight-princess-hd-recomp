@@ -702,17 +702,18 @@ HLE(gx2, GX2SetClearDepthStencil) {
     db->clearDepth = farg(c, 0);
     db->clearStencil = arg(c, 1) & 0xFF;
 }
-HLE(gx2, GX2CopySurface) {
+// (src, srcMip, srcSlice, dst, dstMip, dstSlice)
+static void copy_surface(Cpu* c, uint32 src, uint32 srcMip, uint32 srcSlice, uint32 dst, uint32 dstMip, uint32 dstSlice) {
     // debug: WWHD_COPYDBG=1 logs each copy as issued (thread, caller, source and destination images)
     static const bool dbg = getenv("WWHD_COPYDBG") != nullptr;
     if (dbg)
         LOG("[copydbg] issue t=%.3f thread %08X lr %08X src %08X img %08X dst %08X img %08X size %X", timebase::now() / (double)timebase::kTicksPerSec,
-            threads::current_thread(), c->lr, arg(c, 0), ld32(arg(c, 0) + 0x24), arg(c, 3), ld32(arg(c, 3) + 0x24), ld32(arg(c, 3) + 0x20));
+            threads::current_thread(), c->lr, src, ld32(src + 0x24), dst, ld32(dst + 0x24), ld32(dst + 0x20));
     std::vector<uint32> p;
-    put_struct(p, arg(c, 0), kSurfaceWords);
-    p.insert(p.end(), {arg(c, 1), arg(c, 2)});
-    put_struct(p, arg(c, 3), kSurfaceWords);
-    p.insert(p.end(), {arg(c, 4), arg(c, 5)});
+    put_struct(p, src, kSurfaceWords);
+    p.insert(p.end(), {srcMip, srcSlice});
+    put_struct(p, dst, kSurfaceWords);
+    p.insert(p.end(), {dstMip, dstSlice});
     emit(OP_COPY_SURFACE, p.data(), (uint32)p.size());
     // The copy is complete when GX2CopySurface returns: the game uses the result (and frees the
     // surfaces) right away. agl's tile-mode conversion (027B5EEC) copies into a temporary surface,
@@ -722,6 +723,19 @@ HLE(gx2, GX2CopySurface) {
     if (!t_rec.start) {
         BlockingScope b;
         render_sync(kSyncCopySurface);
+    }
+}
+HLE(gx2, GX2CopySurface) { copy_surface(c, arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5)); }
+// (src, srcMip, srcSlice, dst, dstMip, dstSlice, rectCount, GX2Rect* src rects; GX2Point* dst points on
+// the stack): as Cemu, only a rect covering the whole source at (0, 0) is copied
+HLE(gx2, GX2CopySurfaceEx) {
+    uint32 src = arg(c, 0), rects = arg(c, 7), points = ld32(c->r[1] + 8);
+    for (uint32 i = 0; i < arg(c, 6); i++) {
+        uint32 r = rects + 16 * i, w = ld32(src + 4), h = ld32(src + 8);  // GX2Surface: dim, width, height
+        if (ld32(r) == 0 && ld32(r + 4) == 0 && ld32(r + 8) == w && ld32(r + 12) == h && ld32(points + 8 * i) == 0 && ld32(points + 8 * i + 4) == 0)
+            copy_surface(c, src, arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5));
+        else
+            LOG("[gx2] GX2CopySurfaceEx: partial rect %u,%u-%u,%u not copied (lr=%08X)", ld32(r), ld32(r + 4), ld32(r + 8), ld32(r + 12), c->lr);
     }
 }
 HLE(gx2, GX2CopyColorBufferToScanBuffer) {

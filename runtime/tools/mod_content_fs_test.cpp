@@ -2,6 +2,7 @@
 #include "runtime.h"
 #include "savestate.h"
 #include "mods/content.h"
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <filesystem>
@@ -27,6 +28,7 @@ void write_cstr(uint32_t ea,const std::string& s,uint32_t max){if(max){auto n=st
 }
 namespace threads {void block_begin(){}void block_end(){}}
 namespace wwatch {void host_write_begin(uint32_t,uint32_t){}void host_write_end(uint32_t,uint32_t){}}
+uint32_t guest_call(Cpu*,uint32_t,std::initializer_list<uint32_t>){return 0;}bool os_send_message(uint32_t,const std::array<uint32_t,4>&,uint32_t){return true;}
 void fs_ss_save(ss::Writer&);void fs_ss_load(ss::Reader&);
 int32_t call(const char* name,std::initializer_list<uint32_t> args){Cpu c{};size_t i=3;for(auto a:args)c.r[i++]=a;functions().at(name)(&c);return int32_t(c.r[3]);}
 uint32_t open(const std::string& path,const std::string& mode="rb"){
