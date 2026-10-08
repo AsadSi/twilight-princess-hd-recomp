@@ -46,7 +46,7 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   debugging: Saves › *Full save states*, or `WWHD_FULL_SAVE_STATES=1`. Loading a slot loads either
   kind; an older full state in a slot is kept and the Saves tab says so. A portable state can only be
   saved while you control Link (not during a cutscene or dialogue); one saved on the boat puts Link
-  back on the boat. See [docs/portable-save-states.md](docs/portable-save-states.md).
+  back on the boat.
 - **Fixed: "Quick doors" could crash the game going through a door** (issue #61, "PROGRAM HALT
   J3DPacket.cpp:157"; reported in Tingle's jail on Windfall). The extra game steps that make doors
   quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
@@ -265,8 +265,6 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   `WWHD_VK_PRESENT_MODE` overrides it.
 - **Faster Vulkan on Windows/Linux** (PR #18 by resadent): bounded draw batching and a higher
   game/render thread priority are now on by default, as on macOS.
-- **GameCube save converter** (`tools/savegame`): bring your GameCube save file into HD — see
-  [Optional: bring your GameCube save to HD](#optional-bring-your-gamecube-save-to-hd).
 
 ## Earlier updates
 
@@ -808,23 +806,6 @@ title screen and the file select, before a file is loaded, it quits without aski
   overlay's Vulkan layer; the log lists the Vulkan layers at start (`[vulkan] layers:`).
 - Debugging aids (frame/draw dumps, traces, scheduler statistics) are documented next to their
   code: grep for `WWHD_` in `runtime/src`.
-
-## Optional: bring your GameCube save to HD
-
-`tools/savegame/gc2hd.py` converts a GameCube Wind Waker save (`.gci`, USA GZLE01 or Japanese GZLJ01,
-e.g. from a memory-card dump or Dolphin) into a Wind Waker HD save (`cking.sav`), all three files
-with their progress, items, songs, charts and story state. It works for this port and for Cemu.
-
-```sh
-python3 tools/savegame/gc2hd.py "My Save.gci" -o converted     # writes converted/cking.sav
-python3 tools/savegame/hd_save_info.py converted/cking.sav      # shows what is in it
-```
-
-Back up your old `cking.sav`, then put the new one in `save/user/` (Cemu:
-`mlc01/usr/save/00050000/10143500/user/80000001/` for the USA game). The Tingle Tuner becomes the
-Tingle Bottle (HD's item in the same slot); Picto Box photos and HD-only statistics are not carried
-over; Japanese player names become "Link". Details and options: [tools/savegame/README.md](tools/savegame/README.md).
-Tested with 167 GameCube saves across the whole story (100% and Any% routes).
 
 ## Optional: shader head start
 

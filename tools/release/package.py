@@ -38,9 +38,6 @@ TOOL_FILES = [
     "tools/recomp/recomp.py",
     "tools/recomp/analyze.py",
     "tools/recomp/ppc2c.py",
-    "tools/savegame/gc2hd.py",
-    "tools/savegame/wwsave.py",
-    "tools/savegame/README.md",
 ]
 INSTALLER_FILES = [
     "tools/installer/setup.py",
