@@ -32,7 +32,6 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
-#include "../mods/climb.h"
 #include "../mods/mods.h"
 #include "../mods/manager.h"
 #include "../mods/packages.h"
@@ -975,28 +974,6 @@ void tab_mods() {
     }
     ImGui::Separator();
     package_controls();
-    ImGui::Separator();
-    heading("Cheats (save in game to keep them)");
-    if (ImGui::Button("Give all items")) mods::request_cheat(mods::kCheatItems);
-    ImGui::SameLine();
-    if (ImGui::Button("Master Sword + Mirror Shield")) mods::request_cheat(mods::kCheatSword);
-    ImGui::SameLine();
-    if (ImGui::Button("20 hearts, double magic, 5000 rupees")) mods::request_cheat(mods::kCheatStats);
-    static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},
-                                                      {"Infinite arrows and bombs", mods::kInfAmmo}};
-    for (int i = 0; i < 3; i++) {
-        if (i) ImGui::SameLine(0, 24);
-        int bit = inf[i].second;
-        if (check(inf[i].first, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });
-    }
-    heading("Story cheats (can break story events; use a spare save file)");
-    if (ImGui::Button("All songs")) mods::request_cheat(mods::kCheatSongs);
-    ImGui::SameLine();
-    if (ImGui::Button("All Triforce shards")) mods::request_cheat(mods::kCheatTriforce);
-    ImGui::SameLine();
-    if (ImGui::Button("Map, compass, boss key")) mods::request_cheat(mods::kCheatDungeon);
-    ImGui::SameLine();
-    if (ImGui::Button("Small key")) mods::request_cheat(mods::kCheatKey);
 }
 
 void start_capture(int a, int col) {
@@ -1549,7 +1526,6 @@ void set_open(bool open) {
     input::release_keys();  // keys held now belong to the menu (opening) or are not stuck in the game (closing)
     if (!open) g_wait_release = true;
     if (open) {
-        mods::mouse_release();
         U.just_opened = true;
         U.slots_time = -1;
     }

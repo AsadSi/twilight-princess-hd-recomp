@@ -1,7 +1,6 @@
 // Standalone host-side tests; no game files, player settings or guest code needed.
 #include "mods/manager.h"
 #include "mods/mods.h"
-#include "mods/climb.h"
 #include "overlay/hostui.h"
 #include <cassert>
 #include <cstdlib>
@@ -25,7 +24,6 @@ namespace mods {
 bool direct_camera() { return state[0]; } void set_direct_camera(bool b) { state[0]=b; }
 bool mouse_camera() { return state[1]; } void set_mouse_camera(bool b) { state[1]=b; }
 bool first_person_wheel() { return state[2]; } void set_first_person_wheel(bool b) { state[2]=b; }
-bool climb_enabled() { return state[3]; } void set_climb_enabled(bool b) { state[3]=b; }
 bool quick_doors() { return state[4]; } void set_quick_doors(bool b) { state[4]=b; }
 bool fast_scenes() { return state[5]; } void set_fast_scenes(bool b) { state[5]=b; }
 float camera_speed() { return speed; }
@@ -138,7 +136,7 @@ int main(int argc, char** argv) {
     env("WWHD_MOD_MANAGER_DIR",(root/"storage").string().c_str());
     initialize();
     std::string error;
-    auto package=[&](const char* id, const char* extra, const char* setting="wall-climb") {
+    auto package=[&](const char* id, const char* extra, const char* setting="fast-scenes") {
         auto path=root/id;fs::create_directories(path);
         std::ofstream(path/"manifest.json") << "{\"format_version\":1,\"id\":\"" << id
           << "\",\"name\":\"" << id << "\",\"version\":\"1.0.0\",\"game_id\":\"wwhd-usa\","
@@ -148,12 +146,12 @@ int main(int argc, char** argv) {
     assert(install(package("climb-preset",""),error));
     assert(list().size()==1 && list()[0].id=="climb-preset");
     assert(list()[0].native_confirmed && unconfirmed_native("climb-preset").empty()); // settings presets never ask
-    assert(enable("climb-preset",true,error));frame(1);assert(state[3] && list()[0].active);
+    assert(enable("climb-preset",true,error));frame(1);assert(state[5] && list()[0].active);
     assert(!remove("climb-preset",error));
-    assert(enable("climb-preset",false,error));frame(2);assert(!state[3]);
+    assert(enable("climb-preset",false,error));frame(2);assert(!state[5]);
     assert(create_profile("Adventure",error));
-    assert(enable("climb-preset",true,error));frame(20);assert(state[3]);
-    assert(select_profile("Adventure",error));frame(21);assert(!state[3]);
+    assert(enable("climb-preset",true,error));frame(20);assert(state[5]);
+    assert(select_profile("Adventure",error));frame(21);assert(!state[5]);
     assert(current_profile()=="Adventure");assert(!delete_profile("Adventure",error));
     assert(select_profile("Default",error));assert(delete_profile("Adventure",error));
     assert(install(package("missing-dep",",\"dependencies\":[{\"id\":\"absent\"}]"),error));

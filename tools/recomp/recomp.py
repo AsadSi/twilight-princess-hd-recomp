@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Statically recompile a Wii U RPX into C.
 
-usage: recomp.py game/code/cking.rpx OUTDIR [--insns-per-file N]
+usage: recomp.py game/code/Zelda.rpx OUTDIR [--insns-per-file N]
 
 Output:
   OUTDIR/funcs.h         prototypes of every recompiled function and import

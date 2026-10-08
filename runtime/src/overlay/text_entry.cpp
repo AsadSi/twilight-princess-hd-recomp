@@ -568,7 +568,6 @@ bool start(const Request& r, Done done) {
         g_active = true;
     }
     input::release_keys();  // keys held now belong to the prompt
-    hostui::post([] { mods::mouse_release(); });  // the pointer clicks keys (mouse camera: not captured)
     LOG("[text] the game asks for text (up to %d characters): on-screen text entry shown; type, or use the "
         "on-screen keyboard with a controller or the mouse", r.max_len);
     return true;

@@ -3,7 +3,6 @@
 #include "../crashrec.h"
 #include "../game_languages.h"
 #include <cstdlib>
-#include "../true60.h"
 #include <filesystem>
 #include <ctime>
 #include <vector>
@@ -176,8 +175,7 @@ HLE(coreinit, OSConsoleWrite) {
 
 
 // On a game halt: captures/crash-<time>.log with the guest call chain (named from build/names.tsv
-// when present), the 60 fps pass state and the executing process, for reports from normal play.
-namespace interp { const char* phase_name(); }
+// when present), for reports from normal play.
 static void write_crash_log(Cpu* c, const std::string& file, uint32_t line, const std::string& msg) {
     std::unordered_map<uint32_t, std::string> names;
     std::vector<uint32_t> starts;
@@ -206,10 +204,7 @@ static void write_crash_log(Cpu* c, const std::string& file, uint32_t line, cons
     FILE* f = fopen(path, "w");
     if (!f) return;
     fprintf(f, "halt at %s:%u: %s\n", file.c_str(), line, msg.c_str());
-    fprintf(f, "60 fps pass: %s; true 60 %s, half pass %d, executing process %08X", interp::phase_name(),
-            true60::enabled() ? "on" : "off", (int)true60::half_pass(), true60::exec_proc());
-    if (uint32_t p = true60::exec_proc()) fprintf(f, " (words %08X %08X %08X %08X)", ld32(p), ld32(p + 4), ld32(p + 8), ld32(p + 12));
-    fprintf(f, ", dt %.2f\nlr %08X %s\n", true60::dt(), c->lr, name(c->lr).c_str());
+    fprintf(f, "lr %08X %s\n", c->lr, name(c->lr).c_str());
     for (uint32_t sp = c->r[1], i = 0; i < 40 && sp; i++) {
         uint32_t prev = ld32(sp);
         if (!prev || prev <= sp) break;

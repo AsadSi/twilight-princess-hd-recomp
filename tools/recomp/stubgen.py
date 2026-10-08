@@ -3,7 +3,7 @@
 
 usage: stubgen.py OUTDIR
 
-recomp.py needs your own cking.rpx. This script instead emits the same file layout (funcs.h,
+recomp.py needs your own Zelda.rpx. This script instead emits the same file layout (funcs.h,
 code_000.c, table.c, imports.c) with every guest function the runtime refers to (hooks and direct
 calls) defined as a stub that halts via ppc_unimplemented. The result compiles and links the full
 runtime and renderer on any host, so CI and porting work can check the build; the executable
@@ -21,6 +21,8 @@ root = os.path.normpath(os.path.join(here, "..", ".."))
 def hook_lists():
     hooks, sites = set(), set()
     for hp in [os.path.join(here, "hooks.txt")] + sorted(glob.glob(os.path.join(here, "hooks_*.txt"))):
+        if not os.path.exists(hp):
+            continue
         for line in open(hp):
             line = line.split("#")[0].strip()
             if line.startswith("@"):

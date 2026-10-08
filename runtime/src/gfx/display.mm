@@ -54,7 +54,6 @@
 #include "backends/imgui_impl_metal.h"
 #include "../overlay/overlay.h"
 
-namespace mods { bool mouse_captured(); }
 
 namespace gfx {
 extern Renderer R;
@@ -440,14 +439,14 @@ static void create_windows() {
         screen_named(g_settings[@"drcScreen"]) && screen_named(g_settings[@"drcScreen"]) != tv.screen)
         dispatch_async(dispatch_get_main_queue(), ^{ if (!is_fullscreen(g_drc_window)) [g_drc_window toggleFullScreen:nil]; });
 
-    // full screen: hide the pointer after 2 s without movement (not while the mouse camera holds it)
+    // full screen: hide the pointer after 2 s without movement 
     [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer*) {
         static NSPoint last = {-1, -1};
         static double moved = 0;
         static bool hidden = false;
         NSPoint p = [NSEvent mouseLocation];
         if (!NSEqualPoints(p, last)) { last = p; moved = display_now(); hidden = false; }
-        if (!hidden && is_fullscreen(g_tv_window) && NSApp.active && g_tv_window.keyWindow && !mods::mouse_captured() &&
+        if (!hidden && is_fullscreen(g_tv_window) && NSApp.active && g_tv_window.keyWindow &&
             display_now() - moved > 2.0) {
             [NSCursor setHiddenUntilMouseMoves:YES];
             hidden = true;

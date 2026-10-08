@@ -17,7 +17,6 @@
 #include "renderer.h"
 #include "../runtime.h"
 #include "../savestate.h"
-#include "../true60.h"
 #include "../motion/motion.h"
 #include "../overlay/overlay.h"
 
@@ -26,7 +25,6 @@
 #include <vector>
 
 namespace gfx { void request_capture(); bool menu_hotkey(uint16_t keyCode); bool controls_window_is_key(); bool text_input_key(void* event); }
-namespace mods { void filter_pad(input::PadState& s); bool host_key_down(uint16_t code); void update_gyro_mouse(); }  // mods/
 
 namespace input {
 
@@ -269,7 +267,6 @@ void init() {
             if (posted) return nil;  // test keys only reach the overlay
         }
         std::lock_guard<std::mutex> lk(g_mu);
-        if (e.type == NSEventTypeKeyDown && !e.isARepeat && mods::host_key_down(code)) return nil;  // e.g. Esc releases the mouse
         if (e.type == NSEventTypeKeyDown && !e.isARepeat && gfx::menu_hotkey(code)) return nil;
         // a repeat never presses a key: one held down while the overlay or the text prompt had the keyboard
         // (Enter that confirmed a name) stays out of the game until pressed again
@@ -306,7 +303,6 @@ void init() {
             }
             motion::poll_recalibrate(v, keys);
         }
-        mods::update_gyro_mouse();
     }];
 }
 
@@ -416,45 +412,19 @@ struct Scenario {
 }  // namespace
 }  // namespace input
 namespace interp { void set_mode(int m); uint64_t logic_steps(); }
-namespace true60_test { void tick(double t, bool ended); void set_origin_step(uint64_t s); }
 namespace input {
 // WWHD_TEST_TOUCH=t0-t1:x:y,...: touches the GamePad screen at (x, y) (0..1) during scenario times
 static bool g_test_touch = false;
 static float g_test_tx = 0, g_test_ty = 0;
 static void apply_scenario(PadState& s) {
     static Scenario sc;
-    // WWHD_TEST_ORIGIN_LOAD=n: the scenario starts n logic steps after the last save-state load (a
-    // load completes asynchronously, so a fixed frame can fall a step apart between two runs)
-    static const char* ol = getenv("WWHD_TEST_ORIGIN_LOAD");
-    uint64_t ol_step = 0;
-    // (the clock is the number of Link's full-pass executes since the load, true60::link_steps: the
-    // pass at which a load lands differs between runs, and the steps after it are the game's)
-    if (ol) {
-        if (!true60::state_loaded()) return;
-        static uint64_t found = 0;
-        if (!found) {
-            int64_t past = (int64_t)true60::link_steps() - (int64_t)strtoull(ol, nullptr, 10);
-            if (past < 0) return;
-            found = interp::logic_steps() - (uint64_t)past;  // the logic step at which the count reached it
-        }
-        ol_step = found;
-        sc.origin = 1;
-    }
-    if (!sc.origin || (!ol && render::frame_count() < sc.origin)) return;
-    // scenario time = game time: full logic steps / 30 (frame-time hitches don't shift the input)
-    static const uint64_t s0 = [ol_step] {
-        if (ol_step) {
-            LOG("[test] origin at logic step %llu (load + WWHD_TEST_ORIGIN_LOAD), logic step %llu", (unsigned long long)ol_step,
-                (unsigned long long)ol_step);
-            true60_test::set_origin_step(ol_step);
-            return ol_step;
-        }
+    if (!sc.origin || render::frame_count() < sc.origin) return;
+    // scenario time = game time: logic steps / 30 (frame-time hitches don't shift the input)
+    static const uint64_t s0 = [] {
         LOG("[test] origin at guest time %.4f s, logic step %llu", (double)timebase::now() / timebase::kTicksPerSec,
             (unsigned long long)interp::logic_steps());
-        true60_test::set_origin_step(interp::logic_steps());
         return interp::logic_steps();
     }();
-    // (with WWHD_TEST_ORIGIN_LOAD: the game's own step counter, which the load restores, is the clock)
     double t = (double)(interp::logic_steps() - s0) / 30.0;
     static std::atomic<bool> mode_set{false}, ended{false};
     static std::atomic<int> dbg{0};
@@ -482,7 +452,6 @@ static void apply_scenario(PadState& s) {
             interp::set_mode(m);
             m = -1;
         }
-    true60_test::tick(t, sc.end > 0 && t >= sc.end);  // test aids (true60_test.cpp)
     if (sc.end > 0 && t >= sc.end && !ended.exchange(true)) {
         LOG("[test] t=%.3f s: end", t);
         if (FILE* f = fopen("test_done", "w")) fclose(f);
@@ -551,7 +520,6 @@ PadState read() {
         LOG("[input] frame %llu buttons %04X", (unsigned long long)render::frame_count(), s.buttons);
         last_buttons = s.buttons;
     }
-    mods::filter_pad(s);  // gameplay mods: mouse camera, wheel -> R3
     if (overlay::blocks_input()) s = PadState{};  // the settings overlay has the input
     return s;
 }

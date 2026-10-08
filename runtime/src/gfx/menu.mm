@@ -341,7 +341,6 @@ static NSMenuItem* add(NSMenu* m, NSString* title, SEL action, NSString* key, NS
     return it;
 }
 
-namespace mods { bool climb_enabled(); void set_climb_enabled(bool on); }  // mods/climb.cpp
 
 namespace gfx {
 
@@ -417,7 +416,7 @@ void install_menu(NSWindow* tv) {
     inItem.submenu = in;
     install_display_menu(bar);  // Display: full screen, scaling, GamePad screen mode (display.mm)
 
-    // Gameplay: optional mods, all off by default (runtime/src/mods/). One line per option.
+    // Gameplay: optional mods, all off by default (runtime/src/mods/; inert for TP HD until its hooks exist).
     NSMenuItem* gpItem = [bar addItemWithTitle:@"Gameplay" action:nil keyEquivalent:@""];
     NSMenu* gp = [[NSMenu alloc] initWithTitle:@"Gameplay"];
     [gp addItemWithTitle:@"Camera" action:nil keyEquivalent:@""].enabled = NO;
@@ -433,34 +432,11 @@ void install_menu(NSWindow* tv) {
     toggle(gp, @"    First person on R3 / mouse wheel", ^BOOL { return mods::first_person_wheel(); }, ^(BOOL on) { mods::set_first_person_wheel(on); },
            @"Right-stick click (keyboard V) or wheel forward enters the first-person view, wheel back leaves it");
     [gp addItem:[NSMenuItem separatorItem]];
-    toggle(gp, @"Climb any wall", ^BOOL { return mods::climb_enabled(); }, ^(BOOL on) { mods::set_climb_enabled(on); },
-           @"Grab and climb any wall (stamina wheel; B or A lets go)");
     toggle(gp, @"Quick doors", ^BOOL { return mods::quick_doors(); }, ^(BOOL on) { mods::set_quick_doors(on); },
            @"Door events (walk-in, opening, closing) run at 4x speed");
     toggle(gp, @"Fast scene changes", ^BOOL { return mods::fast_scenes(); }, ^(BOOL on) { mods::set_fast_scenes(on); },
            @"Fades and loading between areas run at 4x speed; the scenes themselves are not sped up");
-    [gp addItem:[NSMenuItem separatorItem]];
-    [gp addItemWithTitle:@"Cheats (save in game to keep them)" action:nil keyEquivalent:@""].enabled = NO;
-    toggle(gp, @"    Give all items", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatItems); },
-           @"Every inventory item, light arrows, deluxe picto box, power bracelets, 4 bottles, 99 arrows and bombs");
-    toggle(gp, @"    Master Sword (full power) and Mirror Shield", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatSword); });
-    toggle(gp, @"    20 hearts, double magic, 5000 rupees", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatStats); },
-           @"Also refills hearts and magic");
-    for (auto [title, which] : {std::pair{@"    Infinite health", mods::kInfHealth}, {@"    Infinite magic", mods::kInfMagic},
-                                {@"    Infinite arrows and bombs", mods::kInfAmmo}}) {
-        int bit = which;  // (blocks cannot capture structured bindings)
-        toggle(gp, title, ^BOOL { return mods::infinite(bit); }, ^(BOOL on) { mods::set_infinite(bit, on); });
-    }
-    [gp addItem:[NSMenuItem separatorItem]];
-    NSString* story = @"Can change or break story events: the game may skip or repeat scenes that teach or check this. "
-                      @"Save to a different file first.";
-    [gp addItemWithTitle:@"⚠️ Story cheats (can break story events; use a spare save file)" action:nil keyEquivalent:@""].enabled = NO;
-    toggle(gp, @"    All songs", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatSongs); }, story);
-    toggle(gp, @"    All Triforce shards", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatTriforce); }, story);
-    toggle(gp, @"    Map, compass and boss key (this dungeon)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatDungeon); }, story);
-    toggle(gp, @"    Add a small key (this dungeon)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatKey); }, story);
     gpItem.submenu = gp;
-    mods::mouse_init((__bridge void*)tv);
 
     // Save States: 5 slots (savestate.cpp); Shift+F1..F5 save, F1..F5 load
     NSMenuItem* ssItem = [bar addItemWithTitle:@"Save States" action:nil keyEquivalent:@""];

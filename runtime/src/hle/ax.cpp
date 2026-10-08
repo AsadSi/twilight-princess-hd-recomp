@@ -22,7 +22,6 @@
 #include "../audio_out.h"
 #include "../runtime.h"
 
-namespace interp { const char* phase_name(); }
 
 namespace {
 
@@ -333,33 +332,11 @@ void init_buffers() {
     g_output.source = audio::OutputSelect::parse(getenv("WWHD_AUDIO_OUTPUT"));
 }
 
-// The game's output mode, from its sound player's master faders (audio_output_mode.h): the player
-// is ((sound manager 1018EC64)->+0x10)->+4 (Snd_player 020307F8 -> 0202BF78 -> 0202BC80), its
-// TV fader at +0x194 and GamePad fader at +0x1AC (Player_fadeMaster 0202F14C).
-bool guest_obj(uint32_t a) { return a >= mem::kMem2Start && a < mem::kMem2End - 0x400 && !(a & 3); }
-bool read_game_faders(audio::Fader& tv, audio::Fader& drc) {
-    uint32_t mgr = ld32(0x1018EC64);
-    if (!guest_obj(mgr)) return false;
-    uint32_t x = ld32(mgr + 0x10);
-    if (!guest_obj(x)) return false;
-    uint32_t player = ld32(x + 4);
-    if (!guest_obj(player)) return false;
-    auto fader = [](uint32_t f) {
-        audio::Fader r;
-        uint32_t v = ld32(f), t = ld32(f + 4);
-        memcpy(&r.value, &v, 4);
-        memcpy(&r.target, &t, 4);
-        r.frames = ld32(f + 0xC);
-        return r;
-    };
-    tv = fader(player + 0x194);
-    drc = fader(player + 0x1AC);
-    return true;
-}
-
+// The game's output mode (Off-TV Play) came from Wind Waker's sound player faders; TP HD's are not
+// mapped yet, so the host plays the TV mix (WWHD_AUDIO_OUTPUT=gamepad still picks the GamePad's)
 void update_output_mode() {
     audio::Fader tv, drc;
-    bool ok = read_game_faders(tv, drc);
+    bool ok = false;
     bool before = g_output.play_drc;
     g_output.update(ok, tv, drc);
     static bool stats = getenv("WWHD_AX_STATS") != nullptr;
@@ -739,7 +716,7 @@ static void trace_voice_start(Cpu* c, uint32_t voice_addr, uint32_t samples) {
     if (!f) return;
     char buf[400];
     int n = snprintf(buf, sizeof buf, "%10.3f ms  %-10s voice %08X samples %08X  lr=%08X",
-                     timebase::now() * 1000.0 / timebase::kTicksPerSec, interp::phase_name(), voice_addr, samples, c->lr);
+                     timebase::now() * 1000.0 / timebase::kTicksPerSec, "30 fps", voice_addr, samples, c->lr);
     for (uint32_t sp = c->r[1], i = 0; i < 9 && sp; i++) {
         uint32_t prev = ld32(sp);
         if (!prev || prev <= sp) break;
@@ -762,7 +739,7 @@ static void ax_stat(int i) {
     uint64_t t = timebase::now(), s0 = t0.load();
     if (t - s0 > 5 * timebase::kTicksPerSec && t0.compare_exchange_strong(s0, t)) {
         char buf[600];
-        int n = snprintf(buf, sizeof buf, "[ax] calls/s (%s):", interp::phase_name());
+        int n = snprintf(buf, sizeof buf, "[ax] calls/s (%s):", "30 fps");
         for (int k = 0; k < kAxStatCount; k++) {
             uint32_t v = g_ax_stats[k].exchange(0);
             if (v) n += snprintf(buf + n, sizeof buf - n, " %s=%.1f", kAxStatNames[k] + 2, v * (double)timebase::kTicksPerSec / (double)(t - s0));
@@ -790,7 +767,7 @@ HLE(snd_core, AXAcquireVoiceEx) {
             n++;
             uint64_t t = timebase::now();
             if (t - t0 > 5 * timebase::kTicksPerSec) {
-                LOG("[ax] %.1f voices/s (%s)", n * (double)timebase::kTicksPerSec / (double)(t - t0), interp::phase_name());
+                LOG("[ax] %.1f voices/s (%s)", n * (double)timebase::kTicksPerSec / (double)(t - t0), "30 fps");
                 n = 0;
                 t0 = t;
             }
@@ -800,7 +777,7 @@ HLE(snd_core, AXAcquireVoiceEx) {
         if (trace > 0) {
             trace--;
             char buf[256];
-            int n = snprintf(buf, sizeof buf, "[ax] acquire voice (%s) lr=%08X", interp::phase_name(), c->lr);
+            int n = snprintf(buf, sizeof buf, "[ax] acquire voice (%s) lr=%08X", "30 fps", c->lr);
             for (uint32_t sp = c->r[1], i = 0; i < 7 && sp; i++) {
                 uint32_t prev = ld32(sp);
                 if (!prev || prev <= sp) break;

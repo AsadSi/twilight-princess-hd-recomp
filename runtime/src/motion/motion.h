@@ -14,8 +14,8 @@
 // the change of the GamePad's direction from one frame to the next (fusion.h, docs/gyro.md), so the sources
 // only say how far the player turned (Aim) and one virtual GamePad (VirtualPad) turns by that.
 //
-// Pro Controller mode: the game ignores the GamePad's motion when it plays with a Pro Controller; while a
-// source is on, game_hooks.cpp lets it read the virtual GamePad's motion there too (drives_gamepad()).
+// Pro Controller mode: Wind Waker's hook that let the game read the virtual GamePad's motion with a Pro
+// Controller is gone with the TP HD fork; drives_gamepad() is what a TP HD hook would check.
 //
 // Threads: sources feed from the host's main thread (SDL events, GameController handlers) or the DSU
 // thread; vpad() runs on the game thread inside VPADRead. Everything is behind one mutex and short.
@@ -94,8 +94,7 @@ void poll_recalibrate(const float* pad_values, const bool* keys);
 // ---- VPADRead / KPADRead (game thread) ----
 // the motion fields of this read; repeat = the read repeats the previous sample (frame interpolation)
 VpadMotion vpad(bool repeat);
-// a source (or WWHD_TEST_GYRO) turns the virtual GamePad: the game may use its motion also in Pro
-// Controller mode (game_hooks.cpp)
+// a source (or WWHD_TEST_GYRO) turns the virtual GamePad
 bool drives_gamepad();
 // the right stick the game aims with (GamePad or Pro Controller), each read: the game ignores the gyro
 // while it is outside its 0.1 dead zone, which status() and the log point out (stick drift)

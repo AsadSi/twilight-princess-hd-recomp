@@ -7,8 +7,6 @@
 #include "../motion/motion.h"
 #include "../rumble.h"
 
-namespace interp { bool repeat_input(); bool fresh_sticks(); }
-
 namespace {
 constexpr int32_t kWpadErrNone = 0, kWpadErrNoController = -1;
 constexpr int32_t kKpadErrNone = 0, kKpadErrNoController = -2;
@@ -72,15 +70,8 @@ HLE(padscore, KPADReadEx) {
         return;
     }
     static uint32_t last = 0;
-    static input::PadState last_p;
-    const bool repeat = interp::repeat_input();
-    input::PadState p = repeat ? last_p : crashrec::read(1);  // see interp.cpp; crash recovery records/replays it
-    if (repeat && interp::fresh_sticks()) {  // true 60: sticks every pass, buttons on full passes
-        input::PadState f = input::read();
-        p.lx = f.lx; p.ly = f.ly; p.rx = f.rx; p.ry = f.ry;
-    }
-    last_p = p;
-    if (!repeat) motion::right_stick(p.rx, p.ry);  // the Pro Controller's stick decides gyro use too (motion.h)
+    input::PadState p = crashrec::read(1);  // crash recovery records/replays it
+    motion::right_stick(p.rx, p.ry);  // the Pro Controller's stick decides gyro use too (motion.h)
     uint32_t hold = pro_buttons(p.buttons);
     memset(mem::ptr(st), 0, 0xF0);
     st8(st + 0x5C, kDevURCC);     // devType

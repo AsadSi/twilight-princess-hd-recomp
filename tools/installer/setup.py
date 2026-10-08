@@ -66,20 +66,18 @@ IS_LINUX = not IS_MAC and not IS_WIN
 EXE_SUFFIX = ".exe" if IS_WIN else ""
 APP_NAME = "Wind Waker HD"
 TITLE_IDS = {
-    "0005000010143500": "USA",
-    "0005000010143600": "Europe",
-    "0005000010143400": "Japan",
+    "000500001019e500": "USA",
 }
-SUPPORTED_TITLE = "0005000010143500"
+SUPPORTED_TITLE = "000500001019e500"
 # The translated code (tools/recomp, the hooks in tools/recomp/hooks*.txt, the runtime) is made for
-# the code of this version of the game: version 0, the disc and eShop release. Its update
-# (0005000E-10143500) brings other code, and its data files go with that code.
-SUPPORTED_VERSION = 0
-# SHA-256 of code/cking.rpx of that version (The Wind Waker HD, USA, 00050000-10143500, v0). A checksum
+# the code of this version of the game: title version 81, the USA disc. An update (0005000E-1019E500)
+# brings other code, and its data files go with that code.
+SUPPORTED_VERSION = 81
+# SHA-256 of code/Zelda.rpx of that version (Twilight Princess HD, USA, 00050000-1019E500, v81). A checksum
 # only: it identifies the file the port is built for and contains nothing of it (64 hex digits;
 # tools/release/guard.py flags only 32-digit, key-shaped strings). Every source is checked against
 # it before the code is translated (check_game_version).
-SUPPORTED_RPX_SHA256 = "c4f0ab300542e0bfc462696850534e71db2ad02288a7eb55e5a4cd4062f16153"
+SUPPORTED_RPX_SHA256 = "28922198517578c9261ac0b0b04a586252033d3bbcf7980b79e37638775b12a9"
 
 EXTRACT_ERRORS = {
     3: "disc_key_bad",
@@ -669,16 +667,16 @@ def check_title(title_id):
     if title_id != SUPPORTED_TITLE:
         region = TITLE_IDS.get(title_id)
         if region:
-            raise SetupError("this is the %s version of The Wind Waker HD (title %s). The port supports the USA "
-                             "version (00050000-10143500) only for now." % (region, title_id))
-        raise SetupError("this disc is not The Wind Waker HD (title id %s)" % title_id)
+            raise SetupError("this is the %s version of Twilight Princess HD (title %s). The port supports the USA "
+                             "version (00050000-1019E500) only for now." % (region, title_id))
+        raise SetupError("this disc is not Twilight Princess HD (title id %s)" % title_id)
 
 
 def title_desc(tid, version=None):
-    """'The Wind Waker HD (USA), version 0', 'the update for The Wind Waker HD (USA), version 16', ..."""
+    """'Twilight Princess HD (USA), version 81', 'the update for Twilight Princess HD (USA), version 16', ..."""
     tid = tid.lower()
     region = TITLE_IDS.get("00050000" + tid[8:])
-    name = "The Wind Waker HD (%s)" % region if region else "title %s-%s" % (tid[:8].upper(), tid[8:].upper())
+    name = "Twilight Princess HD (%s)" % region if region else "title %s-%s" % (tid[:8].upper(), tid[8:].upper())
     kind = tid[:8]
     v = "" if version is None else ", version %d" % version
     if kind == "0005000e":
@@ -728,15 +726,15 @@ def archive_choice(info):
                 except SetupError as e:
                     raise SetupError("this archive contains %s" % str(e)[len("this is "):])
         if any(t["id"] == "0005000e" + SUPPORTED_TITLE[8:] for t in titles):
-            raise SetupError("this archive contains only the update for The Wind Waker HD (USA), not the game itself "
-                             "(title 00050000-10143500). In Cemu, make the archive with the game included "
+            raise SetupError("this archive contains only the update for Twilight Princess HD (USA), not the game itself "
+                             "(title 00050000-1019E500). In Cemu, make the archive with the game included "
                              "(it contains: %s)." % found)
-        raise SetupError("this archive does not contain The Wind Waker HD (USA), title 00050000-10143500 "
+        raise SetupError("this archive does not contain Twilight Princess HD (USA), title 00050000-1019E500 "
                          "(it contains: %s)." % found)
     version = int(info.get("version", -1))
     if version != SUPPORTED_VERSION:
         raise SetupError("the game in this archive is version %d; the port is built for version %d of The Wind Waker "
-                         "HD (USA), the disc and eShop release (folder %s)." % (version, SUPPORTED_VERSION, info["selected"]))
+                         "HD (USA), the USA disc (folder %s)." % (version, SUPPORTED_VERSION, info["selected"]))
     notes = []
     for t in titles:
         if t["folder"] == info["selected"]:
@@ -790,14 +788,14 @@ def file_sha256(path):
 
 GAME_VERSION_FIX = ("Use the game's own files: a disc image (.wud/.wux), a Cemu archive (.wua; setup takes the game from it "
                     "and leaves an update out), or the game's folder exactly as dumped (in Cemu: "
-                    "mlc01/usr/title/00050000/10143500, not the update in 0005000e/10143500), without update files "
+                    "mlc01/usr/title/00050000/1019e500, not the update in 0005000e/1019e500), without update files "
                     "copied over it.")
 
 
 def check_game_version(path):
-    """Raises SetupError unless code/cking.rpx is the one the port is built for (USA, version 0). The
+    """Raises SetupError unless code/Zelda.rpx is the one the port is built for (USA, version 81). The
     translated code and its hooks are made for exactly that file, so this runs before translating."""
-    rpx = os.path.join(path, "code", "cking.rpx")
+    rpx = os.path.join(path, "code", "Zelda.rpx")
     try:
         digest = file_sha256(rpx)
     except OSError as e:
@@ -807,21 +805,21 @@ def check_game_version(path):
     tid, ver = code_title_version(path)
     update = "0005000e" + SUPPORTED_TITLE[8:]
     if tid and tid not in (SUPPORTED_TITLE, update):
-        found = "the game code (code/cking.rpx) is from %s (title %s-%s)" % (title_desc(tid, ver), tid[:8].upper(),
+        found = "the game code (code/Zelda.rpx) is from %s (title %s-%s)" % (title_desc(tid, ver), tid[:8].upper(),
                                                                             tid[8:].upper())
-    elif tid == update or ver:
-        found = ("the game code (code/cking.rpx) is %s (per the folder's app.xml/meta.xml): this looks like the "
+    elif tid == update or (ver and ver != SUPPORTED_VERSION):
+        found = ("the game code (code/Zelda.rpx) is %s (per the folder's app.xml/meta.xml): this looks like the "
                  "game with an update merged in" % ("version %d of the game" % ver if ver else "from the update"))
     else:
-        found = ("the game code (code/cking.rpx) is not the expected file (SHA-256 %s...): not version 0 of the USA "
+        found = ("the game code (code/Zelda.rpx) is not the expected file (SHA-256 %s...): not version 81 of the USA "
                  "game, or a modified or damaged copy" % digest[:16])
-    LOG.write("cking.rpx SHA-256 %s, expected %s" % (digest, SUPPORTED_RPX_SHA256))
-    raise SetupError("%s. The port needs The Wind Waker HD (USA), title 00050000-10143500, version 0 (the disc or "
-                     "eShop release, without the update). %s" % (found, GAME_VERSION_FIX))
+    LOG.write("Zelda.rpx SHA-256 %s, expected %s" % (digest, SUPPORTED_RPX_SHA256))
+    raise SetupError("%s. The port needs Twilight Princess HD (USA), title 00050000-1019E500, version 81 (the disc, "
+                     "without an update). %s" % (found, GAME_VERSION_FIX))
 
 
 def valid_game_folder(path):
-    return (os.path.isfile(os.path.join(path, "code", "cking.rpx")) and os.path.isdir(os.path.join(path, "content"))
+    return (os.path.isfile(os.path.join(path, "code", "Zelda.rpx")) and os.path.isdir(os.path.join(path, "content"))
             and os.path.isfile(os.path.join(path, "meta", "meta.xml")))
 
 
@@ -897,7 +895,7 @@ def extract_game(image, keys, info, data_dir, title=None):
         raise SetupError("not enough free disk space in %s: %s needed" % (data_dir, human(need)))
     run_extract(image, keys, tmp, title)
     if not valid_game_folder(tmp):
-        raise SetupError("the extracted files are incomplete (no code/cking.rpx)")
+        raise SetupError("the extracted files are incomplete (no code/Zelda.rpx)")
     try:
         check_game_version(tmp)
     except SetupError:
@@ -1013,7 +1011,7 @@ def language_source_region(title_id):
     if tid == SUPPORTED_TITLE:
         raise SetupError("this is the USA game, whose languages (English, French, Spanish) the port already has. A "
                          "language source is the European (00050000-10143600) or Japanese (00050000-10143400) game")
-    if tid[:8] in ("0005000e", "0005000c") and ("00050000" + tid[8:]) in TITLE_IDS:
+    if tid[:8] in ("0005000e", "0005000c") and ("00050000" + tid[8:]) in LANGUAGE_SOURCE_TITLES:
         raise SetupError("this is %s, not the game itself: a language source is the European or Japanese game "
                          "(title 00050000-10143600 or 00050000-10143400)" % title_desc(tid))
     raise SetupError("this is not the European or Japanese version of The Wind Waker HD (title %s); a language source "
@@ -1182,7 +1180,7 @@ def language_source_kind(path):
 
 def recompile(game_dir, gen_dir):
     shutil.rmtree(gen_dir, ignore_errors=True)
-    rpx = os.path.join(game_dir, "code", "cking.rpx")
+    rpx = os.path.join(game_dir, "code", "Zelda.rpx")
     out = run_logged([sys.executable, os.path.join(PKG, "tools", "recomp", "recomp.py"), rpx, gen_dir],
                      what="translating the game code")
     n = len(glob.glob(os.path.join(gen_dir, "code_*.c")))

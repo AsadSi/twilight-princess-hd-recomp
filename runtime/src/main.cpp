@@ -1,4 +1,4 @@
-// Wind Waker HD recompiled: entry point.
+// Twilight Princess HD recompiled: entry point.
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -298,7 +298,7 @@ int main(int argc, char** argv) {
     }
     install_crash_handler();
     // which build on which system: also in crash logs (their last log lines)
-    LOG("[boot] Wind Waker HD %s (%s), %s", build::version(), build::commit(), reporthdr::os_description().c_str());
+    LOG("[boot] Twilight Princess HD %s (%s), %s", build::version(), build::commit(), reporthdr::os_description().c_str());
     // test aid: WWHD_TEST_HOST_CRASH=1 crashes inside a system library (strlen of a bad pointer), so
     // the crash log's module names can be checked (CTest crash_log_module, runtime/tools/crash_log_test.cmake)
     if (getenv("WWHD_TEST_HOST_CRASH")) {
@@ -354,7 +354,7 @@ int main(int argc, char** argv) {
         });
 
     LoadedModule m{};
-    std::string rpx = config::game_dir + "/code/cking.rpx";
+    std::string rpx = config::game_dir + "/code/Zelda.rpx";
     if (!load_rpx(rpx, m)) fatal("cannot load %s", rpx.c_str());
     if (m.entry != g_recomp_entry_point) fatal("%s does not match the recompiled code", rpx.c_str());
     LOG("[boot] loaded %s: entry %08X sda %08X sda2 %08X data end %08X", rpx.c_str(), m.entry, m.sda_base, m.sda2_base,
@@ -367,7 +367,7 @@ int main(int argc, char** argv) {
 
     uint32_t argv_arr = mem::runtime_alloc(16);
     uint32_t arg0 = mem::runtime_alloc(16);
-    mem::write_cstr(arg0, "cking.rpx", 16);
+    mem::write_cstr(arg0, "Zelda.rpx", 16);
     st32(argv_arr, arg0);
     // the game runs on its own threads; the process main thread belongs to the window system
     render::init();

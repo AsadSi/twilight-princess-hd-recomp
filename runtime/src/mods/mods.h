@@ -1,14 +1,9 @@
-// Optional gameplay mods (Gameplay menu). All off by default; each can be switched live.
-//   camera.cpp  direct right-stick camera, mouse camera, first person on R3 / mouse wheel
-//   mouse.mm    mouse capture in the game window (macOS events)
-//   turbo.cpp   quick doors and fast scene changes (extra logic steps while they run)
-//   cheats.cpp  items, sword/shield, stats, infinite health/magic/ammo, songs, Triforce, dungeon items
+// Gameplay mod switches (Gameplay menu, mod manager, mod packages). Their implementations were Wind
+// Waker hooks (camera.cpp, mouse.mm, turbo.cpp, cheats.cpp, climb.cpp in git history before the TP HD
+// fork), so for TP HD the switches are kept but do nothing yet.
 // Test/start-up switches: WWHD_MOD_<NAME>=1 (see mods.cpp).
 #pragma once
 #include <cstdint>
-
-struct Cpu;
-namespace input { struct PadState; }
 
 namespace mods {
 
@@ -27,36 +22,6 @@ bool quick_doors();
 void set_quick_doors(bool on);
 bool fast_scenes();
 void set_fast_scenes(bool on);
-
-// ---- input (input.mm) ----
-// called at the end of input::read(): synthetic stick and buttons (mouse camera, R3 pulses)
-void filter_pad(input::PadState& s);
-// a key went down in the game window (before the game's own mapping); true = consumed
-bool host_key_down(uint16_t code);
-
-// ---- mouse (mouse.mm -> camera.cpp) ----
-void mouse_add(float dx, float dy);  // points moved while captured (dy > 0 = down)
-void mouse_wheel(float dy);          // wheel / scroll (dy > 0 = forward)
-void mouse_button(int button, bool down);  // 0 left, 1 right
-bool mouse_captured();
-void mouse_init(void* tv_window);  // NSWindow* of the TV picture (menu.mm, main thread)
-void mouse_release();  // mouse.mm: release the pointer (also called when the mod is switched off)
-
-// ---- logic (interp.cpp: fpcEx_Handler) ----
-// after a normal logic step: runs extra steps while a door event or a scene change is in progress
-void after_execute(Cpu* c, uint32_t execute_fn);
-
-// ---- cheats (cheats.cpp): one-shot save data edits, applied at the top of the next frame ----
-enum Cheat {
-    kCheatItems = 1, kCheatSword = 2, kCheatStats = 4,
-    // story progress (can change or break story events)
-    kCheatSongs = 8, kCheatTriforce = 16, kCheatDungeon = 32, kCheatKey = 64,
-};
-void request_cheat(int which);  // any thread
-enum Infinite { kInfHealth = 1, kInfMagic = 2, kInfAmmo = 4 };
-bool infinite(int which);
-void set_infinite(int which, bool on);
-void cheats_service();          // game main thread, frame start (interp.cpp)
 
 // shared helpers (mods.cpp)
 uint64_t step();    // full logic steps so far (interp::logic_steps)

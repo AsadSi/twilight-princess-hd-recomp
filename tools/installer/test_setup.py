@@ -61,21 +61,21 @@ class Paths(unittest.TestCase):
             os.makedirs(os.path.join(d, "code"))
             os.makedirs(os.path.join(d, "content"))
             os.makedirs(os.path.join(d, "meta"))
-            open(os.path.join(d, "code", "cking.rpx"), "wb").close()
+            open(os.path.join(d, "code", "Zelda.rpx"), "wb").close()
             with open(os.path.join(d, "meta", "meta.xml"), "w") as f:
-                f.write('<menu><title_id type="hexBinary" length="8">0005000010143500</title_id></menu>')
+                f.write('<menu><title_id type="hexBinary" length="8">000500001019E500</title_id></menu>')
             self.assertTrue(setup.valid_game_folder(d))
-            self.assertEqual(setup.game_folder_title(d), "0005000010143500")
+            self.assertEqual(setup.game_folder_title(d), "000500001019e500")
 
 
 class Titles(unittest.TestCase):
     def test_usa_ok(self):
-        setup.check_title("0005000010143500")
+        setup.check_title("000500001019e500")
 
-    def test_other_regions(self):
-        with self.assertRaisesRegex(setup.SetupError, "Europe"):
-            setup.check_title("0005000010143600")
-        with self.assertRaisesRegex(setup.SetupError, "not The Wind Waker HD"):
+    def test_other_titles(self):
+        with self.assertRaisesRegex(setup.SetupError, "not Twilight Princess HD"):
+            setup.check_title("0005000010143500")  # The Wind Waker HD
+        with self.assertRaisesRegex(setup.SetupError, "not Twilight Princess HD"):
             setup.check_title("000500001010ec00")
 
 
@@ -84,9 +84,9 @@ def _title(tid, version, files=10, size=1000):
 
 
 class ArchiveTitles(unittest.TestCase):
-    """Which title of a Cemu archive (.wua) is used (info as wwhd-extract --title 0005000010143500 info prints it)."""
+    """Which title of a Cemu archive (.wua) is used (info as wwhd-extract --title 000500001019e500 info prints it)."""
 
-    BASE, UPDATE = _title("0005000010143500", 0), _title("0005000e10143500", 16)
+    BASE, UPDATE = _title("000500001019e500", 81), _title("0005000e1019e500", 16)
 
     def info(self, titles, selected=None):
         i = {"format": "wua", "titles": titles}
@@ -96,38 +96,36 @@ class ArchiveTitles(unittest.TestCase):
         return i
 
     def test_base_only(self):
-        self.assertEqual(setup.archive_choice(self.info([self.BASE], self.BASE)), ("0005000010143500_v0", []))
+        self.assertEqual(setup.archive_choice(self.info([self.BASE], self.BASE)), ("000500001019e500_v81", []))
 
     def test_update_not_used(self):
-        folder, notes = setup.archive_choice(self.info([self.UPDATE, self.BASE, _title("0005000c10143500", 3)], self.BASE))
-        self.assertEqual(folder, "0005000010143500_v0")
+        folder, notes = setup.archive_choice(self.info([self.UPDATE, self.BASE, _title("0005000c1019e500", 3)], self.BASE))
+        self.assertEqual(folder, "000500001019e500_v81")
         self.assertEqual(len(notes), 2)
-        self.assertIn("the update for The Wind Waker HD (USA), version 16", notes[0])
-        self.assertIn("version 0", notes[0])
+        self.assertIn("the update for Twilight Princess HD (USA), version 16", notes[0])
+        self.assertIn("version 81", notes[0])
         self.assertIn("downloadable content", notes[1])
 
     def test_update_without_game(self):
         with self.assertRaisesRegex(setup.SetupError, "only the update"):
             setup.archive_choice(self.info([self.UPDATE]))
 
-    def test_other_region(self):
-        with self.assertRaisesRegex(setup.SetupError, "archive contains the Europe version"):
-            setup.archive_choice(self.info([_title("0005000010143600", 0), _title("0005000e10143600", 16)]))
-
     def test_other_game(self):
-        with self.assertRaisesRegex(setup.SetupError, "does not contain The Wind Waker HD.*title 00050000-1010EC00"):
+        with self.assertRaisesRegex(setup.SetupError, "does not contain Twilight Princess HD.*title 00050000-10143500"):
+            setup.archive_choice(self.info([_title("0005000010143500", 0), _title("0005000e10143500", 16)]))
+        with self.assertRaisesRegex(setup.SetupError, "does not contain Twilight Princess HD.*title 00050000-1010EC00"):
             setup.archive_choice(self.info([_title("000500001010ec00", 0)]))
         with self.assertRaisesRegex(setup.SetupError, "no Wii U titles"):
             setup.archive_choice(self.info([]))
 
     def test_other_version(self):
-        v2 = _title("0005000010143500", 2)
-        with self.assertRaisesRegex(setup.SetupError, "version 2.*built for version 0"):
+        v2 = _title("000500001019e500", 2)
+        with self.assertRaisesRegex(setup.SetupError, "version 2.*built for version 81"):
             setup.archive_choice(self.info([v2], v2))
 
     def test_title_desc(self):
-        self.assertEqual(setup.title_desc("0005000010143500", 0), "The Wind Waker HD (USA), version 0")
-        self.assertEqual(setup.title_desc("0005000E10143400"), "the update for The Wind Waker HD (Japan)")
+        self.assertEqual(setup.title_desc("000500001019e500", 81), "Twilight Princess HD (USA), version 81")
+        self.assertEqual(setup.title_desc("0005000E1019E500"), "the update for Twilight Princess HD (USA)")
 
     def test_plan(self):
         self.assertEqual(setup.plan_steps("archive"), ["archive", "compiler", "extract", "translate", "compile", "app"])
@@ -135,11 +133,11 @@ class ArchiveTitles(unittest.TestCase):
 
 
 class GameVersion(unittest.TestCase):
-    """code/cking.rpx must be the file the port is built for (USA v0); synthetic files, made-up bytes."""
+    """code/Zelda.rpx must be the file the port is built for (USA v81); synthetic files, made-up bytes."""
 
-    def make(self, d, rpx=b"made-up rpx", app_tid="0005000010143500", app_ver="0000"):
+    def make(self, d, rpx=b"made-up rpx", app_tid="000500001019E500", app_ver="0051"):
         os.makedirs(os.path.join(d, "code"), exist_ok=True)
-        with open(os.path.join(d, "code", "cking.rpx"), "wb") as f:
+        with open(os.path.join(d, "code", "Zelda.rpx"), "wb") as f:
             f.write(rpx)
         with open(os.path.join(d, "code", "app.xml"), "w") as f:
             f.write('<app><title_id type="hexBinary" length="8">%s</title_id>\n'
@@ -159,11 +157,11 @@ class GameVersion(unittest.TestCase):
 
     def test_update_merged_in(self):
         with tempfile.TemporaryDirectory() as d:
-            self.make(d, rpx=b"other code", app_ver="0010")
-            with self.assertRaisesRegex(setup.SetupError, "version 16 of the game.*update merged in.*"
-                                                          "00050000-10143500, version 0.*Use the game's own files"):
+            self.make(d, rpx=b"other code", app_ver="0060")
+            with self.assertRaisesRegex(setup.SetupError, "version 96 of the game.*update merged in.*"
+                                                          "00050000-1019E500, version 81.*Use the game's own files"):
                 setup.check_game_version(d)
-            self.make(d, rpx=b"other code", app_tid="0005000E10143500", app_ver="0000")
+            self.make(d, rpx=b"other code", app_tid="0005000E1019E500", app_ver="0000")
             with self.assertRaisesRegex(setup.SetupError, "from the update.*merged in"):
                 setup.check_game_version(d)
 
@@ -176,10 +174,10 @@ class GameVersion(unittest.TestCase):
             with self.assertRaisesRegex(setup.SetupError, "not the expected file"):
                 setup.check_game_version(d)
 
-    def test_other_region(self):
+    def test_other_game(self):
         with tempfile.TemporaryDirectory() as d:
-            self.make(d, rpx=b"eu", app_tid="0005000010143600")
-            with self.assertRaisesRegex(setup.SetupError, "The Wind Waker HD \\(Europe\\)"):
+            self.make(d, rpx=b"ww", app_tid="0005000010143500")
+            with self.assertRaisesRegex(setup.SetupError, "from title 00050000-10143500"):
                 setup.check_game_version(d)
 
     def test_missing(self):
@@ -328,7 +326,7 @@ class LanguageSources(unittest.TestCase):
         self.assertEqual(setup.language_source_region("0005000010143600"), "EU")
         self.assertEqual(setup.language_source_region("0005000010143400"), "JP")
         with self.assertRaisesRegex(setup.SetupError, "USA game"):
-            setup.language_source_region("0005000010143500")
+            setup.language_source_region("000500001019e500")
         with self.assertRaisesRegex(setup.SetupError, "update"):
             setup.language_source_region("0005000e10143600")
         with self.assertRaisesRegex(setup.SetupError, "not the European or Japanese"):
@@ -389,7 +387,7 @@ class LanguageSources(unittest.TestCase):
             data = os.path.join(d, "data")
             os.makedirs(data)
             usa = os.path.join(d, "usa")
-            _game_folder(usa, "0005000010143500", ["permanent_2d_UsEnglish.pack"])
+            _game_folder(usa, "000500001019e500", ["permanent_2d_UsEnglish.pack"])
             with self.assertRaisesRegex(setup.SetupError, "USA game"):
                 setup.add_language_source(("folder", usa), data)
             empty = os.path.join(d, "empty")
@@ -416,7 +414,7 @@ class LanguageSources(unittest.TestCase):
         def fake_archive_info(path, title=setup.SUPPORTED_TITLE):
             self.assertIsNone(title)
             return "wrong_title", "", {"titles": [
-                {"id": "0005000010143500", "version": 0, "folder": "0005000010143500_v0", "files": 1, "bytes": 1},
+                {"id": "000500001019e500", "version": 81, "folder": "000500001019e500_v81", "files": 1, "bytes": 1},
                 {"id": "0005000010143600", "version": 0, "folder": "0005000010143600_v0", "files": 1, "bytes": 1},
                 {"id": "0005000010143400", "version": 0, "folder": "0005000010143400_v0", "files": 1, "bytes": 1}]}
         saved = setup.run_extract, setup.archive_info
@@ -429,7 +427,7 @@ class LanguageSources(unittest.TestCase):
                 self.assertEqual(calls[-1], (os.path.join(d, "eu.wux"), None, setup.LANGUAGE_SOURCE_FILES))
                 with self.assertRaisesRegex(setup.SetupError, "USA game"):
                     setup.add_language_source(("image", "usa.wux"), d, keys=setup.Keys(),
-                                              info={"title_id": "0005000010143500"})
+                                              info={"title_id": "000500001019e500"})
                 ms = setup.add_language_source(("archive", os.path.join(d, "both.wua")), d)
                 self.assertEqual([m["region"] for m in ms], ["EU", "JP"])  # the USA title is left alone
                 self.assertEqual([c[1] for c in calls[-2:]], ["0005000010143600_v0", "0005000010143400_v0"])

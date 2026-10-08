@@ -51,7 +51,6 @@ bool mouse_camera() { return g_mouse.load(std::memory_order_relaxed); }
 void set_mouse_camera(bool on) {
     g_mouse = on;
     note("mouse camera", on);
-    if (!on) mouse_release();
 }
 float mouse_sensitivity() { return g_sens.load(std::memory_order_relaxed); }
 void set_mouse_sensitivity(float s) {

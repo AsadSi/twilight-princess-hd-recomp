@@ -1,7 +1,6 @@
 #include "manager.h"
 #include "packages.h"
 #include "mods.h"
-#include "climb.h"
 #include "../overlay/hostui.h"
 #include <cstdlib>
 #include <cmath>
@@ -19,9 +18,6 @@ const Entry catalogue[] = {
     {"first-person", "First-person shortcut", "Camera",
      "Enter first person with R3 or the mouse wheel.",
      "WWHD_MOD_FIRST_PERSON", first_person_wheel, set_first_person_wheel},
-    {"wall-climb", "Climb any wall", "Gameplay",
-     "Grab and climb walls using a stamina wheel. A or B lets go.",
-     "WWHD_CLIMB", climb_enabled, set_climb_enabled},
     {"quick-doors", "Quick doors", "Gameplay",
      "Run door-opening and closing events at four times their normal speed.",
      "WWHD_MOD_QUICK_DOORS", quick_doors, set_quick_doors},

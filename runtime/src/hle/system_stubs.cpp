@@ -6,7 +6,7 @@
 #include "../rumble.h"
 #include "../motion/motion.h"
 
-namespace interp { bool repeat_input(); bool fresh_sticks(); void trace_read(const char*); uint64_t logic_steps(); }
+namespace interp { uint64_t logic_steps(); }
 
 // nn::Result: bit 31 set = failure
 static constexpr uint32_t kResultOk = 0;
@@ -47,16 +47,6 @@ HLE(nn_olv, Initialize__Q2_2nn3olvFPCQ3_2nn3olv15InitializeParam) { ret(c, kResu
 HLE(nn_olv, IsInitialized__Q2_2nn3olvFv) { ret(c, 0); }
 HLE(nn_olv, Finalize__Q2_2nn3olvFv) { ret(c, kResultOk); }
 
-// OliveOperationMgrThread (Miiverse requests: Tingle Bottles, posts, Yeahs) runs a state machine that
-// re-posts itself to its own message queue until Miiverse answers, which it never does here: about
-// 100k steps a second, a whole host core (on the console it only soaks up idle time on its core).
-// A 1 ms nap per step (releasing the guest core) keeps it to ~1000 steps a second.
-extern "C" void f_0203DEEC_orig(Cpu* c);
-extern "C" void hook_0203DEEC(Cpu* c) {
-    threads::park_sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(1));
-    f_0203DEEC_orig(c);
-}
-
 // ---- sockets / curl
 HLE(nsysnet, socket_lib_init) { ret(c, 0); }
 HLE(nsysnet, socket_lib_finish) { ret(c, 0); }
@@ -96,16 +86,8 @@ HLE(vpad, VPADRead) {
         return;
     }
     static uint32_t last_hold = 0;
-    interp::trace_read("VPAD");
-    // frame interpolation: the read after a logic pass repeats the last sample (interp.cpp)
-    static input::PadState last_p;
-    const bool repeat = interp::repeat_input();
-    input::PadState p = repeat ? last_p : crashrec::read(0);  // live input, recorded/replayed by crash recovery
-    if (repeat && interp::fresh_sticks()) {  // true 60: sticks every pass, buttons on full passes
-        input::PadState f = input::read();
-        p.lx = f.lx; p.ly = f.ly; p.rx = f.rx; p.ry = f.ry;
-    }
-    last_p = p;
+    const bool repeat = false;  // (frame interpolation repeated samples; TP HD runs at 30 fps)
+    input::PadState p = crashrec::read(0);  // live input, recorded/replayed by crash recovery
     if (input::pro_controller()) {  // GamePad on the table: screen and touch only
         p.buttons = 0;
         p.lx = p.ly = p.rx = p.ry = 0;

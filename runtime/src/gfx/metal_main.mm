@@ -13,7 +13,6 @@
 #include "input.h"
 
 // gameplay mods (runtime/src/mods): HUD drawn into the TV image
-namespace mods { void draw_overlay(id<MTLCommandBuffer> cmd, id<MTLTexture> tex); }
 
 namespace gfx {
 Renderer R;
@@ -207,7 +206,6 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
             sourceSize:MTLSizeMake(w, h, 1) toTexture:scr.tex destinationSlice:0 destinationLevel:0
      destinationOrigin:MTLOriginMake(0, 0, 0)];
     [b endEncoding];
-    if (target & 1) ::mods::draw_overlay(command_buffer(), scr.tex);  // HUD of gameplay mods (stamina wheel)
 }
 
 // debug: WWHD_DUMP_FRAMES=100,300 writes the TV image of those frames to frame_<n>.png

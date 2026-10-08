@@ -19,8 +19,7 @@ using Glyphs = std::unordered_set<uint32_t>;  // code points (the font maps UTF-
 std::shared_ptr<const Glyphs> name_glyphs(int language);
 
 // The characters of the message font (CKingMsg.bffnt) in a 2D language pack file
-// (permanent_2d_*.pack): null with the reason in `why` when it can't be read. Also used by the
-// right-to-left text support (rtl_text_hooks.cpp) on the pack the game actually opened.
+// (permanent_2d_*.pack): null with the reason in `why` when it can't be read.
 std::shared_ptr<const Glyphs> pack_font(const std::string& pack_path, std::string* why);
 
 // The code points a BFFNT (Wii U / 3DS font, either byte order) maps, from its CMAP blocks; false if
