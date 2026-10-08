@@ -489,6 +489,7 @@ static Shader* get_shader_uncached(const uint32_t* regs, bool vertex, LatteFetch
     double t0 = now_ms();
     LatteShader_UpdatePSInputs((uint32*)regs);
     LatteDecompilerOptions opt;
+    opt.strictMul = true;  // Cemu's default (accurate shader mul): MUL/MULADD give 0 for 0 * inf, as on the GPU
     if (!vertex) opt.areaSampledTextures = gfx::area_sample::units_for_pixel_shader(mem::ptr(addr), size);
     LatteDecompilerOutput_t out{};
     if (vertex)

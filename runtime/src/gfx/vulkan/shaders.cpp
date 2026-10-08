@@ -478,6 +478,7 @@ bool decompile(Shader& shader, const uint32_t* regs, bool vertex, LatteFetchShad
     if (vertex && !fetch) { shader.error = "vertex shader has no fetch program"; return false; }
     LatteShader_UpdatePSInputs(const_cast<uint32_t*>(regs));
     LatteDecompilerOptions options;
+    options.strictMul = true;  // Cemu's default (accurate shader mul): MUL/MULADD give 0 for 0 * inf, as on the GPU
     uint64_t packBase=0;
     if(mods::cemu::has_shaders()) {
         packBase=cemu_pack_hash::base(ppc_ptr(address),size,regs,vertex,fetch);
