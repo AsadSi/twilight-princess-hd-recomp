@@ -1082,11 +1082,17 @@ void save_gyro(const motion::Settings& g) {
 void load_gyro() {
     motion::Settings g;
     std::string v;
+    bool saved = false, axis = false;
     for (const char* k : motion::kKeys)
-        if (hostui::get(k, v)) motion::from_kv(g, k, v);
+        if (hostui::get(k, v)) {
+            motion::from_kv(g, k, v);
+            saved = true;
+            axis |= !strcmp(k, "gyro.axis");
+        }
+    if (saved && !axis) motion::upgrade_from_first_release(g);
     motion::set_settings(g);
 }
-// the Gyro window (Controls tab > Gyro...): source, sensitivity, invert, recenter, Cemuhook server
+// the Gyro window (Controls tab > Gyro...): source, axis, sensitivity, invert, recalibrate, Cemuhook server
 void gyro_window(bool& open) {
     const char* title = "Gyro aiming##gyro";
     if (open) { ImGui::OpenPopup(title); open = false; }
@@ -1096,24 +1102,41 @@ void gyro_window(bool& open) {
     bool v;
     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34);
     note("On the Wii U you aim in first person (bow, hookshot, boomerang, telescope, Picto Box, grappling hook) by "
-         "moving the GamePad. The game's own Options > Gyro switch still decides whether it uses the motion.");
+         "moving the GamePad. This works with the GamePad and the Pro Controller choice alike. The game's own "
+         "Options > Gyro switch still decides whether it uses the motion, and it ignores the motion while the right "
+         "stick is pushed.");
     for (int i = 0; i < motion::kSourceCount; i++)
         if (radio(motion::source_label(i), g.source == i)) g.source = i;
     if (motion::env_override()) note("WWHD_GYRO=%s overrides the saved source.", getenv("WWHD_GYRO"));
     if (g.source == motion::kOff && motion::gyro_controllers() > 0) note("A controller with a gyro is connected: choose Controller gyro to use it.");
+    if (g.source == motion::kController || g.source == motion::kCemuhook) {
+        ImGui::TextUnformatted("Turn left/right by");
+        for (int a = 0; a < motion::kAxisModeCount; a++) {
+            ImGui::SameLine();
+            if (radio(motion::axis_label(a), g.tuning.axis == a)) g.tuning.axis = a;
+        }
+        help("Player space: turning the controller left or right about the real vertical, however you hold it "
+             "(recommended). Yaw: turning it about its own vertical axis (as if it lay flat). Roll: tilting it to "
+             "the side like a steering wheel. Tilting its top up or down always looks up or down.");
+    }
+    const float lo = motion::Tuning::kMinSensitivity, hi = motion::Tuning::kMaxSensitivity;
     ImGui::SetNextItemWidth(220);
-    ImGui::SliderFloat("Sensitivity left/right", &g.tuning.sensitivity_x, 0.1f, 5.0f, "%.2fx");
+    ImGui::SliderFloat("Sensitivity left/right", &g.tuning.sensitivity_x, lo, hi, "%.2fx", ImGuiSliderFlags_Logarithmic);
     ImGui::SameLine(0, 16);
     if (check("Invert##x", g.tuning.invert_x, &v)) g.tuning.invert_x = v;
     ImGui::SetNextItemWidth(220);
-    ImGui::SliderFloat("Sensitivity up/down", &g.tuning.sensitivity_y, 0.1f, 5.0f, "%.2fx");
+    ImGui::SliderFloat("Sensitivity up/down", &g.tuning.sensitivity_y, lo, hi, "%.2fx", ImGuiSliderFlags_Logarithmic);
     ImGui::SameLine(0, 16);
     if (check("Invert##y", g.tuning.invert_y, &v)) g.tuning.invert_y = v;
+    if (ImGui::Button("Default sensitivity"))
+        g.tuning.sensitivity_x = g.tuning.sensitivity_y = motion::Tuning::kDefaultSensitivity;
+    help("1.0 turns the view as far as moving a real Wii U GamePad by the same angle would (about twice the "
+         "controller's turn); the default 0.5 lets the view follow the controller about one to one.");
     if (g.source == motion::kMouse) {
         ImGui::SetNextItemWidth(220);
         ImGui::SliderFloat("Mouse: degrees per point", &g.mouse_degrees, 0.01f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        help("How far one point of mouse movement turns the GamePad. With Steam Input's gyro to mouse, tune this and "
-             "Steam's own sensitivity together.");
+        help("How far one point of mouse movement turns the GamePad (before the sensitivity above). With Steam "
+             "Input's gyro to mouse, tune this and Steam's own sensitivity together.");
         note("While the game aims, the pointer is captured and the mouse turns the GamePad (the mouse camera mod "
              "leaves it alone then).");
     }
@@ -1133,17 +1156,17 @@ void gyro_window(bool& open) {
         if (ImGui::SliderInt("Controller slot", &slot, 1, 4)) g.dsu_slot = slot - 1;
         note("A Cemuhook (DSU) server: DS4Windows, BetterJoy, SteamDeckGyroDSU or a phone app; default 127.0.0.1, port 26760.");
     }
-    // recenter: a controller input and/or a key
+    // recalibrate: a controller input and/or a key
     const char* pad_name = g.recenter_pad > 0 ? input_map::pad_label(g.recenter_pad) : "None";
     ImGui::SetNextItemWidth(220);
-    if (ImGui::BeginCombo("Recenter: controller", pad_name)) {
+    if (ImGui::BeginCombo("Recalibrate: controller", pad_name)) {
         for (int p = 0; p < input_map::kPadCount; p++)
             if (ImGui::Selectable(p ? input_map::pad_label(p) : "None", g.recenter_pad == p)) g.recenter_pad = p;
         ImGui::EndCombo();
     }
     std::string key_name = g.recenter_key >= 0 ? input_map::key_label(g.recenter_key) : "None";
     ImGui::SetNextItemWidth(220);
-    if (ImGui::BeginCombo("Recenter: key", key_name.c_str())) {
+    if (ImGui::BeginCombo("Recalibrate: key", key_name.c_str())) {
         if (ImGui::Selectable("None", g.recenter_key < 0)) g.recenter_key = -1;
         for (int k = 0; k < 256; k++) {
             std::string id = input_map::key_id(k);
@@ -1152,8 +1175,10 @@ void gyro_window(bool& open) {
         }
         ImGui::EndCombo();
     }
-    help("The button or key also reaches the game if the controls use it; pick a free one.");
-    if (ImGui::Button("Recenter now")) motion::recenter();
+    help("If the view drifts while the controller rests, recalibrate and put the controller down for a second: "
+         "the gyro's offset is learnt anew. The button or key also reaches the game if the controls use it; pick "
+         "a free one.");
+    if (ImGui::Button("Recalibrate now")) motion::recalibrate();
     ImGui::SameLine();
     ImGui::TextUnformatted(motion::status().c_str());
     ImGui::PopTextWrapPos();

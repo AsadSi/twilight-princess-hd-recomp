@@ -22,6 +22,17 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
   removed itself while a door opened was freed before its last drawn frame was done with. Deleting
   now keeps its normal pace; doors are as quick as before.
+- **Gyro aiming fixes** (issues #45 and #71): a new **Turn left/right by** setting (settings overlay →
+  **Controls** → **Gyro…**) with the usual gyro conventions: **Player space** (default: turn the controller
+  left or right about the real vertical, however you hold it), **Yaw** (its own vertical axis) or **Roll**
+  (tilt it like a steering wheel). Before, rolling the controller turned the view and turning it depended
+  on how you held it. The default sensitivity is lower (0.5x, about one to one with your controller; the
+  range now goes down to 0.05x), and settings that still have the old default start at the new one.
+  Gyro aiming now also works in **Pro Controller** mode. For reports that the gyro stops after a while:
+  the port no longer stops when a controller's sensor timestamps stall, switches to the controller you
+  move when several are connected, turns a controller's sensors on again when they fall silent, and logs
+  `[gyro]` lines that say why motion stopped (including a drifting right stick, which makes the game
+  ignore the gyro). "Recenter" is now **Recalibrate** (learns the gyro's offset anew).
 
 ### v0.2.7
 
@@ -704,9 +715,10 @@ remembered (`WWHD_RUMBLE=0` starts with it off). The macOS app does not drive co
 game turns the camera when the GamePad moves. The port turns its virtual GamePad with a host
 controller's gyro (SDL3; on the macOS app through GameController.framework), a Cemuhook (DSU) server
 or the mouse (Steam Input "gyro to mouse": while the game aims, the pointer is captured and the mouse
-turns the GamePad). Sensitivity and invert per axis, a recenter button or key, and the Cemuhook
-server, port and slot are saved; `WWHD_GYRO=off|controller|cemuhook|mouse` overrides the source at
-start. Details and what to test: `docs/gyro.md`.
+turns the GamePad); it works in GamePad and Pro Controller mode. The axis mode (player space, yaw or
+roll), sensitivity and invert per axis, a recalibrate button or key, and the Cemuhook server, port and
+slot are saved; `WWHD_GYRO=off|controller|cemuhook|mouse` overrides the source at start. Details,
+troubleshooting and what to test: `docs/gyro.md`.
 
 The **Display** menu: full screen for the TV window (**⌘F**, **⌃⌘F** or the green button; the
 pointer hides after 2 s without movement), picture scaling (smooth, sharp, or integer scale) and
