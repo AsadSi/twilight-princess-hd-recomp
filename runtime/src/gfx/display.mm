@@ -388,7 +388,7 @@ static void create_windows() {
     [NSApp setActivationPolicy:test ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
     load_settings();
     load_options();
-    NSWindow* tv = make_window(0, @"The Legend of Zelda: The Wind Waker HD (recompiled)",
+    NSWindow* tv = make_window(0, @"Twilight Princess HD: Recompiled",
                                [[WWTvView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 720)], 1280, 720, NSMakePoint(0, 0));
     g_tv_window = tv;
     install_menu(tv);

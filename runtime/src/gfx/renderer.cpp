@@ -163,7 +163,7 @@ void init() {
         const std::string text = std::string("The ") + api_name(b->api) + " renderer could not start.\n\n" + g_reason;
         const char* hidden = getenv("WWHD_HIDDEN_WINDOWS");  // test runs: nothing pops up
         if (!hidden || !*hidden || !strcmp(hidden, "0"))
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wind Waker HD", text.c_str(), nullptr);
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Twilight Princess HD", text.c_str(), nullptr);
         fflush(stderr);
         _Exit(1);
 #else

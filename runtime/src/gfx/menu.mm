@@ -49,7 +49,7 @@ namespace gfx { bool menu_hotkey(uint16_t code); NSMenuItem* controls_menu_item(
 
 static NSWindow* g_tv;
 static double g_fps = 0;  // frames presented per second, measured over the last half second
-static NSString* const kTitle = @"The Legend of Zelda: The Wind Waker HD (recompiled)";
+static NSString* const kTitle = @"Twilight Princess HD: Recompiled";
 
 // Graphics options are kept across launches (macOS user defaults, domain "wwhd"); an option's WWHD_*
 // environment variable overrides the saved value for that run and is not saved. Scripted test runs
@@ -357,7 +357,7 @@ void install_menu(NSWindow* tv) {
     settings.target = g_target;
     settings.toolTip = @"In-game settings overlay over the picture (F1, or \u2318, in the game window)";
     [app addItem:[NSMenuItem separatorItem]];
-    [app addItemWithTitle:@"Quit Wind Waker HD" action:@selector(terminate:) keyEquivalent:@"q"];
+    [app addItemWithTitle:@"Quit Twilight Princess HD" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = app;
 
     NSMenuItem* gfxItem = [bar addItemWithTitle:@"Graphics" action:nil keyEquivalent:@""];

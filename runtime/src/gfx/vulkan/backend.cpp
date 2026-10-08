@@ -2080,7 +2080,7 @@ void init() {
   const SDL_WindowFlags windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
                                       (hidden_windows() ? SDL_WINDOW_HIDDEN : 0);
 #endif
-  R.tv.window = SDL_CreateWindow("Wind Waker HD — Vulkan", 1280, 720, windowFlags);
+  R.tv.window = SDL_CreateWindow("Twilight Princess HD — Vulkan", 1280, 720, windowFlags);
   if (!R.tv.window)
     throw std::runtime_error(SDL_GetError());
 #ifdef __ANDROID__
@@ -2442,7 +2442,7 @@ void run_main_loop() {
       char title[160];
       int mode = interp::mode();
       std::snprintf(title, sizeof title,
-          "The Legend of Zelda: The Wind Waker HD (Vulkan) — %.0f fps%s%s · %gx%s",
+          "Twilight Princess HD: Recompiled (Vulkan) — %.0f fps%s%s · %gx%s",
           double(frames - titleFrames) / elapsed,
           mode ? " · " : "", mode ? interp::mode_name() : "",
           double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");

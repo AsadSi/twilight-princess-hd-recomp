@@ -57,7 +57,7 @@ void save_locked() {
     std::string tmp = p + ".tmp";
     {
         std::ofstream out(tmp, std::ios::trunc);
-        out << "# Wind Waker HD settings (settings overlay, F1)\n";
+        out << "# Twilight Princess HD settings (settings overlay, F1)\n";
         for (auto& [k, v] : g_values) out << k << '=' << v << '\n';
         if (!out) return;
     }
