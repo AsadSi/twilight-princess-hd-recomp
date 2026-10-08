@@ -12,6 +12,11 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ### Next update
 
+- **Faster on Linux and Steam Deck (Vulkan):** the guest buffer cache is now on by default on desktop
+  Linux, as on macOS. It keeps unchanged vertex, index and uniform data on the GPU instead of copying it
+  every frame, which removed a 20 fps lock in busy views on an RK3588 board (issue #50). If you see broken
+  or flickering geometry, start with `WWHD_VK_BUFFER_CACHE=0` and please report it. Windows and Android
+  stay opt-in (`WWHD_VK_BUFFER_CACHE=1`).
 - **Fixed: "Quick doors" could crash the game going through a door** (issue #61, "PROGRAM HALT
   J3DPacket.cpp:157"; reported in Tingle's jail on Windfall). The extra game steps that make doors
   quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
