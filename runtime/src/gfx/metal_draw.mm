@@ -1755,7 +1755,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         bool dx9 = regs[REGADDR::SQ_CONFIG] & 1;
         LOG("[dbg] dx9consts=%d cull=%08X remapped entries reg=%zu bufgroups=%zu idx %u@%08X first idx %u %u %u", dx9,
             regs[REGADDR::PA_SU_SC_MODE_CNTL], vs->dec->list_remappedUniformEntries_register.size(),
-            vs->dec->list_remappedUniformEntries_bufferGroups.size(), indexType, indexAddr, ld16(indexAddr), ld16(indexAddr + 2), ld16(indexAddr + 4));
+            vs->dec->list_remappedUniformEntries_bufferGroups.size(), indexType, indexAddr, indexAddr ? ld16(indexAddr) : 0, indexAddr ? ld16(indexAddr + 2) : 0, indexAddr ? ld16(indexAddr + 4) : 0);
         for (auto& g : vs->dec->list_remappedUniformEntries_bufferGroups) {
             uint32_t addr = regs[mmSQ_VTX_UNIFORM_BLOCK_START + g.kcacheBankIdOffset / 4];
             for (auto& e : g.entries) {

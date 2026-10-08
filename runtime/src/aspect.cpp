@@ -7,18 +7,21 @@
 // HUD to its edges.
 #include "aspect.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "runtime.h"
 
 namespace aspect {
+constexpr int kWideW = 808;  // l_tvSize's 16:9 width
 namespace {
 constexpr float kBase = 16.0f / 9.0f;
 constexpr uint32_t kTvSize = 0x100A4CE4, kSetTvSize = 0x02AEC704, kOnWide2D = 0x02A387B4;
-constexpr int kWideW = 808, kWideH = 448;
+constexpr int kWideH = 448;
 int env_mode() {
     const char* e = getenv("WWHD_ASPECT");
     if (!e) return kOriginal;
@@ -84,3 +87,68 @@ void service(Cpu* c) {
 }
 
 }  // namespace aspect
+
+// J2DPane::draw (02B34334). TP HD stretches each 2D screen, laid out in the Wii's 608 units, to the screen's width
+// (a root pane's x by ortho width / 608 about x = 304) and undoes it for panes whose user tag is 'n_43'. What it
+// draws comes out right only at 16:9 (808 units wide), so on a wider screen, while these draw:
+// - stretched text, and the D-pad's labels, are drawn narrow so that 16:9's stretch gives them their shape: their
+//   own x is scaled back to that stretch (808 / width) around their position, and a label keeps its 16:9 offset
+//   from the D-pad;
+// - the HUD's groups (the 'n_43' panes in the meter's n_base: hearts, rupees, the X/Y/A/B cluster, ...) hold their
+//   parts as unstretched offsets from a stretched point, so the parts drift inward.
+// A part keeps its 16:9 distance from the edge it is nearest to (left or right third), or from the center.
+namespace {
+// the x range of a pane's shown pictures and text at 16:9, from its own x there (offsets only; the HUD's parts are
+// unscaled; hidden ones are often parked off screen)
+void content_x(uint32_t p, double x, double& lo, double& hi, int depth = 0) {
+    if (!ld8(p + 0xA8)) return;                                                     // mVisible
+    if (ld32(p + 4) >> 8 != 0x50414E) lo = std::min(lo, x), hi = std::max(hi, x);  // not a plain 'PAN' pane
+    if (depth < 4)
+        for (uint32_t l = ld32(p + 0xD4); l; l = ld32(l + 0xC)) content_x(ld32(l), x + ldf32(ld32(l) + 0x54), lo, hi, depth + 1);
+}
+uint32_t parent_of(uint32_t pane) {
+    const uint32_t list = pane ? ld32(pane + 0xE4) : 0;
+    return list ? ld32(list + 0xC) : 0;
+}
+constexpr uint32_t kN43 = 0x6E5F3433;  // 'n_43': HD undoes the stretch for this pane
+bool unstretched(uint32_t p) {
+    for (; p; p = parent_of(p))
+        if (ld32(p + 20) == kN43) return true;
+    return false;
+}
+bool dpad_group(uint32_t p) { return p && ld64(p + 8) == 0x6A756A695F6EULL; }  // juji_n: the D-pad and its labels
+}  // namespace
+
+extern "C" void f_02B34334_orig(Cpu* c);
+extern "C" void hook_02B34334(Cpu* c) {
+    const uint32_t pane = c->r[3], ctx = c->r[4], parent = parent_of(pane);
+    if (!parent || ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // a root pane, or not a J2DOrthoGraph
+    const double x0 = ldf32(ctx + 0xBC), w = ldf32(ctx + 0xC4) - x0, k = aspect::kWideW / w;
+    const bool label = dpad_group(parent) && ld32(pane + 20) != kN43;  // the D-pad's labels ("Minimap", ...)
+    const bool text = ld32(pane + 4) >> 8 == 0x544258 && !dpad_group(parent_of(parent)) && !unstretched(pane);  // 'TBX'
+    const bool group = ld32(pane + 20) == kN43 && ld64(parent + 8) == 0x6E5F62617365ULL;  // in the meter's n_base
+    if (k > 0.999 || (!text && !label && !group)) return f_02B34334_orig(c);
+    const double s = ldf32(parent + 0x78), g = ldf32(parent + 0x84) + s * ldf32(pane + 0x54);  // its x on screen
+    const double g16 = 304 + ((g - x0) * 608 / w - 304) * aspect::kWideW / 608, half = (w - aspect::kWideW) / 2;
+    auto anchor = [&](double x16) { return x16 < 169.33 ? -half : x16 > 438.67 ? half : 0; };  // 16:9's thirds
+    std::vector<std::pair<uint32_t, uint32_t>> saved;  // (address, word) to put back after the draw
+    auto set = [&](uint32_t a, double v) { saved.push_back({a, ld32(a)}); stf32(a, v); };
+    if (group) {
+        for (uint32_t l = ld32(pane + 0xD4); l; l = ld32(l + 0xC)) {
+            const uint32_t part = ld32(l);
+            double lo = 1e9, hi = -1e9;
+            content_x(part, g16 + ldf32(part + 0x54), lo, hi);  // where the part shows at 16:9 (the group is unscaled)
+            set(part + 0x54, ldf32(part + 0x54) + g16 - g + anchor(lo <= hi ? (lo + hi) / 2 : g16 + ldf32(part + 0x54)));
+        }
+    } else {
+        for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) * k);
+        if (label)  // its 16:9 offset from the D-pad (juj_i_n, unstretched, in the same group)
+            for (uint32_t l = ld32(parent + 0xD4); l; l = ld32(l + 0xC))
+                if (ld64(ld32(l) + 8) == 0x6A756A5F695F6EULL) {
+                    const double d = ldf32(ld32(l) + 0x54);
+                    set(pane + 0x54, d + (ldf32(pane + 0x54) - d) * k);
+                }
+    }
+    f_02B34334_orig(c);
+    for (auto& [a, v] : saved) st32(a, v);
+}
