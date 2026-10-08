@@ -438,7 +438,13 @@ void tab_saves() {
     std::string msg = ss::last_message();
     if (!msg.empty()) note("%s", msg.c_str());
     heading("Save states");
-    note("A save state keeps the whole running game. Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu).");
+    const bool full = ss::full_states();
+    if (full)
+        note("Full save states: the whole running game (large, contain game data: never share them). Shift+F1..F5 save in "
+             "game, F2..F5 load (F1 opens this menu).");
+    else
+        note("A save state keeps your progress and where Link stands (a few KB, no game data). Loading enters that place "
+             "with that progress; enemies and cutscenes start fresh. Shift+F1..F5 save in game, F2..F5 load (F1 opens this menu).");
     if (ImGui::BeginTable("slots", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupColumn("Saved");
@@ -454,6 +460,7 @@ void tab_saves() {
             if (!s.used) ImGui::TextDisabled("empty");
             else {
                 std::string d = s.when + (s.area.empty() ? "" : "  -  " + s.area);
+                if (!s.portable) d += "  (full)";
                 if (!s.compatible) d += "  (incompatible)";
                 ImGui::TextUnformatted(d.c_str());
             }
@@ -473,6 +480,26 @@ void tab_saves() {
         }
         ImGui::EndTable();
     }
+    // bug reports: the portable state and the save file, never a full state
+    static double copiedAt = -10;
+    if (ImGui::Button("Copy save for bug report")) {
+        std::string text = ss::bug_report_text();
+        hostui::post([text] { hostui::set_clipboard(text); });
+        copiedAt = ImGui::GetTime();
+    }
+    if (ImGui::GetTime() - copiedAt < 2.0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Copied");
+    }
+    help("Copies the paths of your newest save state and of your save file (cking.sav): attach both files to the bug "
+         "report. Save a state at the place of the problem first.");
+    note("States folder: %s", ss::states_dir().c_str());
+    bool fs;
+    if (check("Full save states (large, contain game data, don't share) - for debugging", full, &fs, !ss::full_states_forced()))
+        ss::set_full_states(fs);
+    help(ss::full_states_forced() ? "Set by WWHD_FULL_SAVE_STATES or a test variable for this start."
+                                  : "Saves the whole running game instead (about 300 MB per slot), exactly as it is. "
+                                    "These files contain game code and data: never attach them to a bug report.");
     heading("Crash Recovery");
     bool on;
     if (check("Crash Recovery (automatic state every few minutes)", crashrec::enabled(), &on)) crashrec::set_enabled(on);

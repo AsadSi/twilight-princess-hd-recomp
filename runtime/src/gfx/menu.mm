@@ -180,6 +180,7 @@ static void choose_renderer(render::Api a) {
 - (void)save:(NSMenuItem*)item { ss::request_save((int)item.tag); }
 - (void)load:(NSMenuItem*)item { ss::request_load((int)item.tag); }
 - (void)toggleCrashRecovery:(NSMenuItem*)item { crashrec::set_enabled(!crashrec::enabled()); }
+- (void)toggleFullStates:(NSMenuItem*)item { ss::set_full_states(!ss::full_states()); }
 - (void)loadAuto:(NSMenuItem*)item { crashrec::request_load((int)item.tag); }
 - (void)menuNeedsUpdate:(NSMenu*)m {
     [m removeAllItems];
@@ -188,7 +189,8 @@ static void choose_renderer(render::Api a) {
     auto label = [&](int i) -> NSString* {
         const ss::SlotInfo& s = info[i];
         if (!s.used) return @"empty";
-        NSString* d = [NSString stringWithFormat:@"%s%s%s", s.when.c_str(), s.area.empty() ? "" : " · ", s.area.c_str()];
+        NSString* d = [NSString stringWithFormat:@"%s%s%s%s", s.when.c_str(), s.area.empty() ? "" : " · ", s.area.c_str(),
+                                                    s.portable ? "" : " · full"];
         return s.compatible ? d : [d stringByAppendingString:@" (incompatible)"];
     };
     for (int i = 1; i <= ss::kSlots; i++) {
@@ -205,6 +207,15 @@ static void choose_renderer(render::Api a) {
         it.enabled = info[i].used && info[i].compatible;
         it.toolTip = i == 1 ? @"In game: F1 (or \u2318,) opens the settings overlay (Saves)" : [NSString stringWithFormat:@"Shortcut in game: F%d", i];
     }
+    // full save states (savestate.h): off by default, for debugging
+    [m addItem:[NSMenuItem separatorItem]];
+    NSMenuItem* fs = [m addItemWithTitle:@"Full Save States (large, contain game data, don't share)" action:@selector(toggleFullStates:)
+                           keyEquivalent:@""];
+    fs.target = self;
+    fs.state = ss::full_states() ? NSControlStateValueOn : NSControlStateValueOff;
+    fs.enabled = !ss::full_states_forced();
+    fs.toolTip = @"For debugging: Save makes a snapshot of the whole running game (about 300 MB). Off: Save makes a small "
+                 @"portable state (progress and position, no game data) that can be attached to bug reports.";
     // crash recovery (crashrec.cpp): automatic states every few minutes + recorded input
     [m addItem:[NSMenuItem separatorItem]];
     NSMenuItem* cr = [m addItemWithTitle:[NSString stringWithFormat:@"Crash Recovery (automatic state every %d min)",
