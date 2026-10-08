@@ -17,6 +17,16 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   every frame, which removed a 20 fps lock in busy views on an RK3588 board (issue #50). If you see broken
   or flickering geometry, start with `WWHD_VK_BUFFER_CACHE=0` and please report it. Windows and Android
   stay opt-in (`WWHD_VK_BUFFER_CACHE=1`).
+- **Save states are now small and can go into bug reports.** The **Save state** button (and
+  Shift+F1–F5, the Save States menu) now writes a *portable* state, `slotN.wwstate`: a few KB with
+  your progress (the same save data the game writes into `cking.sav`) and where Link stands (stage,
+  room, position, facing, time of day). It contains no game code and no game data, so you can attach
+  it to an issue; **Copy save for bug report** in the Saves tab copies the paths of the state and of
+  your `cking.sav`. Loading one puts that progress into the running game and takes Link there; it is
+  not an exact snapshot (enemies, a running cutscene and other actors start fresh). The old full
+  states (the whole running game, ~300 MB, contain game data: never share them) are still there for
+  debugging: Saves › *Full save states*, or `WWHD_FULL_SAVE_STATES=1`. Loading a slot loads either
+  kind. See [docs/portable-save-states.md](docs/portable-save-states.md).
 - **Fixed: "Quick doors" could crash the game going through a door** (issue #61, "PROGRAM HALT
   J3DPacket.cpp:157"; reported in Tingle's jail on Windfall). The extra game steps that make doors
   quicker also deleted actors (a pot, a rat, Tingle) faster than the game allows: an actor that
@@ -686,10 +696,18 @@ magic / 5000 rupees, and infinite health, magic or ammo. Story cheats (all songs
 dungeon map/compass/boss key, a small key) can change or break story events, so use a spare save
 file. Cheats edit the live save data; save in game to keep them.
 
-The **Save States** menu saves the whole running game to one of 5 slots and loads it back
-(**Shift+F1–F5** save, **F2–F5** load; slot 1 loads from the F1 settings overlay); each slot shows its time and area. Slots are kept in
-`~/Library/Application Support/wwhd/states/` (about 270 MB each) and survive restarts; a slot
-made by an incompatible build is refused. Loading works once the game has reached gameplay.
+The **Save States** menu (and the Saves tab of the settings overlay) saves to one of 5 slots and
+loads it back (**Shift+F1–F5** save, **F2–F5** load; slot 1 loads from the F1 settings overlay);
+each slot shows its time and area. Slots are kept in `~/Library/Application Support/wwhd/states/`
+and survive restarts. By default a slot holds a **portable state** (`slotN.wwstate`, a few KB):
+your progress and Link's place, no game data, safe to attach to bug reports. Loading one works
+once a Quest Log is being played (it waits until then): the progress is put into the game and Link
+enters the saved stage at the saved spot. It is not an exact snapshot: enemies, cutscenes and other
+actors start fresh, and Link starts standing (on the sea: swimming, without the boat).
+**Full save states** (Save States menu or Saves tab, off by default, for debugging;
+`WWHD_FULL_SAVE_STATES=1`) save the whole running game instead (`slotN.bin`, about 270 MB) and
+restore it exactly; they contain game code and data, **never share them**. A full state made by an
+incompatible build is refused. Loading a slot loads whichever kind it holds.
 
 **Crash Recovery** (Save States menu, off by default, or `WWHD_CRASH_RECOVERY=1`): every 2 minutes the
 game is saved into one of three automatic states (`states/auto/`, about 260 MB each; the save
@@ -758,7 +776,9 @@ title screen and the file select, before a file is loaded, it quits without aski
   (issue #67: soft, steady shadow edges as on the console; by default the maps scale with the internal
   resolution, for sharper edges that can shimmer in places); `WWHD_SHADOW_SCALE=n` gives the shadow
   maps their own resolution factor (overrides both); `WWHD_STATE_DIR=<dir>`
-  stores save states elsewhere; `WWHD_RUMBLE=0|1` (SDL builds) start value for Controls > Rumble (overrides the remembered
+  stores save states elsewhere; `WWHD_FULL_SAVE_STATES=0|1` full or portable save states for this
+  start; `WWHD_PORTABLE_LOAD=<file.wwstate>` loads that portable state (e.g. from a bug report) as
+  soon as a Quest Log is being played; `WWHD_RUMBLE=0|1` (SDL builds) start value for Controls > Rumble (overrides the remembered
   choice); `WWHD_LOG_RUMBLE=1` logs the game's motor requests and what the motors do.
 - Crashes and game halts write `captures/crash-<time>.log` (crash address, registers, the guest call
   chain, a host backtrace and the last log lines; useful for bug reports, it contains only addresses,
