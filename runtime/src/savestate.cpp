@@ -726,12 +726,16 @@ bool gameplay_ready(std::string& why, bool& retry) {
 
 // Link is under the player's control: the conditions under which the game opens its pause menu
 // (dMw_c, d_menu_window.cpp: no event for 5 frames, no message box, no menu, no stage change or
-// wipe in progress, Link is the controlled actor). Updated every frame for the event delay.
+// wipe in progress, Link is the controlled actor, Link is not on a rope). The menu also refuses
+// while the Telescope or the Picto Box aims; that is left out (Link restarts standing, harmless).
+// Updated every frame for the event delay.
 constexpr uint32_t kEventRun = kPlay + 0x5292;     // dComIfGp_event_runCheck (dEvt_control_c mode)
 constexpr uint32_t kMesgStatus = kPlay + 0x5BB2;   // dComIfGp_getMesgStatus (messageState 025F795C)
 constexpr uint32_t kScopeMesgStatus = kPlay + 0x5BB3;
 constexpr uint32_t kMenuFlag = 0x101EA069;         // dMenu_flag (025986BC)
 constexpr uint32_t kPlayerPtr = kPlay + 0x5B2C;    // mpPlayer[0]: the controlled actor
+constexpr uint32_t kPlayerStatus0 = kPlay + 0x5CD8; // dComIfGp_checkPlayerStatus0 (mPlayerStatus[0][0])
+constexpr uint32_t kSttsRope = 0x00800000;          // daPyStts0_UNK800000_e: set by Link's rope procedures (procRope*)
 constexpr uint32_t fn_ovlpDoingReq = 0x025DBE38;   // fopOvlpM_IsDoingReq (a wipe or scene overlap runs)
 int g_event_wait = 0;                              // d_menu_window.cpp event_wait_frame
 void track_events() {
@@ -744,6 +748,8 @@ bool player_has_control(Cpu* c, std::string& why) {
     if (ld8(kMenuFlag)) { why = "a game menu is open"; return false; }
     if (ld8(kNextStage + 12)) { why = "a stage change is in progress"; return false; }
     if (ld32(kPlayerPtr) != ld32(kLinkPtr)) { why = "Link is not the controlled character"; return false; }
+    // on a rope or swinging from the Grappling Hook (the menu checks it too): he would restart in mid-air
+    if (ld32(kPlayerStatus0) & kSttsRope) { why = "Link is on a rope"; return false; }
     CallScope scope(c);
     if (guest_call(c, fn_ovlpDoingReq) & 0xFF) { why = "a scene transition is in progress"; return false; }
     return true;

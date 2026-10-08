@@ -38,8 +38,13 @@ Only while the player controls Link: the conditions under which the game itself 
 menu (`dMw_c` in `d_menu_window.cpp`): no event or cutscene running (`dComIfGp_event_runCheck`,
 and not for 5 frames after one, like the game), no message or dialogue box (`dComIfGp_getMesgStatus`,
 the telescope's message status), no game menu open (`dMenu_flag`), no stage change or wipe in
-progress (`dComIfGp_isEnableNextStage`, `fopOvlpM_IsDoingReq`), and Link is the controlled actor
-(not, e.g., a possessed Moblin or the Seagull). Otherwise nothing is written; the screen shows
+progress (`dComIfGp_isEnableNextStage`, `fopOvlpM_IsDoingReq`), Link is the controlled actor
+(not, e.g., a possessed Moblin or the Seagull), and Link is not on a rope: the play state's player
+status 0 (HD play+0x5CD8) bit 0x00800000, tww `daPyStts0_UNK800000_e`, which only Link's rope
+procedures set (`procRopeReady/Swing/HangWait/Up/Down_init`): on a rope or swinging from the
+Grappling Hook (he would restart in mid-air). The menu's Telescope / Picto Box aiming checks
+(`dCamAttnStts_TELESCOPE_LOOK_e`, `dCamAttnStts_PICTO_BOX_AIM_e`) are left out: Link restarts
+standing at the same spot, which is harmless. Otherwise nothing is written; the screen shows
 "can't save during a cutscene or dialogue - try again when you have control of Link" and the log
 names the reason (`[savestate] slot N: portable state refused: ...`). This covers the Save button
 and Shift+F1–F5. Full save states and Crash Recovery's automatic states can be made at any time.
