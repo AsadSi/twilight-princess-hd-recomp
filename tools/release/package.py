@@ -44,10 +44,10 @@ INSTALLER_FILES = [
     "tools/installer/toolchains.json",
     "tools/installer/README.md",
 ]
-SETUP_APP = "Wind Waker HD"
-PORTABLE_TXT = """Wind Waker HD (native PC port), portable release.
+SETUP_APP = "Twilight Princess HD"
+PORTABLE_TXT = """Twilight Princess HD (native PC port), portable release.
 
-Start "Wind Waker HD". The first start prepares the game once from your own disc dump (releases never
+Start "Twilight Princess HD". The first start prepares the game once from your own disc dump (releases never
 contain game code, so it is built here); later starts launch the game directly.
 
 Everything the setup and the game create stays in this folder (in "data"): the built game, the game
@@ -55,7 +55,7 @@ files extracted from a disc image (an extracted game folder is used where it is)
 save states, shader caches, logs and the downloaded compiler. Nothing goes to your user folders
 unless you ask for a shortcut. To remove everything, delete this folder.
 
-Hold Shift while starting Wind Waker HD (macOS, Windows), or start it with --setup, to repair,
+Hold Shift while starting Twilight Princess HD (macOS, Windows), or start it with --setup, to repair,
 update, change the game or import saves. The same setup in a terminal: tools/Setup in Terminal.command
 (macOS), tools/Setup in a console window.bat (Windows), tools/setup-in-terminal.sh (Linux).
 
@@ -64,10 +64,10 @@ This file marks the folder as portable; without it, setup uses the per-user fold
 MAC_SETUP_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Wind Waker HD</string>
-  <key>CFBundleDisplayName</key><string>Wind Waker HD</string>
-  <key>CFBundleIdentifier</key><string>io.github.zeldawwhdrecomp.wwhd</string>
-  <key>CFBundleExecutable</key><string>wind-waker-hd</string>
+  <key>CFBundleName</key><string>Twilight Princess HD</string>
+  <key>CFBundleDisplayName</key><string>Twilight Princess HD</string>
+  <key>CFBundleIdentifier</key><string>io.github.asadsi.tphd</string>
+  <key>CFBundleExecutable</key><string>twilight-princess-hd</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>%s</string>
   <key>CFBundleVersion</key><string>%s</string>
@@ -77,16 +77,16 @@ MAC_SETUP_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 LINUX_SETUP_DESKTOP = """[Desktop Entry]
 Type=Application
-Name=Wind Waker HD
-Comment=The Wind Waker HD (native PC port); the first start prepares the game from your own disc dump
-Exec=sh -c 'cd "$(dirname "%k")" && exec ./wind-waker-hd'
+Name=Twilight Princess HD
+Comment=Twilight Princess HD (native PC port); the first start prepares the game from your own disc dump
+Exec=sh -c 'cd "$(dirname "%k")" && exec ./twilight-princess-hd'
 Terminal=false
 Categories=Game;
 Actions=setup;
 
 [Desktop Action setup]
 Name=Setup (repair, update, change the game)
-Exec=sh -c 'cd "$(dirname "%k")" && exec ./wind-waker-hd --setup'
+Exec=sh -c 'cd "$(dirname "%k")" && exec ./twilight-princess-hd --setup'
 """
 
 
@@ -94,7 +94,7 @@ def add_setup_gui(pkg, platform, exe, version):
     """The program a release starts: the first start prepares the game, later starts launch it."""
     if platform.startswith("macos"):
         app = os.path.join(pkg, SETUP_APP + ".app", "Contents")
-        copy(exe, os.path.join(app, "MacOS", "wind-waker-hd"))
+        copy(exe, os.path.join(app, "MacOS", "twilight-princess-hd"))
         v = re.sub(r"[^0-9.]", "", version.lstrip("v")) or "0"
         with open(os.path.join(app, "Info.plist"), "w") as f:
             f.write(MAC_SETUP_PLIST % (v, v))
@@ -103,8 +103,8 @@ def add_setup_gui(pkg, platform, exe, version):
     elif platform.startswith("windows"):
         copy(exe, os.path.join(pkg, SETUP_APP + ".exe"))
     else:
-        copy(exe, os.path.join(pkg, "wind-waker-hd"))
-        os.chmod(os.path.join(pkg, "wind-waker-hd"), 0o755)
+        copy(exe, os.path.join(pkg, "twilight-princess-hd"))
+        os.chmod(os.path.join(pkg, "twilight-princess-hd"), 0o755)
         with open(os.path.join(pkg, SETUP_APP + ".desktop"), "w") as f:
             f.write(LINUX_SETUP_DESKTOP)
         os.chmod(os.path.join(pkg, SETUP_APP + ".desktop"), 0o755)
@@ -386,9 +386,9 @@ def main():
     if a.platform.startswith("macos"):
         copy(os.path.join(inst, "install-macos.command"), os.path.join(pkg, "tools", "Setup in Terminal.command"))
     elif a.platform.startswith("windows"):
-        # runs "Wind Waker HD.exe --console-setup", which runs setup.py with the bundled Python
+        # runs "Twilight Princess HD.exe --console-setup", which runs setup.py with the bundled Python
         if not a.setup_gui:
-            sys.exit("windows: --setup-gui is required (tools/Setup in a console window.bat runs Wind Waker HD.exe)")
+            sys.exit("windows: --setup-gui is required (tools/Setup in a console window.bat runs Twilight Princess HD.exe)")
         if not a.windows_python:
             sys.exit("windows: --windows-python is required (the setup runs with the bundled Python)")
         add_windows_python(pkg, a.windows_python)
@@ -429,7 +429,7 @@ def main():
     with open(os.path.join(licdir, "README.txt"), "w") as f:
         f.writelines(index)
     with open(os.path.join(pkg, "VERSION.txt"), "w") as f:
-        f.write("Wind Waker HD native PC port %s (%s)\n"
+        f.write("Twilight Princess HD native PC port %s (%s)\n"
                 "This package contains no game code, game data or keys; the installer builds the game\n"
                 "from your own disc dump on your machine.\n" % (a.version, a.platform))
 

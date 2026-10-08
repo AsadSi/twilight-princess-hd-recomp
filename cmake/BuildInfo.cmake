@@ -2,7 +2,7 @@
 # every build, rewriting it only when the text changes (so a rebuild recompiles one small file only
 # after a new commit). Run as: cmake -DSRC=<source dir> -DOUT=<file> [-DVERSION=<tag>] -P BuildInfo.cmake
 #
-# version: VERSION when given (release builds: the tag, e.g. v0.2.5; .github/workflows/release.yml),
+# version: VERSION when given (release builds: the tag, e.g. v0.2.5),
 #   else from the newest v* tag: "v0.2.5" on the tagged commit, "v0.2.5+3" three commits after it,
 #   "dev" without git or tags (a source archive)
 # commit:  the short commit hash, "-dirty" with uncommitted changes to tracked files, "unknown" without git

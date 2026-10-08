@@ -106,7 +106,7 @@ int console_setup(const std::string& pkg, const std::vector<std::string>& args) 
     g_out = out;
 
     if (pkg.empty()) {
-        print("Setup could not start: the release files were not found. Keep Wind Waker HD.exe in the unzipped "
+        print("Setup could not start: the release files were not found. Keep Twilight Princess HD.exe in the unzipped "
               "release folder, next to tools\\.");
         return 1;
     }

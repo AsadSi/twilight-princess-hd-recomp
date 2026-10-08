@@ -26,20 +26,20 @@ def main():
         new = m.group(1).strip()
     with open(sums) as f:
         checksums = f.read().strip()
-    print("""**The Wind Waker HD, native PC port, %s**
+    print("""**Twilight Princess HD, native PC port, %s**
 
 This release contains **no game files, no game code and no keys**. You need your own disc dump
 (.wux/.wud with its disc key, plus the Wii U common key from your console), a Cemu .wua archive
 (no keys needed), or an already extracted game folder. The installer builds the game from it on your machine.
 
-**Install:** download the zip for your system, unzip it anywhere and start **Wind Waker HD**. The
+**Install:** download the zip for your system, unzip it anywhere and start **Twilight Princess HD**. The
 first start prepares the game once from your dump (about two minutes); later starts launch it directly.
 Everything stays in that folder.
-- macOS (Apple Silicon, macOS 14+): `Wind Waker HD.app`. The release is not signed by Apple:
+- macOS (Apple Silicon, macOS 14+): `Twilight Princess HD.app`. The release is not signed by Apple:
   macOS 15+: System Settings > Privacy & Security > Open Anyway; macOS 14: right-click > Open.
   Keep the app inside the unzipped folder (move the whole folder, not just the app)
-- Windows (x86-64): `Wind Waker HD.exe` (SmartScreen: "More info" > "Run anyway")
-- Linux (glibc 2.35+, Vulkan): `wind-waker-hd`; `linux-x86_64` for x86-64, `linux-aarch64` for arm64
+- Windows (x86-64): `Twilight Princess HD.exe` (SmartScreen: "More info" > "Run anyway")
+- Linux (glibc 2.35+, Vulkan): `twilight-princess-hd`; `linux-x86_64` for x86-64, `linux-aarch64` for arm64
   (Raspberry Pi 5, Asahi Linux, ARM laptops)
 
 See "Install (releases)" in the README for details.

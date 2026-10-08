@@ -1,5 +1,5 @@
 # Windows: version information (VERSIONINFO) and an application manifest for the programs a release ships
-# or builds (Wind Waker HD.exe, wwhd-extract.exe, the game). Unsigned programs without them look like
+# or builds (Twilight Princess HD.exe, wwhd-extract.exe, the game). Unsigned programs without them look like
 # anonymous droppers to antivirus heuristics (issue #58).
 #
 #   wwhd_windows_resources(TARGET DESCRIPTION ORIGINAL_FILENAME gui|console)

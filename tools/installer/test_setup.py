@@ -243,7 +243,7 @@ class NoScriptHost(unittest.TestCase):
         self.assertTrue(os.path.isdir(setup.win_known_folder(0x02)))
         self.assertTrue(os.path.isdir(setup.win_known_folder(0x10)))
         with tempfile.TemporaryDirectory() as d:
-            link = os.path.join(d, "Wind Waker HD test.lnk")
+            link = os.path.join(d, "Twilight Princess HD test.lnk")
             setup.win_shortcut(link, sys.executable, "--game game --save save", d, sys.executable)
             with open(link, "rb") as f:
                 head = f.read(20)

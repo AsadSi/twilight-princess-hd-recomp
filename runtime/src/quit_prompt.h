@@ -1,5 +1,5 @@
 // Quitting while a game is in progress asks first (issue #65): closing the TV window or Quit (Cmd+Q)
-// shows "Quit Wind Waker HD?" with Quit, Cancel and Save State and Quit. This header holds the
+// shows "Quit Twilight Princess HD?" with Quit, Cancel and Save State and Quit. This header holds the
 // decisions (when to ask, which test answer); the macOS dialog is gfx/quit_prompt.mm. Kept free of
 // AppKit and of the game so runtime/tools/quit_prompt_test.cpp can check it.
 #pragma once

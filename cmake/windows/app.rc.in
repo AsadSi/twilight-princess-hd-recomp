@@ -21,7 +21,7 @@ BEGIN
       VALUE "InternalName", "@WWHD_RC_INTERNAL@"
       VALUE "LegalCopyright", "ZeldaWWHDRecomp contributors. Source code under the Mozilla Public License 2.0."
       VALUE "OriginalFilename", "@WWHD_RC_ORIGINAL@"
-      VALUE "ProductName", "Wind Waker HD Recomp"
+      VALUE "ProductName", "Twilight Princess HD Recomp"
       VALUE "ProductVersion", "@WWHD_RC_VERSION_STRING@"
       VALUE "Comments", "Native PC port; contains no game files or game code. https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp"
     END

@@ -1201,7 +1201,7 @@ def launch(state, data_dir):
 # portable release: the launcher, an optional shortcut, the compiler download
 
 
-LAUNCHER = {"darwin": "Wind Waker HD.app", "win32": "Wind Waker HD.exe"}.get(sys.platform, "wind-waker-hd")
+LAUNCHER = {"darwin": "Twilight Princess HD.app", "win32": "Twilight Princess HD.exe"}.get(sys.platform, "twilight-princess-hd")
 
 
 def create_shortcut():

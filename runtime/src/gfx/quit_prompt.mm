@@ -1,6 +1,6 @@
 // Quit prompt (issue #65): closing the TV window quits the app, as on Windows and Linux; while a save
 // file is being played, closing it or Quit (Cmd+Q, the Dock's Quit, logout) first asks
-// "Quit Wind Waker HD?" in a sheet on the TV window:
+// "Quit Twilight Princess HD?" in a sheet on the TV window:
 //   Quit                 quits (the default button, Return)
 //   Cancel               keeps playing (Esc)
 //   Save State and Quit  writes save state slot 1 (as Save States > Save to slot 1, Shift+F1), then quits
