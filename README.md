@@ -742,7 +742,8 @@ title screen and the file select, before a file is loaded, it quits without aski
   override the remembered choices); `WWHD_DISPLAY_HZ=n` replaces the detected display refresh rate
   that 120/240 fps are capped to (0: no cap); `WWHD_UNCAPPED=1` starts with the debug switch
   "Uncapped" on (no frame limit, no vsync; the game runs faster than real time);
-  `WWHD_SHADOW_SCALE=n` gives the shadow maps their own resolution factor; `WWHD_STATE_DIR=<dir>`
+  `WWHD_SHADOW_SCALE=n` gives the shadow maps their own resolution factor (default 1: the console's
+  1024x1024 at every internal resolution; larger maps make shadow edges harder than the original); `WWHD_STATE_DIR=<dir>`
   stores save states elsewhere; `WWHD_RUMBLE=0|1` (SDL builds) start value for Controls > Rumble (overrides the remembered
   choice); `WWHD_LOG_RUMBLE=1` logs the game's motor requests and what the motors do.
 - Crashes and game halts write `captures/crash-<time>.log` (crash address, registers, the guest call
