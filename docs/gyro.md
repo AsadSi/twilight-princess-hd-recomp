@@ -12,6 +12,9 @@ The port has no GamePad, so it turns a **virtual GamePad** with one of these sou
 | Mouse | mouse movement turns the GamePad while the game aims; made for Steam Input's "gyro to mouse" output, works with a plain mouse too |
 
 It works with both controller choices (Input → **Wii U GamePad** or **Wii U Pro Controller**, issue #71).
+In Pro Controller mode the game's own **Options → Gyroscope** switch stays in the options menu and can be
+changed as usual (checked in a game run); its help text still says it "will have no effect when using the
+Wii U Pro Controller", which is the Wii U's behaviour: in the port it does apply while a gyro source is on.
 
 Settings overlay (F1) → **Controls** → **Gyro…**:
 
