@@ -111,7 +111,7 @@ struct HostThread {
     uint32_t tgt_fn = 0, tgt_r1 = 0, tgt_lr = 0;
 };
 enum WaitState { kRunning = 0, kParked = 1, kRequester = 2 };
-enum WaitKind : uint8_t { W_NONE, W_MUTEX, W_EVENT, W_MSG_SEND, W_MSG_RECV, W_SLEEPQ, W_JOIN, W_RDV, W_SLEEP, W_SERVICE, W_ENTRY };
+enum WaitKind : uint8_t { W_NONE, W_MUTEX, W_EVENT, W_MSG_SEND, W_MSG_RECV, W_SLEEPQ, W_JOIN, W_RDV, W_SLEEP, W_SERVICE, W_ENTRY, W_SEM, W_COND, W_SUSPEND };
 
 // core from an affinity mask (bit0 = core 0, bit1 = core 1, bit2 = core 2); fallback if none set
 static uint32_t core_from_affinity(uint32_t mask, uint32_t fallback) {
@@ -778,6 +778,78 @@ HLE(coreinit, OSRestoreInterrupts) {
     }
     ret(c, prev);
 }
+HLE(coreinit, OSEnableInterrupts) {
+    int prev = t_self ? (t_self->irq_off ? 0 : 1) : 1;
+    if (t_self) {
+        t_self->irq_off = 0;
+        if (t_self->holds_core && g_core_preempt[t_self->held_core]) ppc_preempt(c);
+    }
+    ret(c, prev);
+}
+HLE(coreinit, OSSetThreadPriority) {
+    uint32_t t = arg(c, 0), prio = arg(c, 1);
+    if (prio > 31) { ret(c, 0); return; }
+    st32(t + osthread::kBasePrio, prio);
+    st32(t + osthread::kEffPrio, prio);
+    if (HostThread* ht = host_thread(t)) ht->prio = (int)prio;  // applies at its next schedule
+    ret(c, 1);
+}
+// A thread can only suspend itself here (a host thread can't be stopped from outside at an arbitrary
+// point); the boot thread does that after starting the game's main thread. Others only count.
+HLE(coreinit, OSSuspendThread) {
+    HostThread* ht = host_thread(arg(c, 0));
+    if (!ht) { ret(c, 0); return; }
+    std::unique_lock<std::mutex> lk(ht->m);
+    int prev = ht->suspend++;
+    st32(ht->guest + osthread::kSuspend, ht->suspend);
+    if (ht != t_self) {
+        if (ht->started && !ht->exited) LOG("[thread] OSSuspendThread(%08X) of another running thread: counted only", arg(c, 0));
+        ret(c, prev);
+        return;
+    }
+    park_wait(lk, ht->cv, [&] { return ht->suspend <= 0; }, W_SUSPEND, arg(c, 0));
+    ret(c, prev);
+}
+HLE(coreinit, OSContinueThread) {  // resume completely
+    HostThread* ht = host_thread(arg(c, 0));
+    if (!ht) { ret(c, 0); return; }
+    int prev;
+    bool start = false;
+    {
+        std::lock_guard<std::mutex> lk(ht->m);
+        prev = ht->suspend;
+        ht->suspend = 0;
+        if (!ht->started) start = ht->started = true;
+        st32(ht->guest + osthread::kSuspend, 0);
+    }
+    if (start) start_host_thread(ht);
+    ht->cv.notify_all();
+    ret(c, prev);
+}
+HLE(coreinit, OSCancelThread) { LOG("[thread] OSCancelThread(%08X) ignored (lr=%08X)", arg(c, 0), c->lr); }
+HLE(coreinit, OSDetachThread) {}
+HLE(coreinit, OSIsThreadTerminated) {
+    uint8_t st = ld8(arg(c, 0) + osthread::kState);
+    ret(c, st == osthread::NONE || st == osthread::MORIBUND);
+}
+HLE(coreinit, OSCheckActiveThreads) {
+    std::lock_guard<std::mutex> lk(g_threads_mutex);
+    int n = 0;
+    for (auto& [t, ht] : g_threads) n += ht->started && !ht->exited && !ht->service;
+    ret(c, n);
+}
+HLE(coreinit, OSGetStackPointer) { ret(c, c->r[1]); }
+HLE(coreinit, OSGetCurrentContext) { ret(c, threads::current_thread()); }  // the OSContext is the start of the OSThread
+// (arg1..arg4, function, stack top): runs the function on that stack and returns its result
+HLE(coreinit, OSSwitchFiberEx) {
+    uint32_t a0 = arg(c, 0), a1 = arg(c, 1), a2 = arg(c, 2), a3 = arg(c, 3), fn = arg(c, 4), stack = arg(c, 5);
+    uint32_t sp = c->r[1];
+    c->r[1] = (stack - 8) & ~0xFu;
+    st32(c->r[1], 0);  // end of the back chain
+    uint32_t r = guest_call(c, fn, {a0, a1, a2, a3});
+    c->r[1] = sp;
+    ret(c, r);
+}
 HLE(coreinit, OSMemoryBarrier) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
 
 
@@ -929,6 +1001,18 @@ HLE(coreinit, OSSignalEvent) {
     }
     ev->cv.notify_all();
 }
+HLE(coreinit, OSSignalEventAll) {
+    HEvent* ev = g_events.get(arg(c, 0));
+    {
+        std::lock_guard<std::mutex> lk(ev->m);
+        if (ev->signaled) return;
+        // an auto-reset event with waiters wakes them all and stays unsignaled
+        if (!ev->auto_reset || ev->waiters.empty()) ev->signaled = true;
+        for (HostThread* w : ev->waiters) w->woken = true;
+        ev->waiters.clear();
+    }
+    ev->cv.notify_all();
+}
 HLE(coreinit, OSResetEvent) {
     if (g_trace_msg) LOG("[evt] reset %08X lr=%08X", arg(c, 0), c->lr);
     HEvent* ev = g_events.get(arg(c, 0));
@@ -953,7 +1037,7 @@ struct HQueue {
 };
 static ObjTable<HQueue> g_queues;
 
-HLE(coreinit, OSInitMessageQueue) {
+static void init_queue(Cpu* c) {
     uint32_t q = arg(c, 0);
     if (g_trace_msg) LOG("[msg] init q=%08X count=%u", q, arg(c, 2));
     HQueue* hq = g_queues.get(q);
@@ -965,21 +1049,27 @@ HLE(coreinit, OSInitMessageQueue) {
     hq->cv.notify_all();
     st32(q, 0x6D536751);  // "mSgQ"
 }
-HLE(coreinit, OSSendMessage) {
-    HQueue* q = g_queues.get(arg(c, 0));
-    uint32_t m = arg(c, 1), flags = arg(c, 2);
-    std::array<uint32_t, 4> msg{ld32(m), ld32(m + 4), ld32(m + 8), ld32(m + 12)};
-    if (g_trace_msg) LOG("[msg] send q=%08X msg=%08X %08X flags=%X lr=%08X", arg(c, 0), msg[0], msg[1], flags, c->lr);
+HLE(coreinit, OSInitMessageQueue) { init_queue(c); }
+HLE(coreinit, OSInitMessageQueueEx) { init_queue(c); }  // (+ name in r6)
+// flags: 1 block while the queue is full, 2 high priority (to the front); false if full and not blocking
+bool os_send_message(uint32_t queue, const std::array<uint32_t, 4>& msg, uint32_t flags) {
+    HQueue* q = g_queues.get(queue);
     {
         std::unique_lock<std::mutex> lk(q->m);
         if (q->msgs.size() >= q->capacity) {
-            if (!(flags & 1)) { ret(c, 0); return; }
-            park_wait(lk, q->cv, [&] { return q->msgs.size() < q->capacity; }, W_MSG_SEND, arg(c, 0));
+            if (!(flags & 1)) return false;
+            park_wait(lk, q->cv, [&] { return q->msgs.size() < q->capacity; }, W_MSG_SEND, queue);
         }
-        if (flags & 2) q->msgs.push_front(msg); else q->msgs.push_back(msg);  // OS_MESSAGE_FLAG_HIGH_PRIORITY
+        if (flags & 2) q->msgs.push_front(msg); else q->msgs.push_back(msg);
     }
     q->cv.notify_all();
-    ret(c, 1);
+    return true;
+}
+HLE(coreinit, OSSendMessage) {
+    uint32_t m = arg(c, 1), flags = arg(c, 2);
+    std::array<uint32_t, 4> msg{ld32(m), ld32(m + 4), ld32(m + 8), ld32(m + 12)};
+    if (g_trace_msg) LOG("[msg] send q=%08X msg=%08X %08X flags=%X lr=%08X", arg(c, 0), msg[0], msg[1], flags, c->lr);
+    ret(c, os_send_message(arg(c, 0), msg, flags));
 }
 HLE(coreinit, OSReceiveMessage) {
     HQueue* q = g_queues.get(arg(c, 0));
@@ -1057,6 +1147,84 @@ HLE(coreinit, OSWaitRendezvous) {
     ret(c, 1);
 }
 
+// OSSemaphore: count mirrored at +0xC for the game's own reads
+struct HSem {
+    std::mutex m;
+    std::condition_variable cv;
+    int32_t count = 0;
+};
+static ObjTable<HSem> g_sems;
+HLE(coreinit, OSInitSemaphore) {
+    HSem* sm = g_sems.get(arg(c, 0));
+    {
+        std::lock_guard<std::mutex> lk(sm->m);
+        sm->count = (int32_t)arg(c, 1);
+    }
+    sm->cv.notify_all();
+    st32(arg(c, 0), 0x73506852);  // "sPhR"
+    st32(arg(c, 0) + 0xC, arg(c, 1));
+}
+HLE(coreinit, OSWaitSemaphore) {  // -> the count before the wait took one
+    HSem* sm = g_sems.get(arg(c, 0));
+    std::unique_lock<std::mutex> lk(sm->m);
+    park_wait(lk, sm->cv, [&] { return sm->count > 0; }, W_SEM, arg(c, 0));
+    int32_t prev = sm->count--;
+    st32(arg(c, 0) + 0xC, (uint32_t)sm->count);
+    ret(c, (uint32_t)prev);
+}
+HLE(coreinit, OSSignalSemaphore) {  // -> the count before the signal
+    HSem* sm = g_sems.get(arg(c, 0));
+    int32_t prev;
+    {
+        std::lock_guard<std::mutex> lk(sm->m);
+        prev = sm->count++;
+        st32(arg(c, 0) + 0xC, (uint32_t)sm->count);
+    }
+    sm->cv.notify_all();
+    ret(c, (uint32_t)prev);
+}
+
+// OSCondition: OSWaitCond releases the OSMutex completely and takes it back with the same count;
+// OSSignalCond wakes every waiter (as Cafe OS does)
+struct HCond {
+    std::mutex m;
+    std::condition_variable cv;
+    uint64_t gen = 0;
+};
+static ObjTable<HCond> g_conds;
+HLE(coreinit, OSInitCond) {
+    g_conds.get(arg(c, 0));
+    st32(arg(c, 0), 0x634E6456);  // "cNdV"
+}
+HLE(coreinit, OSWaitCond) {
+    HCond* cd = g_conds.get(arg(c, 0));
+    HMutex* mx = g_mutexes.get(arg(c, 1));
+    const void* self = t_self ? (const void*)t_self : (const void*)&t_cpu;
+    std::unique_lock<std::mutex> lk(cd->m);
+    const uint64_t g = cd->gen;
+    int count;
+    {
+        std::lock_guard<std::mutex> ml(mx->m);
+        count = mx->owner == self ? mx->count : 1;
+        mx->owner = nullptr;
+        mx->count = 0;
+    }
+    mx->cv.notify_one();
+    park_wait(lk, cd->cv, [&] { return cd->gen != g; }, W_COND, arg(c, 0));
+    lk.unlock();
+    mutex_lock(arg(c, 1));
+    std::lock_guard<std::mutex> ml(mx->m);
+    mx->count = count;
+}
+HLE(coreinit, OSSignalCond) {
+    HCond* cd = g_conds.get(arg(c, 0));
+    {
+        std::lock_guard<std::mutex> lk(cd->m);
+        cd->gen++;
+    }
+    cd->cv.notify_all();
+}
+
 // ---------------------------------------------------------------- alarms
 // One host thread fires all alarms and runs their guest callbacks.
 struct Alarm {
@@ -1131,6 +1299,11 @@ static void arm_alarm(uint32_t alarm, uint64_t when, uint64_t period, uint32_t c
 HLE(coreinit, OSCreateAlarm) {
     memset(mem::ptr(arg(c, 0)), 0, 0x58);
     st32(arg(c, 0), 0x614C724D);  // "aLrM"
+}
+HLE(coreinit, OSCreateAlarmEx) {
+    memset(mem::ptr(arg(c, 0)), 0, 0x58);
+    st32(arg(c, 0), 0x614C724D);
+    st32(arg(c, 0) + 0x04, arg(c, 1));  // name
 }
 HLE(coreinit, OSSetAlarm) {
     uint32_t alarm = arg(c, 0), cb = c->r[7];

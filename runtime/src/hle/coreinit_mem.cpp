@@ -105,20 +105,28 @@ std::mutex g_mem_mutex;
 std::unordered_map<uint32_t, ExpHeap*> g_exp;
 std::unordered_map<uint32_t, FrmHeap*> g_frm;
 uint32_t g_default_heap = 0, g_mem1_heap = 0, g_fg_heap = 0;
+static uint32_t g_mem2_start = 0;  // start of the default heap (OSGetMemBound)
 
+// the guest-visible MEMHeapHeader: tag at +0x00, heapStart +0x18, heapEnd +0x1C (games read them to
+// put their own allocators over a whole base heap)
 constexpr uint32_t kHeapHeader = 0x40;
+void write_header(uint32_t start, uint32_t size, uint32_t tag) {
+    st32(start, tag);
+    st32(start + 0x18, start + kHeapHeader);
+    st32(start + 0x1C, start + size);
+}
 
 uint32_t create_exp(uint32_t start, uint32_t size) {
     auto* h = new ExpHeap();
     h->init(start + kHeapHeader, start + size);
-    st32(start, 0x45585048);  // "EXPH"
+    write_header(start, size, 0x45585048);  // "EXPH"
     g_exp[start] = h;
     return start;
 }
 
 uint32_t create_frm(uint32_t start, uint32_t size) {
     auto* h = new FrmHeap{start + kHeapHeader, start + size, start + kHeapHeader, start + size};
-    st32(start, 0x46524D48);  // "FRMH"
+    write_header(start, size, 0x46524D48);  // "FRMH"
     g_frm[start] = h;
     return start;
 }
@@ -162,6 +170,7 @@ uint32_t frm_alloc(uint32_t heap, uint32_t size, int32_t align) {
 void mem_setup_heaps(uint32_t data_end) {
     uint32_t start = (data_end + 0xFFF) & ~0xFFFu;
     g_default_heap = create_exp(start, mem::kMem2End - start);
+    g_mem2_start = start;
     g_mem1_heap = create_frm(mem::kMem1, mem::kMem1Size);
     g_fg_heap = create_frm(mem::kFgBucket, mem::kFgBucketSize);
     LOG("[mem] default heap %08X-%08X", start, mem::kMem2End);
@@ -241,6 +250,35 @@ HLE(coreinit, MEMGetAllocatableSizeForFrmHeapEx) {
     TRACE("[mem] frm allocatable(heap=%08X) -> %X", arg(c, 0), r);
     ret(c, r);
 }
+
+// (type, u32* start, u32* size): 1 MEM1, 2 MEM2 (the application's part, which the default heap covers)
+HLE(coreinit, OSGetMemBound) {
+    uint32_t type = arg(c, 0), start = 0, size = 0;
+    if (type == 1) start = mem::kMem1, size = mem::kMem1Size;
+    else if (type == 2) start = g_mem2_start, size = mem::kMem2End - g_mem2_start;
+    else { ret(c, (uint32_t)-1); return; }
+    st32(arg(c, 1), start);
+    st32(arg(c, 2), size);
+    ret(c, 0);
+}
+
+// locked cache: the game only allocates it (no LC DMA imports); one 16 KiB block
+static constexpr uint32_t kLcSize = 0x4000;
+static uint32_t g_lc = 0;
+static bool g_lc_used = false;
+HLE(coreinit, LCAlloc) {
+    std::lock_guard<std::mutex> lk(g_mem_mutex);
+    if (!g_lc) g_lc = mem::runtime_alloc(kLcSize, 0x200);
+    if (g_lc_used || arg(c, 0) > kLcSize) { ret(c, 0); return; }
+    g_lc_used = true;
+    ret(c, g_lc);
+}
+HLE(coreinit, LCDealloc) {
+    std::lock_guard<std::mutex> lk(g_mem_mutex);
+    if (arg(c, 0) == g_lc) g_lc_used = false;
+}
+HLE(coreinit, LCEnableDMA) { ret(c, 1); }
+HLE(coreinit, LCDisableDMA) {}
 
 HLE(coreinit, MEMGetBaseHeapHandle) {
     // base heap slots: 0 = MEM1, 1 = MEM2 (default heap), 8 = foreground bucket

@@ -5,6 +5,8 @@
 //   /vol/save/...     -> <save dir>/...
 #include "../platform/filesystem.h"
 
+#include <array>
+#include <filesystem>
 #include <cstdio>
 #ifndef _WIN32
 #include <strings.h>
@@ -195,30 +197,73 @@ HLE(coreinit, FSOpenFile) {
     ret(c, open_file(mem::read_cstr(arg(c, 2)), mem::read_cstr(arg(c, 3)), arg(c, 4)));
 }
 
-HLE(coreinit, FSCloseFile) {
-    std::lock_guard<std::mutex> lk(g_fs_mutex);
-    auto it = g_files.find(arg(c, 2));
-    if (it != g_files.end()) {
-        fclose(it->second.f);
-        g_files.erase(it);
-    }
-    ret(c, FS_OK);
-}
-
-HLE(coreinit, FSReadFile) {
-    uint32_t dst = arg(c, 2), size = arg(c, 3), count = arg(c, 4);
-    FILE* f = file(arg(c, 5));
-    if (!f || size == 0) { ret(c, 0); return; }
+// -> elements read; pos >= 0 reads from there (FSReadFileWithPos)
+static int32_t read_file(uint32_t dst, uint32_t size, uint32_t count, uint32_t handle, int64_t pos = -1) {
+    FILE* f = file(handle);
+    if (!f || size == 0) return 0;
     size_t n;
     {
         BlockingScope b;  // the calling thread waits for the disc; others on its core run
+        if (pos >= 0 && host::file_seek(f, pos, SEEK_SET) != 0) return FS_ACCESS_ERROR;
         // the kernel writes guest memory here: write-protected texture pages would fail the read
         // (EFAULT) instead of faulting into the write tracker (write_watch.h)
         wwatch::HostWrite w(dst, (uint32_t)std::min<uint64_t>((uint64_t)size * count, 0x100000000ull - dst));
         n = fread(mem::ptr(dst), 1, (size_t)size * count, f);
     }
-    ret(c, (uint32_t)(n / size));
+    return (int32_t)(n / size);
 }
+
+HLE(coreinit, FSReadFile) { ret(c, (uint32_t)read_file(arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5))); }
+// (client, block, dst, size, count, pos, handle, flags, error mask)
+HLE(coreinit, FSReadFileWithPos) { ret(c, (uint32_t)read_file(arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 6), arg(c, 5))); }
+
+static int32_t close_file(uint32_t handle) {
+    std::lock_guard<std::mutex> lk(g_fs_mutex);
+    auto it = g_files.find(handle);
+    if (it != g_files.end()) {
+        fclose(it->second.f);
+        g_files.erase(it);
+    }
+    return FS_OK;
+}
+HLE(coreinit, FSCloseFile) { ret(c, close_file(arg(c, 2))); }
+
+// Async calls run at once and complete through their FSAsyncParams (callback, context, message
+// queue): the FSAsyncResult lives in the command block (the OS's own part of it), and with a queue its
+// OSMessage (message = the result) is posted there for FSGetAsyncResult; else the callback runs
+// before the call returns.
+bool os_send_message(uint32_t queue, const std::array<uint32_t, 4>& msg, uint32_t flags);  // threads.cpp
+static constexpr uint32_t kAsyncResult = 0xA40;  // in the 0xA80-byte FSCmdBlock
+static void async_done(Cpu* c, uint32_t client, uint32_t block, int32_t status, uint32_t params) {
+    uint32_t cb = ld32(params), ctx = ld32(params + 4), queue = ld32(params + 8), r = block + kAsyncResult;
+    st32(r + 0x00, cb);
+    st32(r + 0x04, ctx);
+    st32(r + 0x08, queue);
+    st32(r + 0x0C, r);  // ioMsg: message = this result
+    st32(r + 0x10, 0);
+    st32(r + 0x14, 0);
+    st32(r + 0x18, 0);
+    st32(r + 0x1C, client);
+    st32(r + 0x20, block);
+    st32(r + 0x24, (uint32_t)status);
+    if (queue) os_send_message(queue, {r, 0, 0, 0}, 1);
+    else if (cb) guest_call(c, cb, {client, block, (uint32_t)status, ctx});
+    ret(c, FS_OK);
+}
+HLE(coreinit, FSGetAsyncResult) { ret(c, ld32(arg(c, 0))); }  // (OSMessage*) -> FSAsyncResult*
+// (client, block, path, mode, handle*, error mask, params)
+HLE(coreinit, FSOpenFileAsync) {
+    int32_t r = open_file(mem::read_cstr(arg(c, 2)), mem::read_cstr(arg(c, 3)), arg(c, 4));
+    async_done(c, arg(c, 0), arg(c, 1), r, arg(c, 6));
+}
+// (client, block, dst, size, count, pos, handle, flags; error mask and params on the stack)
+HLE(coreinit, FSReadFileWithPosAsync) {
+    int32_t r = read_file(arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 6), arg(c, 5));
+    async_done(c, arg(c, 0), arg(c, 1), r, ld32(c->r[1] + 0xC));
+}
+// (client, block, handle, error mask, params)
+HLE(coreinit, FSCloseFileAsync) { async_done(c, arg(c, 0), arg(c, 1), close_file(arg(c, 2)), arg(c, 4)); }
+HLE(coreinit, FSGetErrorCodeForViewer) { ret(c, 0); }
 
 HLE(coreinit, FSWriteFile) {
     uint32_t src = arg(c, 2), size = arg(c, 3), count = arg(c, 4);
@@ -299,6 +344,14 @@ HLE(nn_save, SAVEFlushQuota) { ret(c, 0); }
 HLE(nn_save, SAVEOpenFile) {
     ret(c, open_file(save_path(arg(c, 2), mem::read_cstr(arg(c, 3))), mem::read_cstr(arg(c, 4)), arg(c, 5)));
 }
+// (client, block, slot, path, error mask): a file, or a folder with what is in it
+HLE(nn_save, SAVERemove) {
+    std::error_code ec;
+    std::string hp = host_path(save_path(arg(c, 2), mem::read_cstr(arg(c, 3))));
+    auto n = std::filesystem::remove_all(hp, ec);  // (uintmax_t)-1 on error
+    ret(c, ec ? FS_ACCESS_ERROR : n > 0 ? FS_OK : FS_NOT_FOUND);
+}
+HLE(nn_save, SAVERollbackQuota) { ret(c, 0); }
 HLE(nn_save, SAVEGetStat) { ret(c, stat_path(save_path(arg(c, 2), mem::read_cstr(arg(c, 3))), arg(c, 4))); }
 HLE(nn_save, SAVEOpenDir) {
     std::string gp = save_path(arg(c, 2), mem::read_cstr(arg(c, 3)));

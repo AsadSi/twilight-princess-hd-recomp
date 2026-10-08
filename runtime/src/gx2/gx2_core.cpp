@@ -796,6 +796,22 @@ HLE(gx2, GX2GetSwapStatus) {
     if (arg(c, 3)) st64(arg(c, 3), timebase::guest_now());
 }
 HLE(gx2, GX2SetSwapInterval) { g_swap_interval = std::max<uint32>(arg(c, 0), 1); }
+HLE(gx2, GX2GetSwapInterval) { ret(c, g_swap_interval); }
+// ms: the game waits up to timeout * 60 / 1000 vsyncs for a flip before it reports a GPU hang
+HLE(gx2, GX2GetGPUTimeout) { ret(c, 10000); }
+static uint32 g_misc_params[8];
+HLE(gx2, GX2SetMiscParam) { if (arg(c, 0) < 8) g_misc_params[arg(c, 0)] = arg(c, 1); ret(c, 1); }
+HLE(gx2, GX2GetMiscParam) { ret(c, arg(c, 0) < 8 ? g_misc_params[arg(c, 0)] : 0); }
+// debugging aids of the SDK: nothing to do
+HLE(gx2, GX2PrintGPUStatus) {}
+HLE(gx2, GX2DebugTagUserString) {}
+HLE(gx2, GX2DebugTagUserStringVA) {}
+HLE(gx2, GX2TempDumpResources) {}
+HLE(gx2, GX2TempGetResourceCount) { ret(c, 0); }
+HLE(gx2, GX2RSetAllocator) {}  // no GX2R buffer calls are imported
+HLE(gx2, GX2Shutdown) {}
+HLE(gx2, GX2SetTVGamma) {}
+HLE(gx2, GX2SetDRCGamma) {}
 HLE(gx2, GX2WaitForVsync) {
     if(uncapped_benchmark()) {
         BlockingScope b;

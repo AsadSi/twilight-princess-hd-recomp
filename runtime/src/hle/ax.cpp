@@ -1,4 +1,4 @@
-// snd_core (AX): voices, the 3 ms audio frame, mixing and output.
+// sndcore2 (AX): voices, the 3 ms audio frame, mixing and output.
 //
 // Every frame (96 samples at 32 kHz) each playing voice is decoded (ADPCM/PCM16/PCM8),
 // resampled, run through its volume envelope and filters and mixed into the buses (main + 3 aux)
@@ -595,7 +595,7 @@ void ax_ss_load(ss::Reader& r) {
     audio::flush();
 }
 
-HLE(snd_core, AXInit) {
+static void ax_init() {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (g_running) return;
     g_vpb_base = mem::runtime_alloc(kVpbSize * kMaxVoices, 32);
@@ -611,34 +611,41 @@ HLE(snd_core, AXInit) {
     std::thread(frame_thread).detach();
     LOG("[ax] initialized, %d voices", kMaxVoices);
 }
-HLE(snd_core, AXQuit) { g_running = false; }
-HLE(snd_core, AXUserBegin) {}
-HLE(snd_core, AXUserEnd) {}
-HLE(snd_core, AXUserIsProtected) { ret(c, 0); }
-HLE(snd_core, AXInitProfile) {}
-HLE(snd_core, AXGetSwapProfile) { ret(c, 0); }
+HLE(sndcore2, AXInit) { ax_init(); }
+// (AXInitParams*: renderer 0 = 32 kHz, 1 = 48 kHz; +4 unknown; +8 pipeline): the mixer runs at 48 kHz
+HLE(sndcore2, AXInitWithParams) {
+    uint32_t p = arg(c, 0);
+    if (ld32(p) != 1) LOG("[ax] AXInitWithParams asks for renderer %u (pipeline %u); mixing at 48 kHz", ld32(p), ld32(p + 8));
+    ax_init();
+}
+HLE(sndcore2, AXQuit) { g_running = false; }
+HLE(sndcore2, AXUserBegin) {}
+HLE(sndcore2, AXUserEnd) {}
+HLE(sndcore2, AXUserIsProtected) { ret(c, 0); }
+HLE(sndcore2, AXInitProfile) {}
+HLE(sndcore2, AXGetSwapProfile) { ret(c, 0); }
 
-HLE(snd_core, AXRegisterAppFrameCallback) {
+HLE(sndcore2, AXRegisterAppFrameCallback) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     for (uint32_t& cb : g_app_frame_cb)
         if (!cb) { cb = arg(c, 0); break; }
     ret(c, 0);
 }
-HLE(snd_core, AXDeregisterAppFrameCallback) {
+HLE(sndcore2, AXDeregisterAppFrameCallback) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     for (uint32_t& cb : g_app_frame_cb)
         if (cb == arg(c, 0)) cb = 0;
     ret(c, 0);
 }
-HLE(snd_core, AXRegisterDeviceFinalMixCallback) {
+HLE(sndcore2, AXRegisterDeviceFinalMixCallback) {
     if (arg(c, 0) < 3) g_final_mix_cb[arg(c, 0)] = arg(c, 1);
     ret(c, 0);
 }
-HLE(snd_core, AXGetDeviceFinalMixCallback) {
+HLE(sndcore2, AXGetDeviceFinalMixCallback) {
     if (arg(c, 1)) st32(arg(c, 1), arg(c, 0) < 3 ? g_final_mix_cb[arg(c, 0)] : 0);
     ret(c, 0);
 }
-HLE(snd_core, AXRegisterAuxCallback) {
+HLE(sndcore2, AXRegisterAuxCallback) {
     // (device, deviceIndex, auxBus, func, userParam); the TV's and the first GamePad's buses are mixed
     uint32_t dev = arg(c, 0), idx = arg(c, 1), bus = arg(c, 2);
     LOG("[ax] aux callback: device %u index %u bus %u func %08X", dev, idx, bus, arg(c, 3));
@@ -654,7 +661,7 @@ HLE(snd_core, AXRegisterAuxCallback) {
     }
     ret(c, 0);
 }
-HLE(snd_core, AXSetAuxReturnVolume) {
+HLE(sndcore2, AXSetAuxReturnVolume) {
     // (device, deviceIndex, auxBus, volume)
     if (arg(c, 2) < kAuxBuses) {
         if (arg(c, 0) == 0) g_aux_return[arg(c, 2)] = (uint16_t)arg(c, 3);
@@ -662,26 +669,26 @@ HLE(snd_core, AXSetAuxReturnVolume) {
     }
     ret(c, 0);
 }
-HLE(snd_core, AXGetDeviceMode) { if (arg(c, 1)) st32(arg(c, 1), 0); ret(c, 0); }  // stereo
-HLE(snd_core, AXSetDeviceUpsampleStage) {
+HLE(sndcore2, AXGetDeviceMode) { if (arg(c, 1)) st32(arg(c, 1), 0); ret(c, 0); }  // stereo
+HLE(sndcore2, AXSetDeviceUpsampleStage) {
     if (arg(c, 0) < 3) g_upsample_stage[arg(c, 0)] = arg(c, 1);
     ret(c, 0);
 }
-HLE(snd_core, AXSetDeviceLinearUpsampler) { ret(c, 0); }
-HLE(snd_core, AXSetDeviceCompressor) { ret(c, 0); }
-HLE(snd_core, AXSetDefaultMixerSelect) {}
-HLE(snd_core, AXSetDRCVSMode) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSLC) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSSpeakerPosition) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSSurroundDepth) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSDownmixBalance) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSSurroundLevelGain) { ret(c, 0); }
-HLE(snd_core, AXSetDRCVSOutputGain) { ret(c, 0); }
-HLE(snd_core, DRCVS_SetOutputMode) { ret(c, 0); }
-HLE(snd_core, DRCVS_Process) { ret(c, 0); }
-HLE(snd_core, AXRmtGetSamplesLeft) { ret(c, 0); }
-HLE(snd_core, AXRmtGetSamples) { ret(c, 0); }
-HLE(snd_core, AXRmtAdvancePtr) { ret(c, 0); }
+HLE(sndcore2, AXSetDeviceLinearUpsampler) { ret(c, 0); }
+HLE(sndcore2, AXSetDeviceCompressor) { ret(c, 0); }
+HLE(sndcore2, AXSetDefaultMixerSelect) {}
+HLE(sndcore2, AXSetDRCVSMode) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSLC) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSSpeakerPosition) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSSurroundDepth) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSDownmixBalance) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSSurroundLevelGain) { ret(c, 0); }
+HLE(sndcore2, AXSetDRCVSOutputGain) { ret(c, 0); }
+HLE(sndcore2, DRCVS_SetOutputMode) { ret(c, 0); }
+HLE(sndcore2, DRCVS_Process) { ret(c, 0); }
+HLE(sndcore2, AXRmtGetSamplesLeft) { ret(c, 0); }
+HLE(sndcore2, AXRmtGetSamples) { ret(c, 0); }
+HLE(sndcore2, AXRmtAdvancePtr) { ret(c, 0); }
 
 // sound trace window, started by the capture key (input thread) and read by AX calls
 static std::mutex g_sound_trace_mutex;
@@ -756,7 +763,7 @@ static void sound_trace_env() {
     if (const char* e = getenv("WWHD_SOUND_TRACE")) ax::start_sound_trace(e, 60.0);
 }
 
-HLE(snd_core, AXAcquireVoiceEx) {
+HLE(sndcore2, AXAcquireVoiceEx) {
     ax_stat(0);
     sound_trace_env();
     {
@@ -807,7 +814,7 @@ HLE(snd_core, AXAcquireVoiceEx) {
     LOG("[ax] out of voices");
     ret(c, 0);
 }
-HLE(snd_core, AXFreeVoice) {
+HLE(sndcore2, AXFreeVoice) {
     ax_stat(1);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
@@ -816,7 +823,7 @@ HLE(snd_core, AXFreeVoice) {
         st32(v->vpb + kVpbState, 0);
     }
 }
-HLE(snd_core, AXSetVoiceState) {
+HLE(sndcore2, AXSetVoiceState) {
     ax_stat(2);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
@@ -828,12 +835,12 @@ HLE(snd_core, AXSetVoiceState) {
         st32(v->vpb + kVpbState, v->state);
     }
 }
-HLE(snd_core, AXSetVoiceType) {
+HLE(sndcore2, AXSetVoiceType) {
     ax_stat(13);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) v->type = (uint16_t)arg(c, 1);
 }
-HLE(snd_core, AXSetVoiceOffsets) {
+HLE(sndcore2, AXSetVoiceOffsets) {
     ax_stat(3);
     // AXPBOFFSET: +0 format, +2 loop, +4 loopOffset, +8 endOffset, +C currentOffset, +10 samples (relative to samples)
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -850,7 +857,7 @@ HLE(snd_core, AXSetVoiceOffsets) {
     v->cur_abs = b + ld32(o + 0xC);
     write_offsets(*v);
 }
-HLE(snd_core, AXGetVoiceOffsets) {
+HLE(sndcore2, AXGetVoiceOffsets) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     Voice* v = voice(arg(c, 0));
     uint32_t o = arg(c, 1);
@@ -863,13 +870,13 @@ HLE(snd_core, AXGetVoiceOffsets) {
     st32(o + 0xC, v->cur_abs - b);
     st32(o + 0x10, v->samples);
 }
-HLE(snd_core, AXSetVoiceLoop) {
+HLE(sndcore2, AXSetVoiceLoop) {
     ax_stat(4);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) { v->loop = (uint16_t)arg(c, 1); write_offsets(*v); }
 }
 // "Ex" offsets are relative to a new sample base
-HLE(snd_core, AXSetVoiceEndOffsetEx) {
+HLE(sndcore2, AXSetVoiceEndOffsetEx) {
     ax_stat(5);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
@@ -878,7 +885,7 @@ HLE(snd_core, AXSetVoiceEndOffsetEx) {
         write_offsets(*v);
     }
 }
-HLE(snd_core, AXSetVoiceLoopOffsetEx) {
+HLE(sndcore2, AXSetVoiceLoopOffsetEx) {
     ax_stat(6);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
@@ -887,17 +894,17 @@ HLE(snd_core, AXSetVoiceLoopOffsetEx) {
         write_offsets(*v);
     }
 }
-HLE(snd_core, AXGetVoiceCurrentOffsetEx) {
+HLE(sndcore2, AXGetVoiceCurrentOffsetEx) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     Voice* v = voice(arg(c, 0));
     ret(c, v ? v->cur_abs - base_units(v->format, arg(c, 1)) : 0);
 }
-HLE(snd_core, AXGetVoiceLoopCount) {
+HLE(sndcore2, AXGetVoiceLoopCount) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     Voice* v = voice(arg(c, 0));
     ret(c, v ? v->loop_count : 0);
 }
-HLE(snd_core, AXSetVoiceSrcRatio) {
+HLE(sndcore2, AXSetVoiceSrcRatio) {
     ax_stat(7);
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
@@ -906,7 +913,7 @@ HLE(snd_core, AXSetVoiceSrcRatio) {
     }
     ret(c, 0);
 }
-HLE(snd_core, AXSetVoiceSrc) {
+HLE(sndcore2, AXSetVoiceSrc) {
     ax_stat(8);
     // AXPBSRC: +0 ratioHi, +2 ratioLo, +4 currentFrac, +6 history[4]
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -918,14 +925,14 @@ HLE(snd_core, AXSetVoiceSrc) {
         v->cur = (int16_t)ld16(s + 8);
     }
 }
-HLE(snd_core, AXSetVoiceSrcType) {
+HLE(sndcore2, AXSetVoiceSrcType) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
         uint32_t t = arg(c, 1);
         v->filter = t == 0 ? FILTER_NONE : t == 1 ? FILTER_LINEAR : FILTER_TAP;
     }
 }
-HLE(snd_core, AXSetVoiceVe) {
+HLE(sndcore2, AXSetVoiceVe) {
     ax_stat(9);
     // AXPBVE: +0 currentVolume u16, +2 currentDelta s16
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -934,7 +941,7 @@ HLE(snd_core, AXSetVoiceVe) {
         v->ve_delta = (int16_t)ld16(arg(c, 1) + 2);
     }
 }
-HLE(snd_core, AXSetVoiceDeviceMix) {
+HLE(sndcore2, AXSetVoiceDeviceMix) {
     ax_stat(10);
     // (vpb, device, deviceIndex, AXCHMIX* mix): per channel, 4 buses of {vol u16, delta s16}
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -959,7 +966,7 @@ HLE(snd_core, AXSetVoiceDeviceMix) {
             }
     ret(c, 0);
 }
-HLE(snd_core, AXSetVoiceAdpcm) {
+HLE(sndcore2, AXSetVoiceAdpcm) {
     ax_stat(11);
     // AXPBADPCM: a[16], gain, pred_scale, yn1, yn2
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -971,7 +978,7 @@ HLE(snd_core, AXSetVoiceAdpcm) {
         v->yn2 = (int16_t)ld16(a + 0x26);
     }
 }
-HLE(snd_core, AXSetVoiceAdpcmLoop) {
+HLE(sndcore2, AXSetVoiceAdpcmLoop) {
     ax_stat(12);
     // AXPBADPCMLOOP: loop_pred_scale, loop_yn1, loop_yn2
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -982,7 +989,7 @@ HLE(snd_core, AXSetVoiceAdpcmLoop) {
         v->loop_yn2 = (int16_t)ld16(a + 4);
     }
 }
-HLE(snd_core, AXSetVoiceLpf) {
+HLE(sndcore2, AXSetVoiceLpf) {
     // AXPBLPF: on, yn1, a0, b0
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     uint32_t p = arg(c, 1);
@@ -993,14 +1000,14 @@ HLE(snd_core, AXSetVoiceLpf) {
         v->lpf_b0 = (int16_t)ld16(p + 6);
     }
 }
-HLE(snd_core, AXSetVoiceLpfCoefs) {
+HLE(sndcore2, AXSetVoiceLpfCoefs) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
         v->lpf_a0 = (int16_t)arg(c, 1);
         v->lpf_b0 = (int16_t)arg(c, 2);
     }
 }
-HLE(snd_core, AXSetVoiceBiquad) {
+HLE(sndcore2, AXSetVoiceBiquad) {
     // AXPBBIQUAD: on, xn1, xn2, yn1, yn2, b0, b1, b2, a1, a2
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     uint32_t p = arg(c, 1);
@@ -1017,7 +1024,7 @@ HLE(snd_core, AXSetVoiceBiquad) {
         v->bq_a2 = (int16_t)ld16(p + 0x12);
     }
 }
-HLE(snd_core, AXSetVoiceBiquadCoefs) {
+HLE(sndcore2, AXSetVoiceBiquadCoefs) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     if (Voice* v = voice(arg(c, 0))) {
         v->bq_b0 = (int16_t)arg(c, 1);
@@ -1027,7 +1034,7 @@ HLE(snd_core, AXSetVoiceBiquadCoefs) {
         v->bq_a2 = (int16_t)arg(c, 5);
     }
 }
-HLE(snd_core, AXComputeLpfCoefs) {
+HLE(sndcore2, AXComputeLpfCoefs) {
     // (freq, u16* a0, u16* b0)
     float t1 = cosf((float)arg(c, 0) / 32000.0f * 6.2831855f);
     float t2 = 2.0f - t1;
@@ -1037,10 +1044,10 @@ HLE(snd_core, AXComputeLpfCoefs) {
     st16(arg(c, 2), r);
 }
 // the remote speaker and voice priorities don't affect the output
-HLE(snd_core, AXSetVoicePriority) {
+HLE(sndcore2, AXSetVoicePriority) {
     ax_stat(14);}
-HLE(snd_core, AXSetVoiceMixerSelect) { ret(c, 0); }
-HLE(snd_core, AXSetVoiceRmtOn) {}
-HLE(snd_core, AXSetVoiceRmtIIR) {}
-HLE(snd_core, AXSetVoiceRmtIIRCoefs) {}
-HLE(snd_core, AXDecodeAdpcmData) { LOG("[ax] AXDecodeAdpcmData called (not implemented)"); }
+HLE(sndcore2, AXSetVoiceMixerSelect) { ret(c, 0); }
+HLE(sndcore2, AXSetVoiceRmtOn) {}
+HLE(sndcore2, AXSetVoiceRmtIIR) {}
+HLE(sndcore2, AXSetVoiceRmtIIRCoefs) {}
+HLE(sndcore2, AXDecodeAdpcmData) { LOG("[ax] AXDecodeAdpcmData called (not implemented)"); }

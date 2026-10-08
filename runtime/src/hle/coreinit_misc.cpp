@@ -305,6 +305,30 @@ HLE(coreinit, __gh_set_errno) {}
 HLE(coreinit, exit) { LOG("[game] exit(%d)", (int)arg(c, 0)); std::exit((int)arg(c, 0)); }
 HLE(coreinit, _Exit) { LOG("[game] _Exit(%d)", (int)arg(c, 0)); std::_Exit((int)arg(c, 0)); }
 
+HLE(coreinit, COSWarn) {  // (module, format, ...)
+    GuestArgs a;
+    a.c = c;
+    a.gpr = 2;
+    a.overflow = c->r[1] + 8;
+    report(guest_format(mem::read_cstr(arg(c, 1)), a));
+}
+HLE(coreinit, __PPCHalt) { fatal("__PPCHalt (lr=%08X)", c->lr); }
+HLE(coreinit, OSGetConsoleType) { ret(c, 0); }  // retail: none of the development bits (0x10000000 is tested)
+HLE(coreinit, OSGetShutdownReason) { ret(c, 0); }
+HLE(coreinit, OSIsHomeButtonMenuEnabled) { ret(c, 1); }
+
+// ---------------------------------------------------------------- MCP (title and system settings)
+HLE(coreinit, MCP_Open) { ret(c, 1); }
+HLE(coreinit, MCP_Close) { ret(c, 0); }
+HLE(coreinit, MCP_GetSysProdSettings) {  // (handle, MCPSysProdSettings*): a USA console
+    uint32_t out = arg(c, 1);
+    memset(mem::ptr(out), 0, 0x46);
+    st32(out + 0x00, 2);  // product area: USA
+    st32(out + 0x08, 2);  // game region: USA
+    memcpy(mem::ptr(out + 0x10), "NTSC", 4);
+    ret(c, 0);
+}
+
 // ---------------------------------------------------------------- UC (system settings)
 // UCSysConfig entries are 0x54 bytes: name[64], access u32, dataType u32, error s32, dataSize u32, dataPtr u32
 HLE(coreinit, UCOpen) { ret(c, 1); }

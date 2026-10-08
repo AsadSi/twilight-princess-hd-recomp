@@ -30,7 +30,15 @@ uint32_t pro_buttons(uint32_t v) {
 }
 }  // namespace
 
+HLE(padscore, KPADInit) {}
 HLE(padscore, KPADInitEx) {}
+HLE(padscore, KPADShutdown) {}
+HLE(padscore, KPADEnableDPD) {}
+HLE(padscore, KPADDisableDPD) {}
+HLE(padscore, KPADEnableMpls) {}
+HLE(padscore, KPADDisableMpls) {}
+// -> the previous callback; connections are never reported (the Pro Controller is there or not)
+HLE(padscore, KPADSetConnectCallback) { ret(c, 0); }
 HLE(padscore, KPADGetMplsWorkSize) { ret(c, 0x5FE0); }
 HLE(padscore, KPADSetMplsWorkarea) {}
 HLE(padscore, WPADEnableURCC) {}

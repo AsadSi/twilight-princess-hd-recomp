@@ -18,6 +18,7 @@ HLE(nn_act, Finalize__Q2_2nn3actFv) { ret(c, kResultOk); }
 HLE(nn_act, GetSlotNo__Q2_2nn3actFv) { ret(c, 1); }
 HLE(nn_act, GetPrincipalId__Q2_2nn3actFv) { ret(c, 0); }
 HLE(nn_act, GetParentalControlSlotNoEx__Q2_2nn3actFPUcUc) { st8(arg(c, 0), 1); ret(c, kResultOk); }
+HLE(nn_act, GetUuid__Q2_2nn3actFP7ACTUuid) { memset(mem::ptr(arg(c, 0)), 0, 16); ret(c, kResultOk); }
 
 // ---- nn_ac (network connection)
 HLE(nn_ac, Initialize__Q2_2nn2acFv) { ret(c, kResultOk); }
@@ -46,23 +47,65 @@ HLE(nn_boss, StartScheduling__Q3_2nn4boss4TaskFb) { ret(c, kResultFail); }
 HLE(nn_olv, Initialize__Q2_2nn3olvFPCQ3_2nn3olv15InitializeParam) { ret(c, kResultFail); }
 HLE(nn_olv, IsInitialized__Q2_2nn3olvFv) { ret(c, 0); }
 HLE(nn_olv, Finalize__Q2_2nn3olvFv) { ret(c, kResultOk); }
+HLE(nn_olv, GetErrorCode__Q2_2nn3olvFRCQ2_2nn6Result) { ret(c, 0); }
+// posting parameters are built and accepted; the post itself fails
+HLE(nn_olv, __ct__Q3_2nn3olv15InitializeParamFv) { ret(c, arg(c, 0)); }
+HLE(nn_olv, SetWork__Q3_2nn3olv15InitializeParamFPUcUi) { ret(c, kResultOk); }
+HLE(nn_olv, __ct__Q3_2nn3olv28UploadPostDataByPostAppParamFv) { ret(c, arg(c, 0)); }
+HLE(nn_olv, __dt__Q3_2nn3olv28UploadPostDataByPostAppParamFv) {}
+HLE(nn_olv, SetWork__Q3_2nn3olv28UploadPostDataByPostAppParamFPUcUi) { ret(c, kResultOk); }
+HLE(nn_olv, SetFlags__Q3_2nn3olv28UploadPostDataByPostAppParamFUi) { ret(c, kResultOk); }
+HLE(nn_olv, SetBodyTextMaxLength__Q3_2nn3olv28UploadPostDataByPostAppParamFUi) { ret(c, kResultOk); }
+HLE(nn_olv, SetExternalImageData__Q3_2nn3olv15UploadParamBaseFPCUcUi) { ret(c, kResultOk); }
+HLE(nn_olv, AddCommonData__Q3_2nn3olv15UploadParamBaseFUiPCUcT1) { ret(c, kResultOk); }
+HLE(nn_olv, GetDataTypeNum__Q3_2nn3olv15UploadParamBaseCFUi) { ret(c, 0); }
+HLE(nn_olv, UploadPostDataByPostApp__Q2_2nn3olvFPCQ3_2nn3olv28UploadPostDataByPostAppParam) { ret(c, kResultFail); }
+
+// ---- nn_nfp (amiibo): the reader works and never sees a figure, so the activate event never fires
+HLE(nn_nfp, Initialize__Q2_2nn3nfpFv) { ret(c, kResultOk); }
+HLE(nn_nfp, Finalize__Q2_2nn3nfpFv) { ret(c, kResultOk); }
+HLE(nn_nfp, SetActivateEvent__Q2_2nn3nfpFP7OSEvent) { ret(c, kResultOk); }
+HLE(nn_nfp, SetDeactivateEvent__Q2_2nn3nfpFP7OSEvent) { ret(c, kResultOk); }
+HLE(nn_nfp, StartDetection__Q2_2nn3nfpFv) { ret(c, kResultOk); }
+HLE(nn_nfp, StopDetection__Q2_2nn3nfpFv) { ret(c, kResultOk); }
+HLE(nn_nfp, Unmount__Q2_2nn3nfpFv) { ret(c, kResultOk); }
+HLE(nn_nfp, GetErrorCode__Q2_2nn3nfpFRCQ2_2nn6Result) { ret(c, 0); }
+HLE(nn_nfp, InitializeCreateInfo__Q2_2nn3nfpFPQ3_2nn3nfp25ApplicationAreaCreateInfo) { ret(c, kResultOk); }
+HLE(nn_nfp, InitializeAmiiboSettingsArgsIn__Q2_2nn3nfpFPQ3_2nn3nfp20AmiiboSettingsArgsIn) { ret(c, kResultOk); }
+// no tag: everything that needs one fails
+HLE(nn_nfp, Mount__Q2_2nn3nfpFv) { ret(c, kResultFail); }
+HLE(nn_nfp, Flush__Q2_2nn3nfpFv) { ret(c, kResultFail); }
+HLE(nn_nfp, GetTagInfo__Q2_2nn3nfpFPQ3_2nn3nfp7TagInfo) { ret(c, kResultFail); }
+HLE(nn_nfp, GetNfpCommonInfo__Q2_2nn3nfpFPQ3_2nn3nfp10CommonInfo) { ret(c, kResultFail); }
+HLE(nn_nfp, GetNfpRegisterInfo__Q2_2nn3nfpFPQ3_2nn3nfp12RegisterInfo) { ret(c, kResultFail); }
+HLE(nn_nfp, OpenApplicationArea__Q2_2nn3nfpFUi) { ret(c, kResultFail); }
+HLE(nn_nfp, ReadApplicationArea__Q2_2nn3nfpFPvUi) { ret(c, kResultFail); }
+HLE(nn_nfp, WriteApplicationArea__Q2_2nn3nfpFPCvUiRCQ3_2nn3nfp5TagId) { ret(c, kResultFail); }
+HLE(nn_nfp, CreateApplicationArea__Q2_2nn3nfpFRCQ3_2nn3nfp25ApplicationAreaCreateInfo) { ret(c, kResultFail); }
+HLE(nn_nfp, SwitchToAmiiboSettings__Q2_2nn3nfpFRCQ3_2nn3nfp20AmiiboSettingsArgsInPCcUi) { ret(c, kResultFail); }
+HLE(nn_nfp, GetAmiiboSettingsResult__Q2_2nn3nfpFPQ3_2nn3nfp20AmiiboSettingsResultRC15SysArgDataBlock) { ret(c, kResultFail); }
 
 // ---- sockets / curl
 HLE(nsysnet, socket_lib_init) { ret(c, 0); }
 HLE(nsysnet, socket_lib_finish) { ret(c, 0); }
 HLE(nsysnet, NSSLInit) { ret(c, 0); }
 HLE(nsysnet, NSSLFinish) { ret(c, 0); }
+HLE(nlibcurl, curl_global_init) { ret(c, 0); }  // CURLE_OK (the network itself is unavailable: nn_ac)
 HLE(nlibcurl, curl_global_init_mem) { ret(c, 0); }
 HLE(nlibcurl, curl_global_cleanup) {}
 
 // ---- proc_ui (foreground/background lifecycle)
 HLE(proc_ui, ProcUIInit) {}
+HLE(proc_ui, ProcUIInitEx) {}
 HLE(proc_ui, ProcUIShutdown) {}
 HLE(proc_ui, ProcUIRegisterCallback) {}
 HLE(proc_ui, ProcUIDrawDoneRelease) {}
 HLE(proc_ui, ProcUIProcessMessages) { ret(c, 0); }  // PROCUI_STATUS_IN_FOREGROUND
 
 // ---- vpad (GamePad): keyboard / host controllers
+HLE(vpad, VPADSetButtonProcMode) {}
+HLE(vpad, VPADEnableGyroZeroPlay) {}
+HLE(vpad, VPADSetGyroZeroPlayParam) {}
 HLE(vpad, VPADRead) {
     // (chan, VPADStatus* buf, count, int32* error) -> samples written
     uint32_t chan = arg(c, 0), st = arg(c, 1), count = arg(c, 2), err = arg(c, 3);

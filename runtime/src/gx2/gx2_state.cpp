@@ -91,6 +91,15 @@ HLE(gx2, GX2SetDepthStencilControl) {
     set_reg(REGADDR::DB_DEPTH_CONTROL, r.getRawValue());
 }
 HLE(gx2, GX2SetDepthStencilControlReg) { set_reg(REGADDR::DB_DEPTH_CONTROL, ld32(arg(c, 0))); }
+// depth only: the stencil test off (as the SDK documents it)
+HLE(gx2, GX2SetDepthOnlyControl) {
+    LATTE_DB_DEPTH_CONTROL r;
+    r.set_Z_ENABLE(arg(c, 0) != 0).set_Z_WRITE_ENABLE(arg(c, 1) != 0).set_Z_FUNC((LATTE_DB_DEPTH_CONTROL::E_ZFUNC)arg(c, 2));
+    set_reg(REGADDR::DB_DEPTH_CONTROL, r.getRawValue());
+}
+// GX2DepthBuffer: clearDepth (f32) at +0x88, clearStencil at +0x8C, read by the game's own clears
+HLE(gx2, GX2SetClearDepth) { stf32(arg(c, 0) + 0x88, (float)c->f[1].ps0); }
+HLE(gx2, GX2SetClearStencil) { st32(arg(c, 0) + 0x8C, arg(c, 1)); }
 
 HLE(gx2, GX2SetStencilMask) {
     LATTE_DB_STENCILREFMASK f;
@@ -116,6 +125,24 @@ HLE(gx2, GX2SetPolygonControl) {
     set_reg(REGADDR::PA_SU_SC_MODE_CNTL, v.getRawValue());
 }
 HLE(gx2, GX2SetPolygonControlReg) { set_reg(REGADDR::PA_SU_SC_MODE_CNTL, ld32(arg(c, 0))); }
+// (frontFace, cullFront, cullBack): GX2SetPolygonControl with polygon modes and offsets off
+HLE(gx2, GX2SetCullOnlyControl) {
+    LATTE_PA_SU_SC_MODE_CNTL v;
+    v.set_FRONT_FACE((LATTE_PA_SU_SC_MODE_CNTL::E_FRONTFACE)arg(c, 0));
+    v.set_CULL_FRONT((arg(c, 1) & 1) != 0);
+    v.set_CULL_BACK((arg(c, 2) & 1) != 0);
+    set_reg(REGADDR::PA_SU_SC_MODE_CNTL, v.getRawValue());
+}
+HLE(gx2, GX2SetPrimitiveRestartIndex) { set_reg(REGADDR::VGT_MULTI_PRIM_IB_RESET_INDX, arg(c, 0)); }
+// stream out and tessellation are not supported: off is accepted, on is logged
+HLE(gx2, GX2SetStreamOutEnable) {
+    if (arg(c, 0)) LOG("[gx2] GX2SetStreamOutEnable(1): stream out is not supported (lr=%08X)", c->lr);
+}
+HLE(gx2, GX2SetTessellation) {
+    if (arg(c, 0)) LOG("[gx2] GX2SetTessellation(%u): tessellation is not supported (lr=%08X)", arg(c, 0), c->lr);
+}
+HLE(gx2, GX2SetMinTessellationLevel) {}
+HLE(gx2, GX2SetMaxTessellationLevel) {}
 
 HLE(gx2, GX2SetPolygonOffsetReg) {
     uint32 r = arg(c, 0);
