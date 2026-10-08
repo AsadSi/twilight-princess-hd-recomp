@@ -434,6 +434,20 @@ static void test_settings_and_sources() {
     a = vpad(false);
     print("mouse 10 deg: dir x", a.dir[0]);
     assert(close_to(a.dir[0], {std::cos(10 * kPi / 180), 0, std::sin(10 * kPi / 180)}, 0.01f));
+    {  // a stall longer than the fusion step cap (a slow frame, a busy CI machine) keeps the whole angle
+        recenter();
+        vpad(false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        mouse_motion(100, 0);
+        VpadMotion s2 = vpad(false);
+        print("mouse 10 deg after a 150 ms stall: dir x", s2.dir[0]);
+        assert(close_to(s2.dir[0], {std::cos(10 * kPi / 180), 0, std::sin(10 * kPi / 180)}, 0.01f));
+        recenter();
+        vpad(false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        mouse_motion(100, 0);
+        a = vpad(false);
+    }
     VpadMotion b = vpad(true);  // a repeated read repeats
     assert(close_to(b.dir[0], a.dir[0], 1e-6f));
     recenter();

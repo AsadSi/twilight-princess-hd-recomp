@@ -280,9 +280,12 @@ VpadMotion vpad(bool repeat) {
         g_test.update(dt, w, {}, g_settings.tuning);
         m = g_test.vpad();
     } else if (g_settings.source == kMouse) {
-        Vec3 w = mouse_rate(g_mouse.orientation(), g_mouse_dx, g_mouse_dy, dt, g_settings.mouse_degrees);
+        // the mouse moves the pose by an angle, not a rate: use the step the fusion integrates (it caps a
+        // stall at 0.1 s), so a long frame never loses part of the movement
+        const float step = std::min(dt, 0.1f);
+        Vec3 w = mouse_rate(g_mouse.orientation(), g_mouse_dx, g_mouse_dy, step, g_settings.mouse_degrees);
         g_mouse_dx = g_mouse_dy = 0;
-        if (dt > 0) g_mouse.update(dt, w, {}, g_settings.tuning);
+        if (step > 0) g_mouse.update(step, w, {}, g_settings.tuning);
         m = g_mouse.vpad();
     } else if (g_settings.source == kController || g_settings.source == kCemuhook) {
         auto it = g_devices.find(g_active);
