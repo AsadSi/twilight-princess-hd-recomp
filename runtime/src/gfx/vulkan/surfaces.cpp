@@ -4,6 +4,7 @@
 #include "buffer_cache.h"
 #include "render_prof.h"
 #include "settings.h"
+#include "shaders.h"
 #include "sparse_hash_memo.h"
 #include "write_watch.h"
 #define XXH_INLINE_ALL
@@ -24,6 +25,8 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <vector>
 
 Latte::E_GX2SURFFMT LatteTexture_ReconstructGX2Format(const Latte::LATTE_SQ_TEX_RESOURCE_WORD1_N&, const Latte::LATTE_SQ_TEX_RESOURCE_WORD4_N&);
 namespace gfxvk {
@@ -585,6 +588,200 @@ VkImageView sampled_texture_view(Surface* s,const uint32_t* texWords) {
     info.subresourceRange={VkImageAspectFlags(s->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,s->mips,0,layers};
     VkImageView view=VK_NULL_HANDLE;check_vk(vkCreateImageView(R.device,&info,nullptr,&view),"create sampled texture view");s->sampledViews.emplace(key,view);return view;
 }
+// ---------------------------------------------------------------- scaled depth copies without blits
+// Vulkan requires no depth/stencil format to support blits (BLIT_SRC/BLIT_DST are optional for all of
+// them), and Adreno drivers report none for some. Scaling such a surface (rescale after a resolution or
+// aspect-ratio change, a scaled GX2CopySurface) draws instead: each destination pixel takes the source
+// texel vkCmdBlitImage with VK_FILTER_NEAREST would take, written with gl_FragDepth; stencil is copied
+// one bit per pass (the pass writes its bit where the source has it, the depth pass zeroes all bits).
+// WWHD_VK_DEPTH_COPY=draw uses the draws on every device (tests; the renderer smoke test sets it).
+bool g_depthCopyDraw=[]{const char* e=getenv("WWHD_VK_DEPTH_COPY");return e&&!strcmp(e,"draw");}();
+static bool format_can_blit(VkFormat format) {
+    VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,format,&properties);
+    auto features=properties.optimalTilingFeatures;
+    return (features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)&&(features&VK_FORMAT_FEATURE_BLIT_DST_BIT);
+}
+static bool depth_copy_draws(const Surface* s) {
+    if(!s->fmt.depth)return false;
+    if(g_depthCopyDraw)return true;
+    if(format_can_blit(s->fmt.pixel))return false;
+    static std::vector<VkFormat> logged;
+    if(std::find(logged.begin(),logged.end(),s->fmt.pixel)==logged.end()) {
+        logged.push_back(s->fmt.pixel);
+        LOG("[gfx] Vulkan: depth format %d cannot be blitted on this device; scaled depth copies are drawn",int(s->fmt.pixel));
+    }
+    return true;
+}
+namespace {
+struct DepthCopyParams { float scaleX,scaleY;int32_t lastX,lastY;uint32_t bit; };
+struct DepthCopyResources {
+    VkDevice device=VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptors=VK_NULL_HANDLE;
+    VkPipelineLayout layout=VK_NULL_HANDLE;
+    VkSampler sampler=VK_NULL_HANDLE;
+    std::unordered_map<uint64_t,VkPipeline> pipelines;  // (format, stencil bit pass)
+} depthCopy;
+const char* depthCopyVertex=R"glsl(#version 450
+void main() {
+    vec2 p=vec2((gl_VertexIndex<<1)&2,gl_VertexIndex&2);
+    gl_Position=vec4(p*2.0-1.0,0.0,1.0);
+}
+)glsl";
+const char* depthCopyFragment=R"glsl(#version 450
+layout(set=0,binding=0) uniform sampler2D depthSource;
+layout(push_constant) uniform Params { vec2 scale; ivec2 last; uint bit; } p;
+void main() {
+    ivec2 texel=min(ivec2(gl_FragCoord.xy*p.scale),p.last);
+    gl_FragDepth=texelFetch(depthSource,texel,0).r;
+}
+)glsl";
+const char* stencilCopyFragment=R"glsl(#version 450
+layout(set=0,binding=1) uniform usampler2D stencilSource;
+layout(push_constant) uniform Params { vec2 scale; ivec2 last; uint bit; } p;
+void main() {
+    ivec2 texel=min(ivec2(gl_FragCoord.xy*p.scale),p.last);
+    if((texelFetch(stencilSource,texel,0).r&(1u<<p.bit))==0u)discard;
+}
+)glsl";
+VkShaderModule depth_copy_module(const char* source,bool vertex) {
+    std::string error;auto words=vk::compile_glsl(source,vertex,&error);
+    if(words.empty()||!error.empty())throw std::runtime_error("Vulkan depth copy shader: "+error);
+    VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};ci.codeSize=words.size()*4;ci.pCode=words.data();
+    VkShaderModule module=VK_NULL_HANDLE;check_vk(vkCreateShaderModule(R.device,&ci,nullptr,&module),"create depth copy shader");return module;
+}
+void depth_copy_resources() {
+    if(depthCopy.device&&depthCopy.device!=R.device)depthCopy={};  // a new device: the old one's objects went with it
+    depthCopy.device=R.device;
+    if(!depthCopy.descriptors) {
+        VkDescriptorSetLayoutBinding bindings[2]{{0,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr},
+                                                 {1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,VK_SHADER_STAGE_FRAGMENT_BIT,nullptr}};
+        VkDescriptorSetLayoutCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};ci.bindingCount=2;ci.pBindings=bindings;
+        check_vk(vkCreateDescriptorSetLayout(R.device,&ci,nullptr,&depthCopy.descriptors),"create depth copy descriptors");
+    }
+    if(!depthCopy.layout) {
+        VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(DepthCopyParams)};
+        VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};ci.setLayoutCount=1;ci.pSetLayouts=&depthCopy.descriptors;
+        ci.pushConstantRangeCount=1;ci.pPushConstantRanges=&push;
+        check_vk(vkCreatePipelineLayout(R.device,&ci,nullptr,&depthCopy.layout),"create depth copy layout");
+    }
+    if(!depthCopy.sampler) {
+        VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};ci.minFilter=ci.magFilter=VK_FILTER_NEAREST;ci.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        ci.addressModeU=ci.addressModeV=ci.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        check_vk(vkCreateSampler(R.device,&ci,nullptr,&depthCopy.sampler),"create depth copy sampler");
+    }
+}
+// the depth pass (writes depth and, with stencil, zeroes it) or a stencil bit pass
+VkPipeline depth_copy_pipeline(const FormatInfo& fmt,bool stencilPass) {
+    depth_copy_resources();
+    const uint64_t key=uint64_t(fmt.pixel)<<1|uint64_t(stencilPass);
+    if(auto it=depthCopy.pipelines.find(key);it!=depthCopy.pipelines.end())return it->second;
+    VkShaderModule vs=VK_NULL_HANDLE,fs=VK_NULL_HANDLE;VkPipeline result=VK_NULL_HANDLE;
+    try {
+        vs=depth_copy_module(depthCopyVertex,true);fs=depth_copy_module(stencilPass?stencilCopyFragment:depthCopyFragment,false);
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        for(int i=0;i<2;++i){stages[i].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;stages[i].stage=i?VK_SHADER_STAGE_FRAGMENT_BIT:VK_SHADER_STAGE_VERTEX_BIT;stages[i].module=i?fs:vs;stages[i].pName="main";}
+        VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};vp.viewportCount=vp.scissorCount=1;
+        VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};rs.polygonMode=VK_POLYGON_MODE_FILL;rs.cullMode=VK_CULL_MODE_NONE;rs.lineWidth=1;
+        VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
+        VkPipelineDepthStencilStateCreateInfo dss{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        dss.depthTestEnable=dss.depthWriteEnable=stencilPass?VK_FALSE:VK_TRUE;dss.depthCompareOp=VK_COMPARE_OP_ALWAYS;
+        dss.stencilTestEnable=fmt.stencil?VK_TRUE:VK_FALSE;
+        // reference and write mask are dynamic: 0 / all bits in the depth pass, all bits / one bit in a bit pass
+        dss.front={VK_STENCIL_OP_REPLACE,VK_STENCIL_OP_REPLACE,VK_STENCIL_OP_REPLACE,VK_COMPARE_OP_ALWAYS,0xFF,0xFF,0};dss.back=dss.front;
+        VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        VkDynamicState states[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR,VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,VK_DYNAMIC_STATE_STENCIL_REFERENCE};
+        VkPipelineDynamicStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};ds.dynamicStateCount=fmt.stencil?4:2;ds.pDynamicStates=states;
+        VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+        rendering.depthAttachmentFormat=fmt.pixel;rendering.stencilAttachmentFormat=fmt.stencil?fmt.pixel:VK_FORMAT_UNDEFINED;
+        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};ci.pNext=&rendering;ci.stageCount=2;ci.pStages=stages;
+        ci.pVertexInputState=&vi;ci.pInputAssemblyState=&ia;ci.pViewportState=&vp;ci.pRasterizationState=&rs;ci.pMultisampleState=&ms;
+        ci.pDepthStencilState=&dss;ci.pColorBlendState=&bs;ci.pDynamicState=&ds;ci.layout=depthCopy.layout;
+        check_vk(vkCreateGraphicsPipelines(R.device,R.pipelineCache,1,&ci,nullptr,&result),"create depth copy pipeline");
+        depthCopy.pipelines.emplace(key,result);++R.pipelineCreates;R.pipelineCacheDirty=true;R.pipelineCacheChangedFrame=R.frame;
+    } catch(...) {
+        if(result)vkDestroyPipeline(R.device,result,nullptr);
+        if(vs)vkDestroyShaderModule(R.device,vs,nullptr);if(fs)vkDestroyShaderModule(R.device,fs,nullptr);
+        throw;
+    }
+    vkDestroyShaderModule(R.device,vs,nullptr);vkDestroyShaderModule(R.device,fs,nullptr);
+    return result;
+}
+// a 2D view of one level and layer of a depth/stencil surface, for sampling one aspect; kept with the
+// surface's other sampled views (destroyed with its image) under keys sampled_texture_view never makes
+VkImageView depth_copy_source_view(Surface* s,VkImageAspectFlags aspect,uint32_t level,uint32_t layer) {
+    const uint32_t key=0x80000000u|(aspect==VK_IMAGE_ASPECT_STENCIL_BIT?0x40000000u:0)|(level<<20)|layer;
+    if(auto it=s->sampledViews.find(key);it!=s->sampledViews.end())return it->second;
+    VkImageViewCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};info.image=s->image;info.viewType=VK_IMAGE_VIEW_TYPE_2D;info.format=s->fmt.pixel;
+    info.subresourceRange={aspect,level,1,layer,1};
+    VkImageView view=VK_NULL_HANDLE;check_vk(vkCreateImageView(R.device,&info,nullptr,&view),"create depth copy source view");
+    s->sampledViews.emplace(key,view);return view;
+}
+}
+// Copies layers [srcLayer, srcLayer+layers) of level srcLevel of src, the region (0,0)-(srcW,srcH), to
+// level 0 of dst from dstLayer on, the region (0,0)-(dstW,dstH), as a nearest-filter blit would. Leaves
+// both surfaces in SHADER_READ_ONLY_OPTIMAL.
+static void draw_depth_copy(Surface* src,uint32_t srcLevel,uint32_t srcLayer,uint32_t srcW,uint32_t srcH,
+                            Surface* dst,uint32_t dstLayer,uint32_t dstW,uint32_t dstH,uint32_t layers) {
+    if(src->image==dst->image)throw std::runtime_error("Vulkan depth copy source and destination alias");
+    if(src->fmt.pixel!=dst->fmt.pixel||!src->fmt.depth||src->imageType!=VK_IMAGE_TYPE_2D||dst->imageType!=VK_IMAGE_TYPE_2D)
+        throw std::runtime_error("Vulkan depth copy requires 2D depth surfaces of one format");
+    if(!(src->usage&VK_IMAGE_USAGE_SAMPLED_BIT)||!(dst->usage&VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))
+        throw std::runtime_error("Vulkan depth copy requires a sampled source and a depth attachment destination");
+    if(srcLevel>=src->mips||srcLayer+layers>src->arrayLayers||dstLayer+layers>dst->arrayLayers||!srcW||!srcH||!dstW||!dstH||
+       dstW>dst->extent.width||dstH>dst->extent.height)
+        throw std::runtime_error("Invalid Vulkan depth copy region");
+    const FormatInfo& fmt=src->fmt;
+    VkPipeline depthPass=depth_copy_pipeline(fmt,false),bitPass=fmt.stencil?depth_copy_pipeline(fmt,true):VK_NULL_HANDLE;
+    end_encoder();
+    transition_image(src,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
+    transition_image(dst,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT|VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    auto cmd=command_buffer();
+    DepthCopyParams params{float(srcW)/float(dstW),float(srcH)/float(dstH),int32_t(srcW)-1,int32_t(srcH)-1,0};
+    VkViewport viewport{0,0,float(dstW),float(dstH),0,1};VkRect2D area{{0,0},{dstW,dstH}};
+    for(uint32_t i=0;i<layers;++i) {
+        VkDescriptorSet set=VK_NULL_HANDLE;
+        VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};allocation.descriptorPool=R.descriptorPool;
+        allocation.descriptorSetCount=1;allocation.pSetLayouts=&depthCopy.descriptors;
+        check_vk(vkAllocateDescriptorSets(R.device,&allocation,&set),"allocate depth copy descriptors");
+        VkDescriptorImageInfo images[2]{{depthCopy.sampler,depth_copy_source_view(src,VK_IMAGE_ASPECT_DEPTH_BIT,srcLevel,srcLayer+i),VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                        {depthCopy.sampler,VK_NULL_HANDLE,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+        VkWriteDescriptorSet writes[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        for(uint32_t b=0;b<2;++b){writes[b].dstSet=set;writes[b].dstBinding=b;writes[b].descriptorCount=1;writes[b].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;writes[b].pImageInfo=&images[b];}
+        if(fmt.stencil)images[1].imageView=depth_copy_source_view(src,VK_IMAGE_ASPECT_STENCIL_BIT,srcLevel,srcLayer+i);
+        vkUpdateDescriptorSets(R.device,fmt.stencil?2:1,writes,0,nullptr);
+        VkRenderingAttachmentInfo attachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        attachment.imageView=layer_view(dst,dstLayer+i);attachment.imageLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        // every pixel of the render area is written (depth, and all stencil bits), and nothing outside it is touched
+        attachment.loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea=area;rendering.layerCount=1;
+        rendering.pDepthAttachment=&attachment;rendering.pStencilAttachment=fmt.stencil?&attachment:nullptr;
+        vkCmdBeginRendering(cmd,&rendering);++R.renderPassCount;
+        vkCmdSetViewport(cmd,0,1,&viewport);vkCmdSetScissor(cmd,0,1,&area);
+        vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,depthCopy.layout,0,1,&set,0,nullptr);
+        vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,depthPass);
+        if(fmt.stencil) {
+            vkCmdSetStencilReference(cmd,VK_STENCIL_FACE_FRONT_AND_BACK,0);
+            vkCmdSetStencilWriteMask(cmd,VK_STENCIL_FACE_FRONT_AND_BACK,0xFF);
+        }
+        params.bit=0;vkCmdPushConstants(cmd,depthCopy.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);
+        vkCmdDraw(cmd,3,1,0,0);
+        if(fmt.stencil) {
+            vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,bitPass);
+            vkCmdSetStencilReference(cmd,VK_STENCIL_FACE_FRONT_AND_BACK,0xFF);
+            for(uint32_t bit=0;bit<8;++bit) {
+                vkCmdSetStencilWriteMask(cmd,VK_STENCIL_FACE_FRONT_AND_BACK,1u<<bit);
+                params.bit=bit;vkCmdPushConstants(cmd,depthCopy.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);
+                vkCmdDraw(cmd,3,1,0,0);
+            }
+        }
+        vkCmdEndRendering(cmd);
+    }
+    transition_image(dst,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
 void resample(Surface* src,Surface* dst,uint32_t slices,float uMax,float vMax,uint32_t dstW,uint32_t dstH) {
     if(!src||!dst||!src->image||!dst->image)throw std::runtime_error("Vulkan resample requires allocated surfaces");
     if(src->image==dst->image)throw std::runtime_error("Vulkan resample source and destination alias");
@@ -592,17 +789,23 @@ void resample(Surface* src,Surface* dst,uint32_t slices,float uMax,float vMax,ui
         throw std::runtime_error("Vulkan resample requires matching uncompressed surface formats and dimensions");
     VkFormatProperties properties{};vkGetPhysicalDeviceFormatProperties(R.physicalDevice,src->fmt.pixel,&properties);
     auto features=properties.optimalTilingFeatures;
-    if(!(features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)||!(features&VK_FORMAT_FEATURE_BLIT_DST_BIT))
+    const bool draw=depth_copy_draws(src);
+    if(!draw&&(!(features&VK_FORMAT_FEATURE_BLIT_SRC_BIT)||!(features&VK_FORMAT_FEATURE_BLIT_DST_BIT)))
         throw std::runtime_error("Vulkan device cannot blit this surface format");
     if(slices>src->arrayLayers||slices>dst->arrayLayers)throw std::runtime_error("Vulkan resample layer range exceeds surface");
     if(!dstW)dstW=dst->extent.width;if(!dstH)dstH=dst->extent.height;
     if(dstW>dst->extent.width||dstH>dst->extent.height||!(uMax>0&&uMax<=1&&vMax>0&&vMax<=1))
         throw std::runtime_error("Invalid Vulkan resample extent");
+    const uint32_t srcW=std::max(1u,uint32_t(std::lround(src->extent.width*uMax))),srcH=std::max(1u,uint32_t(std::lround(src->extent.height*vMax)));
+    if(draw) {
+        draw_depth_copy(src,0,0,srcW,srcH,dst,0,dstW,dstH,slices);
+        return;
+    }
     end_encoder();transition_image(src,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
     transition_image(dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
     VkImageBlit region{};region.srcSubresource={VkImageAspectFlags(src->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,0,slices};
     region.dstSubresource=region.srcSubresource;
-    region.srcOffsets[1]={int32_t(std::max(1u,uint32_t(std::lround(src->extent.width*uMax)))),int32_t(std::max(1u,uint32_t(std::lround(src->extent.height*vMax)))),int32_t(src->extent.depth)};
+    region.srcOffsets[1]={int32_t(srcW),int32_t(srcH),int32_t(src->extent.depth)};
     region.dstOffsets[1]={int32_t(dstW),int32_t(dstH),int32_t(dst->extent.depth)};
     VkFilter filter=!src->fmt.depth&&src->fmt.kind==FormatInfo::FLOAT&&(features&VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)?VK_FILTER_LINEAR:VK_FILTER_NEAREST;
     vkCmdBlitImage(command_buffer(),src->image,src->layout,dst->image,dst->layout,1,&region,filter);
@@ -936,13 +1139,20 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
         if(!dst||dst->fmt.pixel!=gpuSrc->fmt.pixel)throw std::runtime_error("Vulkan GPU GX2CopySurface format conversion is unsupported");
         if(srcSlice>=gpuSrc->arrayLayers||dstSlice>=dst->arrayLayers)throw std::runtime_error("GX2CopySurface array slice is out of range");
         if(gpuSrc==dst&&gpuLevel==0&&srcSlice==dstSlice)return;
-        end_encoder();
         bool self=gpuSrc->image==dst->image;
-        transition_image(gpuSrc,self?VK_IMAGE_LAYOUT_GENERAL:VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT|(self?VK_ACCESS_TRANSFER_WRITE_BIT:0));
-        if(!self)transition_image(dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
         uint32_t sw=std::min(uint32_t(std::lround(cw*gpuSrc->sx)),std::max(gpuSrc->extent.width>>gpuLevel,1u));
         uint32_t sh=std::min(uint32_t(std::lround(ch*gpuSrc->sy)),std::max(gpuSrc->extent.height>>gpuLevel,1u));
         uint32_t tw=std::min(uint32_t(std::lround(cw*dst->sx)),dst->extent.width),th=std::min(uint32_t(std::lround(ch*dst->sy)),dst->extent.height);
+        if(!self&&(sw!=tw||sh!=th)&&depth_copy_draws(dst)) {
+            // a scaled depth copy the device cannot blit
+            draw_depth_copy(gpuSrc,gpuLevel,srcSlice,sw,sh,dst,dstSlice,tw,th,1);
+            mark_gpu_written(dst);
+            write_back_linear_copy(dst,dstSlice,d,dbase,dstMip,dstSlice,cw,ch);
+            return;
+        }
+        end_encoder();
+        transition_image(gpuSrc,self?VK_IMAGE_LAYOUT_GENERAL:VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT|(self?VK_ACCESS_TRANSFER_WRITE_BIT:0));
+        if(!self)transition_image(dst,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
         for(auto aspect:{VK_IMAGE_ASPECT_COLOR_BIT,VK_IMAGE_ASPECT_DEPTH_BIT,VK_IMAGE_ASPECT_STENCIL_BIT}) {
             if(!(gpuSrc->aspect&aspect))continue;
             if(sw==tw&&sh==th) {

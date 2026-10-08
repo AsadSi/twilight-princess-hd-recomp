@@ -21,6 +21,7 @@
 
 namespace gfxvk {
 extern uint64_t g_stat_full_checks, g_stat_uploads;
+extern bool g_depthCopyDraw;  // surfaces.cpp: scaled depth copies are drawn instead of blitted
 void request_tv_dump(const std::string&,int);
 namespace {
 void require(bool condition,const char* message) { if(!condition)throw std::runtime_error(message); }
@@ -159,6 +160,97 @@ void asynchronous_submission_check() {
   require(!slot.pending&&slot.garbageBuffers.empty()&&slot.garbageImages.empty(),"async drain left pending resources");
  defer_buffer(out);flush();
  fprintf(stderr,"[renderer smoke] ten async submissions, immutable snapshots, slot wrap and deferred retirement passed\n");
+}
+// Scaled depth copies without blits (surfaces.cpp draw_depth_copy). Vulkan makes blits of depth/stencil
+// formats optional and Adreno drivers report none for some, so resizing a depth target (a resolution or
+// aspect-ratio change) threw there and aborted the game. The draws are forced here on any device and
+// checked texel by texel against the nearest-filter mapping, through resample (all depth formats, two
+// layers, up and down, a partial region) and through the real resize path of an aspect-ratio change.
+void depth_copy_check() {
+ auto depthAt=[](uint32_t x,uint32_t y,uint32_t layer){return float((x*7+y*13+layer*5)%97)/96.0f;};
+ auto d16At=[](uint32_t x,uint32_t y,uint32_t layer){return uint16_t(x*1031+y*7919+layer*3);};
+ auto stencilAt=[](uint32_t x,uint32_t y,uint32_t layer){return uint8_t(x*37+y*11+layer*101);};
+ // texel bytes of one aspect of the pattern (depth: D16 as 2 bytes, else a float; stencil: 1 byte)
+ auto pattern=[&](const Surface& s,VkImageAspectFlags aspect,uint32_t layer,uint32_t w,uint32_t h){
+  const uint32_t bytes=aspect==VK_IMAGE_ASPECT_STENCIL_BIT?1:s.fmt.pixel==VK_FORMAT_D16_UNORM?2:4;
+  std::vector<uint8_t> out(size_t(w)*h*bytes);
+  for(uint32_t y=0;y<h;++y)for(uint32_t x=0;x<w;++x) {
+   uint8_t* p=out.data()+(size_t(y)*w+x)*bytes;
+   if(bytes==1)*p=stencilAt(x,y,layer);
+   else if(bytes==2){uint16_t v=d16At(x,y,layer);memcpy(p,&v,2);}
+   else {float v=depthAt(x,y,layer);memcpy(p,&v,4);}
+  }
+  return out;
+ };
+ auto fill=[&](Surface& s,uint32_t layers){
+  std::vector<VkImageAspectFlags> aspects{VK_IMAGE_ASPECT_DEPTH_BIT};if(s.fmt.stencil)aspects.push_back(VK_IMAGE_ASPECT_STENCIL_BIT);
+  transition_image(&s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+  for(uint32_t layer=0;layer<layers;++layer)for(auto aspect:aspects) {
+   auto texels=pattern(s,aspect,layer,s.extent.width,s.extent.height);
+   Buffer staging=create_buffer(texels.size(),VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+   require(staging.mapped!=nullptr,"depth copy staging buffer is not mapped");memcpy(staging.mapped,texels.data(),texels.size());
+   VkBufferImageCopy copy{};copy.imageSubresource={aspect,0,layer,1};copy.imageExtent={s.extent.width,s.extent.height,1};
+   vkCmdCopyBufferToImage(command_buffer(),staging.buffer,s.image,s.layout,1,&copy);defer_buffer(staging);
+  }
+  mark_gpu_written(&s);
+ };
+ // dst's region (0,0)-(dstW,dstH) must hold the nearest source texel of (0,0)-(srcW,srcH); outside it, `outside`
+ auto check=[&](Surface& dst,uint32_t srcW,uint32_t srcH,uint32_t dstW,uint32_t dstH,uint32_t layers,const char* what,
+                float outsideDepth=0,uint8_t outsideStencil=0){
+  const float sx=float(srcW)/float(dstW),sy=float(srcH)/float(dstH);
+  const uint32_t w=dst.extent.width,h=dst.extent.height;
+  for(uint32_t layer=0;layer<layers;++layer) {
+   const bool d16=dst.fmt.pixel==VK_FORMAT_D16_UNORM;
+   auto depths=read_image(dst,VK_IMAGE_ASPECT_DEPTH_BIT,d16?2:4,0,layer);
+   std::vector<uint8_t> stencils;if(dst.fmt.stencil)stencils=read_image(dst,VK_IMAGE_ASPECT_STENCIL_BIT,1,0,layer);
+   uint32_t bad=0;
+   for(uint32_t y=0;y<h;++y)for(uint32_t x=0;x<w;++x) {
+    const size_t i=size_t(y)*w+x;const bool inside=x<dstW&&y<dstH;
+    const uint32_t tx=std::min(uint32_t((float(x)+0.5f)*sx),srcW-1),ty=std::min(uint32_t((float(y)+0.5f)*sy),srcH-1);
+    if(d16){uint16_t v;memcpy(&v,depths.data()+i*2,2);if(inside&&v!=d16At(tx,ty,layer))++bad;}
+    else {float v;memcpy(&v,depths.data()+i*4,4);if(v!=(inside?depthAt(tx,ty,layer):outsideDepth))++bad;}
+    if(dst.fmt.stencil&&stencils[i]!=(inside?stencilAt(tx,ty,layer):outsideStencil))++bad;
+   }
+   if(bad){fprintf(stderr,"[renderer smoke] %s: %u of %u texels differ (layer %u)\n",what,bad,w*h,layer);require(false,what);}
+  }
+ };
+ const bool forced=g_depthCopyDraw;g_depthCopyDraw=true;
+ const uint32_t sizes[3][2]={{64,37},{17,11},{40,24}};
+ for(uint32_t format:{0x05u,0x0Eu,0x11u}) {
+  Image src(40,24,format,true,2);require(src.s.extent.width==40&&src.s.extent.height==24,"depth copy source extent differs");
+  fill(src.s,2);
+  for(auto& size:sizes) {
+   Image dst(size[0],size[1],format,true,2);
+   resample(&src.s,&dst.s,2);
+   check(dst.s,40,24,size[0],size[1],2,"drawn depth copy (resample) differs from the nearest-filter mapping");
+  }
+  // a partial region from part of the source: the rest of the destination keeps its contents
+  if(format!=0x05) {
+   Image dst(48,32,format,true,1);
+   transition_image(&dst.s,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+   VkClearDepthStencilValue value{0.75f,0x33};VkImageSubresourceRange range{dst.s.aspect,0,1,0,1};
+   vkCmdClearDepthStencilImage(command_buffer(),dst.s.image,dst.s.layout,&value,1,&range);
+   resample(&src.s,&dst.s,1,0.5f,0.75f,30,21);
+   check(dst.s,20,18,30,21,1,"drawn partial depth copy differs",0.75f,0x33);
+  }
+ }
+ fprintf(stderr,"[renderer smoke] drawn depth copies (D16, D32F, D32F+S8; layers, up/down, partial) passed\n");
+ // the resize itself: a screen-shaped depth/stencil target, then a 21:9 aspect ratio and a 2x resolution
+ SurfaceDesc d;d.addr=mem::host_alloc(64*36*8,256);d.width=64;d.height=36;d.pitch=64;d.format=0x11;d.isDepth=true;d.dim=1;d.slices=1;
+ Surface* target=find_or_create_surface(d,true);
+ require(target&&target->extent.width==64&&target->extent.height==36,"depth target extent differs");
+ fill(*target,1);
+ set_frame_aspect(21.0f/9.0f);latch_res_scale();
+ require(find_or_create_surface(d,true)==target&&target->extent.width==84&&target->extent.height==36,"aspect change did not rescale the depth target");
+ check(*target,64,36,84,36,1,"depth target after an aspect-ratio change differs");
+ fill(*target,1);
+ set_res_scale(2);latch_res_scale();
+ require(find_or_create_surface(d,true)==target&&target->extent.width==168&&target->extent.height==72,"resolution change did not rescale the depth target");
+ check(*target,84,36,168,72,1,"depth target after a resolution change differs");
+ set_frame_aspect(16.0f/9.0f);set_res_scale(1);latch_res_scale();
+ require(find_or_create_surface(d,true)==target&&target->extent.width==64,"depth target did not return to its guest size");
+ g_depthCopyDraw=forced;
+ fprintf(stderr,"[renderer smoke] depth/stencil target resized by aspect ratio and resolution without blits passed\n");
 }
 // Volume render targets (issue #53, the Picto Box): the game renders 8x8x8 colour-grading volumes
 // slice by slice (GX2 colour buffers of a 3D surface, the view selecting the slice) and samples them
@@ -505,6 +597,7 @@ int renderer_smoke_test() {
    depths=read_image(depth.s,VK_IMAGE_ASPECT_DEPTH_BIT,4);stencils=read_image(depth.s,VK_IMAGE_ASPECT_STENCIL_BIT,1);
    for(size_t i=0;i<stencils.size();++i){float value;memcpy(&value,depths.data()+i*4,4);require(value==0.25f&&stencils[i]==0xa5,"depth/stencil clear differs");}
    fprintf(stderr,"[renderer smoke] depth/stencil upload and clear passed\n");
+   depth_copy_check();
    volume_target_check();
    Image rendered(64,64,0x1a);dynamic_uniform_check(rendered.s);vertex_window_check(rendered.s);triangle(rendered.s);
    if(R.tv.scan)destroy_surface_image(R.tv.scan.get());R.tv.scan=std::make_unique<Surface>();auto& scan=*R.tv.scan;scan.width=64;scan.height=64;scan.format=0x1a;scan.fmt=format_info(scan.format,false);create_surface_image(&scan,false);resample(&rendered.s,&scan,1);mark_gpu_written(&scan);
