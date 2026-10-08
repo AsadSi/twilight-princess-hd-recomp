@@ -21,7 +21,6 @@
 #include "imgui.h"
 #include "hostui.h"
 #include "controls_view.h"
-#include "text_entry.h"
 #include "../aspect.h"
 #include "../crashrec.h"
 #include "../game_languages.h"
@@ -55,7 +54,6 @@ std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
 std::atomic<float> g_density{1.0f};
 std::atomic<bool> g_wait_release{false};  // just closed: the game sees no buttons until all are released
-std::atomic<double> g_last_frame{0};      // frame() ran (alive(): the game's text prompt can show)
 const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ignore the user's input
 // ... except keys a test posts itself (WWHD_TEST_POST_KEYS, gfx/input.mm; the hidden test window never
 // has the user's keyboard)
@@ -285,7 +283,7 @@ TestSwitch parse_test() {
 // ---------------------------------------------------------------- controller
 // debug: WWHD_TEST_PAD=320-400:B+LeftStickRight:0.8+LeftStickUp:0.4 holds host controller inputs
 // (controls.json names, value 1 unless given) during TV frames 320..400. They reach only the
-// Controls tab's live display and the game's text prompt (not the menu navigation, capture or the game).
+// Controls tab's live display (not the menu navigation, capture or the game).
 void test_pad(float* v) {
     struct Hold { uint64_t from, to; int pad; float value; };
     static const std::vector<Hold> holds = [] {
@@ -1373,8 +1371,7 @@ void set_open(bool open) {
     LOG("[overlay] %s", open ? "opened" : "closed");
 }
 bool blocks_input() { return captures() || g_wait_release.load(std::memory_order_relaxed); }
-bool captures() { return is_open() || text_entry::active(); }
-bool alive() { return now_s() - g_last_frame.load(std::memory_order_relaxed) < 1.0; }
+bool captures() { return is_open(); }
 bool perf_shown() { return g_perf.load(std::memory_order_relaxed); }
 void set_perf_shown(bool on) {
     g_perf = on;
@@ -1395,12 +1392,7 @@ bool key(int code, bool down, bool repeat, int mods) {
         if (down && !repeat && !g_capturing_keys.load()) set_open(!is_open());
         if (!g_capturing_keys.load()) return true;
     }
-    if (!is_open()) {
-        // the game's text prompt (text_entry.h) has the keyboard while it shows
-        if (!text_entry::active()) return false;
-        text_entry::key(code, down, repeat);
-        return true;
-    }
+    if (!is_open()) return false;
     if (code >= 0 && code < 256 && !repeat) g_held_keys[code] = down;
     if (g_capturing_keys.load()) {
         if (down && !repeat) {
@@ -1477,15 +1469,13 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         U.frame_i = (U.frame_i + 1) % 120;
     }
     U.last_present = t;
-    g_last_frame = t;
     read_controller();
-    // the game's text prompt shows unless the menu is open over it (the menu has the input then)
-    const bool open = is_open(), perf = perf_shown(), text = !open && text_entry::active();
+    const bool open = is_open(), perf = perf_shown();
     // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
     const std::string toast = open ? std::string() : ss::last_message();
     U.linearized = false;
-    if (!open && !perf && !text && toast.empty()) {
+    if (!open && !perf && toast.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -1525,19 +1515,9 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         }
     }
     apply_capture();
-    feed_gamepad(io, open && U.cap_action < 0);  // the text prompt reads the controller itself
+    feed_gamepad(io, open && U.cap_action < 0);
     ImGui::NewFrame();
     if (open) settings_window();
-    if (text) {
-        float pad[input_map::kPadCount];
-        std::copy(std::begin(U.values), std::end(U.values), pad);
-        if (g_no_host) test_pad(pad);  // WWHD_TEST_PAD drives the on-screen keyboard in test runs
-        if (text_entry::draw(pad)) {
-            // answered: the game sees no buttons until the one that confirmed is released
-            for (auto& k : g_held_keys) k = false;
-            g_wait_release = true;
-        }
-    }
     if (perf) perf_window(open);
     if (!toast.empty()) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 24), ImGuiCond_Always, ImVec2(0.5f, 1.0f));

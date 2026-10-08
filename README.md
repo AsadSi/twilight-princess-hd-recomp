@@ -503,8 +503,7 @@ sudo pacman -S clang cmake ninja sdl3 vulkan-headers vulkan-icd-loader glslang s
 
 Wii U volumes are case-insensitive and the game asks for paths in a different case than the
 extracted folders (e.g. `Audiores` vs `AudioRes`); the runtime resolves such paths itself on
-case-sensitive file systems. When the game asks for text (your name), a text window appears over
-the game (see *Entering text* under Playing).
+case-sensitive file systems.
 
 On Linux and Windows, **F11** or **Alt+Enter** switches the focused window (TV or GamePad) to full
 screen and back; the TV window's full screen (also the settings overlay's *Display > Full screen*) is
@@ -643,23 +642,6 @@ Mouse, keyboard (arrows, Enter, Esc) and controller (D-pad / stick, A, B; L / R 
 The game keeps running but gets no input while it is open; Esc, F1 or B closes it. On macOS it shows
 the same options as the menu bar, and both stay in sync. Shift+F1 still saves state slot 1; slot 1 is
 loaded from the overlay (F1 used to load it).
-
-**Entering text (the name screen):** when the game asks for text — your name when you start a new
-file — a text window appears under the game's own name field (also in the GamePad-only and
-picture-in-picture modes; it scales down to fit, and on very small windows moves up over the field),
-with a field, a character counter (the name takes up to 8 characters) and an on-screen keyboard. The
-game's field shows the name in the game's font as you type. Only characters the game's font can draw
-are offered: the keys and typed characters are checked against the font the name is drawn with
-(`CKingMsg.bffnt`, read from your own game files at run time); a missing one is refused with a short
-note. Type on the keyboard (any layout, accents and dead keys, input methods), **Enter** = OK,
-**Esc** = Cancel, Backspace / Delete / arrows edit. With a controller: D-pad or left stick choose a
-key, **A** types it, **B** deletes, **X** adds a space, **Y** is Shift (once, then Caps), **L / R**
-switch between letters, accented letters and symbols (kana on a Japanese game), **ZL / ZR** move the
-caret, **Start** or the OK key confirms. The mouse clicks keys too; on Android the system keyboard
-also opens. The game gets no input while the window is open, and none after it closes until the
-button that confirmed is released. `WWHD_SWKBD_TEXT=<name>` answers automatically (test runs); only
-where the overlay can't show does the old prompt remain (the typed text in the window title on
-Windows/Linux, a dialog on macOS).
 
 ### Controls
 

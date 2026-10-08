@@ -1,8 +1,6 @@
 // Host input: keyboard and game controllers, read as a Wii U GamePad.
 #pragma once
 #include <cstdint>
-#include <functional>
-#include <string>
 
 namespace input {
 
@@ -35,11 +33,6 @@ void release_keys();                // forget held keys (another window took the
 void controller_values(float* v);   // main thread: input_map::kPadCount host controller inputs, 0..1
 void host_controller_values(float* v);  // any thread: the latest controller_values (settings overlay)
 void held_keys(bool* keys);         // 256 entries: keys held for the game (keyboard + WWHD_KEYS script)
-
-// Ask the user for a line of text (software keyboard). Non-blocking: `done` runs on the
-// main thread with ok = false when cancelled. Text is UTF-16.
-void prompt_text(const std::u16string& initial, int max_len,
-                 std::function<void(bool ok, std::u16string text)> done);
 
 // The host drives the controllers' rumble motors (SDL host; the game's requests are kept by
 // rumble.h). The AppKit host does not yet.

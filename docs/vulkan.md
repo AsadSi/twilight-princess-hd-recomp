@@ -379,8 +379,8 @@ Verify mode found 0 mismatches in 142 million checked hits (330 s per scene, 30 
 
 In the macOS app the Graphics and Display menus and their keys work as with Metal. The SDL game window
 also accepts the following plain-key shortcuts; repeated keydown events are ignored.
-The shortcuts are scoped to the game window, respect host-input disabling, and do
-not toggle settings while entering text. Menu checkmarks reflect pending settings;
+The shortcuts are scoped to the game window and respect host-input disabling.
+Menu checkmarks reflect pending settings;
 resolution changes latch at the next render-frame boundary. Unsupported effect
 controls remain disabled until the renderer reports support.
 

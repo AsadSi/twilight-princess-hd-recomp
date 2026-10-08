@@ -16,7 +16,7 @@ graphics, audio, input) with native implementations of the APIs the game calls.
 | Shaders | Latte microcode → GLSL/SPIR-V/MSL (Cemu decompiler) | same decompiler (vendored), MSL only, persistent recipe cache |
 | Threads | emulated cores with a cycle-quantum scheduler on host fibers | each guest thread is a host thread; a per-core scheduler reproduces Cafe OS priority rules |
 | Memory | emulated address space | guest memory mapped at a fixed host address; loads/stores are byte-swapped host accesses |
-| Audio / input / text entry | emulated AX DSP + host audio; configurable controllers; ImGui keyboard | AX mixing to CoreAudio; keyboard + GameController as a GamePad; native macOS text field |
+| Audio / input | emulated AX DSP + host audio; configurable controllers | AX mixing to CoreAudio; keyboard + GameController as a GamePad |
 | Distribution | emulator + your game dump | recompiled program + your game dump (game files are never redistributed) |
 
 ## The CPU: static recompilation
@@ -59,8 +59,8 @@ The game imports a few hundred system functions. The ones it uses are reimplemen
   extracted game files and a local `save/` folder.
 - **Audio.** AX voices are decoded and mixed natively (ADPCM/PCM, resampling, filters, the game's own
   final-mix callbacks) and played through CoreAudio.
-- **System applets.** The on-screen keyboard is a macOS text field, and the error viewer logs errors
-  and confirms them automatically. Online services report "unavailable".
+- **System applets.** The error viewer logs errors and confirms them automatically. Online services
+  report "unavailable".
 
 ## Graphics: native GX2 instead of GPU emulation
 

@@ -2434,7 +2434,7 @@ void run_main_loop() {
       polled = now;
       display_rate::poll(R.tv.window);
     }
-    if (elapsed >= 0.5 && !input::text_prompt_active()) {
+    if (elapsed >= 0.5) {
       uint64_t frames = gx2::flips_presented();
       if (exitFrame && frame_count() >= exitFrame) {
         SDL_Event quit{};quit.type=SDL_EVENT_QUIT;SDL_PushEvent(&quit);

@@ -11,18 +11,15 @@
 #include "../gfx/vulkan/settings.h"
 #include "../overlay/hostui.h"
 #include "../overlay/overlay.h"
-#include "../overlay/text_entry.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
-#include <deque>
 #include <map>
 #include <mutex>
 #include <set>
 #include <thread>
-#include <utility>
 #include <vector>
 namespace render { uint64_t frame_count(); }
 namespace gfxvk { bool graphics_hotkey(char key, bool activate); }
@@ -36,12 +33,7 @@ static bool g_touch=false;static float g_tx=0,g_ty=0;
 static std::map<SDL_JoystickID,SDL_Gamepad*> g_controllers;
 static std::set<SDL_JoystickID> g_rumble_controllers;  // the ones that have a rumble motor
 static SDL_Window* g_prompt_window=nullptr;
-static std::function<void(bool,std::u16string)> g_pending,g_done;
-static std::u16string g_initial,g_text;
-static int g_max_len=0,g_pending_max_len=0;
-static std::string g_previous_title;
 void set_prompt_window(SDL_Window* window){g_prompt_window=window;}
-bool text_prompt_active(){return (bool)g_done;}
 static int keycode(SDL_Scancode code) {
  switch(code) {
  case SDL_SCANCODE_A: return kVK_ANSI_A;
@@ -325,36 +317,6 @@ void init(){
   std::thread(rumble_watchdog).detach();
  }
 }
-static std::string utf8(const std::u16string& text){
- std::string out;
- for(size_t i=0;i<text.size();i++){
-  uint32_t c=text[i];if(c>=0xD800&&c<=0xDBFF&&i+1<text.size()&&text[i+1]>=0xDC00&&text[i+1]<=0xDFFF)c=0x10000+((c-0xD800)<<10)+(text[++i]-0xDC00);
-  if(c<0x80)out.push_back((char)c);
-  else if(c<0x800){out.push_back((char)(0xC0|(c>>6)));out.push_back((char)(0x80|(c&63)));}
-  else if(c<0x10000){out.push_back((char)(0xE0|(c>>12)));out.push_back((char)(0x80|((c>>6)&63)));out.push_back((char)(0x80|(c&63)));}
-  else{out.push_back((char)(0xF0|(c>>18)));out.push_back((char)(0x80|((c>>12)&63)));out.push_back((char)(0x80|((c>>6)&63)));out.push_back((char)(0x80|(c&63)));}
- }return out;
-}
-// The game's other windows (the GamePad window, where "Use the GamePad to input" invites a click) take
-// the typing too: text input only on the TV window lost every key typed after clicking the GamePad.
-static std::vector<std::pair<SDL_Window*,std::string>> g_other_titles;
-static void other_windows_text_input(bool on){
- if(on){g_other_titles.clear();int n=0;if(SDL_Window** ws=SDL_GetWindows(&n)){for(int i=0;i<n;i++)if(ws[i]!=g_prompt_window){g_other_titles.push_back({ws[i],SDL_GetWindowTitle(ws[i])});SDL_StartTextInput(ws[i]);}SDL_free(ws);}}
- else{for(auto& [w,t]:g_other_titles){SDL_StopTextInput(w);SDL_SetWindowTitle(w,t.c_str());}g_other_titles.clear();}
-}
-static void show_prompt(){
- const std::string title="Enter text (Enter confirms, Escape cancels): "+utf8(g_text);
- if(g_prompt_window)SDL_SetWindowTitle(g_prompt_window,title.c_str());
- for(auto& [w,t]:g_other_titles)SDL_SetWindowTitle(w,title.c_str());
-}
-// std::exchange, not std::move: libc++ leaves a moved-from std::function set, which kept the
-// prompt "active" after the first text (keys swallowed, later prompts never opened).
-static void finish_prompt(bool ok){
- auto done=std::exchange(g_done,nullptr);auto text=std::move(g_text);
- if(g_prompt_window){SDL_StopTextInput(g_prompt_window);SDL_SetWindowTitle(g_prompt_window,g_previous_title.c_str());}
- other_windows_text_input(false);
- release_keys();if(done)done(ok,std::move(text));
-}
 // Some controllers (GameSir) also register a virtual touch screen and a keyboard with Android and
 // send touches and keys for their buttons (mapping modes of the maker's app). Touches only count
 // from touch devices that are not a connected controller.
@@ -370,50 +332,33 @@ bool touch_from_controller(SDL_TouchID id){
  (void)id;return false;
 #endif
 }
-// debug: WWHD_TEST_POST_KEYS=300:F1,410:Down,420:Return,430:K/30 (held 30 frames),500:Text=Tetra pushes key
-// presses (and typed text) at TV frames into SDL's event queue, as gfx/input.mm does on macOS: they take the
-// real path in hidden test runs and reach only the settings overlay and the game's text prompt.
+// debug: WWHD_TEST_POST_KEYS=300:F1,410:Down,420:Return,430:K/30 (held 30 frames) pushes key presses at TV
+// frames into SDL's event queue, as gfx/input.mm does on macOS: they take the real path in hidden test runs
+// and reach only the settings overlay.
 static constexpr Uint64 kTestEventTime=4242;  // timestamp that marks them
 static bool test_event(const SDL_Event& e){return e.common.timestamp==kTestEventTime;}
 static void post_test_keys(){
- struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;};
+ struct Post{uint64_t frame;SDL_Scancode code;bool down;};
  static std::vector<Post> posts=[]{
   std::vector<Post> v;const char* e=getenv("WWHD_TEST_POST_KEYS");
   for(const char* p=e;p&&*p;){
    char* end;uint64_t f=strtoull(p,&end,10);if(*end!=':')break;p=end+1;
    size_t len=strcspn(p,",");std::string k(p,len);p+=len+(p[len]==',');
-   if(k.rfind("Text=",0)==0){v.push_back({f,SDL_SCANCODE_UNKNOWN,true,k.substr(5)});continue;}
    uint64_t hold=0;if(size_t sl=k.find('/');sl!=std::string::npos){hold=strtoull(k.c_str()+sl+1,nullptr,10);k.resize(sl);}
    int code=input_map::key_from_id(k);SDL_Scancode sc=SDL_SCANCODE_UNKNOWN;
    for(int i=0;i<SDL_SCANCODE_COUNT&&code!=input_map::kNoKey;i++)if(keycode((SDL_Scancode)i)==code){sc=(SDL_Scancode)i;break;}
    if(sc==SDL_SCANCODE_UNKNOWN){LOG("[input] WWHD_TEST_POST_KEYS: unknown key %s",k.c_str());continue;}
-   v.push_back({f,sc,true,{}});v.push_back({f+hold,sc,false,{}});
+   v.push_back({f,sc,true});v.push_back({f+hold,sc,false});
   }
   std::stable_sort(v.begin(),v.end(),[](const Post& a,const Post& b){return a.frame<b.frame;});
   return v;
  }();
- static size_t next=0;static std::deque<std::string> texts;  // SDL keeps the text pointer
+ static size_t next=0;
  for(;next<posts.size()&&render::frame_count()>=posts[next].frame;next++){
   const Post& p=posts[next];SDL_Event e{};e.common.timestamp=kTestEventTime;
-  if(!p.text.empty()){texts.push_back(p.text);e.type=SDL_EVENT_TEXT_INPUT;e.text.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;e.text.text=texts.back().c_str();}
-  else{e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;}
-  LOG("[input] test %s %s%s at frame %llu",p.text.empty()?"key":"text",p.text.empty()?SDL_GetScancodeName(p.code):p.text.c_str(),p.text.empty()?(p.down?" down":" up"):"",(unsigned long long)render::frame_count());
+  e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;
+  LOG("[input] test key %s%s at frame %llu",SDL_GetScancodeName(p.code),p.down?" down":" up",(unsigned long long)render::frame_count());
   SDL_PushEvent(&e);
- }
-}
-// The overlay's text prompt (overlay/text_entry.h) while the menu is not over it: typed text (SDL text
-// input, input method composition) and the keys of every game window. True = the prompt took the event.
-static bool text_entry_event(const SDL_Event& event){
- if(!text_entry::active()||overlay::is_open())return false;
- if(getenv("WWHD_NO_HOST_INPUT")&&!test_event(event))return false;
- switch(event.type){
- case SDL_EVENT_TEXT_INPUT:text_entry::text(event.text.text);return true;
- case SDL_EVENT_TEXT_EDITING:text_entry::preedit(event.edit.text);return true;
- case SDL_EVENT_KEY_DOWN:case SDL_EVENT_KEY_UP:{
-  int code=keycode(event.key.scancode);
-  return code>=0&&overlay::key(code,event.type==SDL_EVENT_KEY_DOWN,event.key.repeat,overlay_mods(event.key.mod));
- }
- default:return false;
  }
 }
 void handle_event(const SDL_Event& event){
@@ -423,21 +368,6 @@ void handle_event(const SDL_Event& event){
  if(event.type==SDL_EVENT_GAMEPAD_REMOVED){std::lock_guard lk(g_pads_mu);auto i=g_controllers.find(event.gdevice.which);if(i!=g_controllers.end()){SDL_CloseGamepad(i->second);g_controllers.erase(i);}g_rumble_controllers.erase(event.gdevice.which);g_rumble_sent.erase(event.gdevice.which);g_accel.erase(event.gdevice.which);g_sensor_seen.erase(event.gdevice.which);g_sensor_kick.erase(event.gdevice.which);motion::controller_gone(event.gdevice.which);}
  if(event.type==SDL_EVENT_GAMEPAD_SENSOR_UPDATE){g_sensor_seen[event.gsensor.which]=SDL_GetTicks();if(!getenv("WWHD_NO_HOST_INPUT")&&!overlay::blocks_input())sensor_event(event.gsensor);return;}
  if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST)release_keys();
- if(text_entry_event(event))return;
- if(g_done){
-  if(event.type==SDL_EVENT_KEY_DOWN){
-   if(event.key.scancode==SDL_SCANCODE_RETURN){finish_prompt(true);return;}
-   if(event.key.scancode==SDL_SCANCODE_ESCAPE){finish_prompt(false);return;}
-   if(event.key.scancode==SDL_SCANCODE_BACKSPACE&&!g_text.empty()){char16_t c=g_text.back();g_text.pop_back();if(c>=0xDC00&&c<=0xDFFF&&!g_text.empty()&&g_text.back()>=0xD800&&g_text.back()<=0xDBFF)g_text.pop_back();show_prompt();}
-  }
-  if(event.type==SDL_EVENT_TEXT_INPUT){
-   const unsigned char* p=(const unsigned char*)event.text.text;
-   while(*p){uint32_t c=*p++;int rest=0;if(c>=0xF0){c&=7;rest=3;}else if(c>=0xE0){c&=15;rest=2;}else if(c>=0xC0){c&=31;rest=1;}while(rest--&&*p)c=(c<<6)|(*p++&63);
-    size_t units=c>0xFFFF?2:1;if(g_text.size()+units>(size_t)g_max_len)break;
-    if(c>0xFFFF){c-=0x10000;g_text.push_back((char16_t)(0xD800+(c>>10)));g_text.push_back((char16_t)(0xDC00+(c&1023)));}else g_text.push_back((char16_t)c);
-   }show_prompt();
-  }return;
- }
  if(getenv("WWHD_NO_HOST_INPUT")&&!test_event(event))return;
  if(overlay_event(event)||test_event(event))return;  // posted test keys reach only the overlay
  // Save states belong to the game window, not auxiliary controls/text windows.
@@ -466,36 +396,19 @@ void handle_event(const SDL_Event& event){
   if(action && gfxvk::graphics_hotkey(action,activate)){if(activate)hostui::graphics_changed();return;}
  }
  #ifdef __ANDROID__
- // phones: the controller is the GamePad. Keys only type text (above): controllers such as the
+ // phones: the controller is the GamePad. Keys don't reach the game: controllers such as the
  // GameSir also show up as a keyboard and would press keyboard-mapped GamePad buttons twice.
  static const bool keyboardPad=getenv("WWHD_ANDROID_KEYBOARD")!=nullptr;
  if(!keyboardPad&&(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP))return;
  #endif
- // a repeat never presses a key: one held down while the overlay or the text prompt had the keyboard (Enter
- // that confirmed a name) stays out of the game until pressed again
+ // a repeat never presses a key: one held down while the overlay had the keyboard stays out of the game until
+ // pressed again
  if(event.type==SDL_EVENT_KEY_DOWN||event.type==SDL_EVENT_KEY_UP){int code=keycode(event.key.scancode);if(code>=0){std::lock_guard lk(g_mu);g_keys[code]=event.type==SDL_EVENT_KEY_DOWN&&(g_keys[code]||!event.key.repeat);}}
 }
 void update(){
  mods::update_mouse();
  apply_rumble();
  update_sensors();
- std::function<void(bool,std::u16string)> cancelled;
- {std::lock_guard lk(g_mu);if(g_pending&&!g_done){g_done=std::exchange(g_pending,nullptr);g_text=std::move(g_initial);g_max_len=g_pending_max_len;memset(g_keys,0,sizeof g_keys);if(!g_prompt_window)g_prompt_window=SDL_GetKeyboardFocus();if(g_prompt_window){g_previous_title=SDL_GetWindowTitle(g_prompt_window);if(SDL_StartTextInput(g_prompt_window)){other_windows_text_input(true);show_prompt();LOG("[input] the game asks for text: type it in a game window (shown in the window title), Enter confirms, Escape cancels; WWHD_SWKBD_TEXT=<text> answers automatically");}else{LOG("[input] text input unavailable (%s); set WWHD_SWKBD_TEXT=<text>",SDL_GetError());cancelled=std::exchange(g_done,nullptr);}}else{LOG("[input] text input: no window to type in; set WWHD_SWKBD_TEXT=<text>");cancelled=std::exchange(g_done,nullptr);}}}
- if(cancelled)cancelled(false,{});
- // SDL text input in every game window while the overlay's text prompt shows (typed text, input methods;
- // on Android it brings up the system keyboard); the input method's candidates open over the prompt
- static bool entry_text=false;
- if(text_entry::active()!=entry_text&&!g_done){
-  entry_text=!entry_text;int n=0;
-  if(SDL_Window** ws=SDL_GetWindows(&n)){
-   for(int i=0;i<n;i++){
-    if(!entry_text){SDL_StopTextInput(ws[i]);continue;}
-    int w=1,h=1;SDL_GetWindowSize(ws[i],&w,&h);SDL_Rect area{w/2-160,h/2-60,320,30};
-    SDL_SetTextInputArea(ws[i],&area,0);SDL_StartTextInput(ws[i]);
-   }
-   SDL_free(ws);
-  }
- }
  post_test_keys();
  float v[input_map::kPadCount]={};using namespace input_map;
  auto put=[&](int p,float x){v[p]=std::max(v[p],x);};
@@ -514,7 +427,6 @@ void update(){
  auto state=input_map::controller_state(input_map::current(),v);std::lock_guard lk(g_mu);std::copy(std::begin(v),std::end(v),g_values);g_pad=state;
  if(!overlay::blocks_input()&&!getenv("WWHD_NO_HOST_INPUT"))motion::poll_recalibrate(v,g_keys);
 }
-void prompt_text(const std::u16string& initial,int max_len,std::function<void(bool,std::u16string)> done){std::lock_guard lk(g_mu);g_initial=initial;g_pending_max_len=std::max(0,max_len);if(g_initial.size()>(size_t)g_pending_max_len)g_initial.resize(g_pending_max_len);g_pending=std::move(done);}
 // debug: WWHD_PRESS=1000-1010:8000,1500-1505:0008 holds VPAD buttons (hex) during TV frame ranges
 struct Press { uint64_t from, to; uint32_t bits; };
 static std::vector<Press> scripted() {
