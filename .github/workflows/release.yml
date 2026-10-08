@@ -419,9 +419,9 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-  # Internal monitor: uploads every release zip and the Windows "Wind Waker HD.exe" to VirusTotal and writes
-  # the results to the job summary and vt-report.json. It never fails the release and publishes nothing; the
-  # publish job does not wait for it. Without the VT_API_KEY secret (forks, pull requests) it only says so.
+  # Uploads every release zip and the Windows "Wind Waker HD.exe" to VirusTotal and writes the results to the
+  # job summary and vt-report.json; on a published release the vt-notes job adds them to the release. It never
+  # fails the release; the publish job does not wait for it. Without the VT_API_KEY secret it only says so.
   virustotal:
     needs: [version, macos, linux, windows]
     runs-on: ubuntu-24.04
@@ -429,8 +429,6 @@ jobs:
     timeout-minutes: 45
     env:
       VT_API_KEY: ${{ secrets.VT_API_KEY }}
-      # later: put the report links into the release notes (not wired up; keep "false")
-      VT_LINKS_IN_RELEASE_NOTES: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -494,3 +492,32 @@ jobs:
         run: |
           gh release create "$VERSION" dist/*.zip dist/SHA256SUMS.txt --title "$VERSION" --notes-file dist/notes.md \
             --verify-tag
+
+  # Published releases: append the VirusTotal links and counts to the release notes and attach vt-report.json.
+  # Runs after both publish and the scan; any failure only leaves the release without the section.
+  vt-notes:
+    needs: [version, virustotal, publish]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vt-report
+          path: vt
+
+      - name: Add the VirusTotal section to the release
+        run: |
+          section="$(python3 tools/release/virustotal.py --render-notes vt/vt-report.json)"
+          if [ -z "$section" ]; then echo "no VirusTotal results: release unchanged"; exit 0; fi
+          gh release view "$VERSION" --json body -q .body > notes.md
+          printf '\n%s' "$section" >> notes.md
+          gh release edit "$VERSION" --notes-file notes.md
+          gh release upload "$VERSION" vt/vt-report.json --clobber

@@ -147,7 +147,34 @@ def main():
     return 0
 
 
+def render_notes(report_path):
+    """the release-notes section for a finished report (publish follow-up job): links and counts per file"""
+    rep = json.load(open(report_path))
+    files = [i for i in rep.get("files", []) if "sha256" in i]
+    if not files:
+        return ""
+    out = ["### VirusTotal", "",
+           "Scan results of this release's files at publishing time (results can change as engines update):", ""]
+    for i in files:
+        s = i.get("stats")
+        res = ("%d of %d engines flag it" % (s.get("malicious", 0) + s.get("suspicious", 0),
+                                              sum(v for k, v in s.items() if k in ("malicious", "suspicious", "undetected", "harmless")))
+               if s else "scan not finished")
+        out.append("- `%s`: %s, [report](%s)" % (i["name"], res, i["link"]))
+    flagged = sorted({f.split(":")[0] for i in files for f in i.get("flagged", [])})
+    if flagged:
+        out += ["", "Detections on the Windows files are generic heuristics on an unsigned program "
+                "(%s), reported to the vendors as false positives; see issue #58." % ", ".join(flagged)]
+    return "\n".join(out) + "\n"
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--render-notes":
+        try:
+            sys.stdout.write(render_notes(sys.argv[2]))
+        except Exception as e:
+            notice("render notes: %s" % e)
+        sys.exit(0)
     try:
         sys.exit(main())
     except Exception as e:  # never fail the release
