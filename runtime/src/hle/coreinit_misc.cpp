@@ -317,6 +317,18 @@ HLE(coreinit, OSGetConsoleType) { ret(c, 0); }  // retail: none of the developme
 HLE(coreinit, OSGetShutdownReason) { ret(c, 0); }
 HLE(coreinit, OSIsHomeButtonMenuEnabled) { ret(c, 1); }
 
+// ---------------------------------------------------------------- hardware registers
+// TP HD links the GameCube PAD/SI driver, which polls the serial interface itself. A Wii U has no
+// GameCube ports, so SISR (interface 6, register 0xE) reports "no response" on all four channels and
+// every PADStatus gets err -1; anything else reads 0 and writes are dropped. Hardware version as
+// Cemu answers it (Latte, not Hollywood).
+HLE(coreinit, __OSReadRegister32Ex) { ret(c, arg(c, 0) == 6 && arg(c, 1) == 0xE ? 0x08080808u : 0); }
+HLE(coreinit, __OSWriteRegister32Ex) {}
+HLE(coreinit, OSReadRegister16) { ret(c, 0); }
+HLE(coreinit, OSEnforceInorderIO) {}
+HLE(coreinit, OSDriver_Register) { ret(c, 0); }
+HLE(coreinit, bspGetHardwareVersion) { st32(arg(c, 0), 0x11000000); ret(c, 0); }
+
 // ---------------------------------------------------------------- MCP (title and system settings)
 HLE(coreinit, MCP_Open) { ret(c, 1); }
 HLE(coreinit, MCP_Close) { ret(c, 0); }

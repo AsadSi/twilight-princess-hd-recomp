@@ -851,6 +851,7 @@ HLE(coreinit, OSSwitchFiberEx) {
     ret(c, r);
 }
 HLE(coreinit, OSMemoryBarrier) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+HLE(coreinit, OSCoherencyBarrier) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
 
 
 // ---------------------------------------------------------------- host objects
