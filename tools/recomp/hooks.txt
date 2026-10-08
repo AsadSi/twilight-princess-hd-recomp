@@ -1,3 +1,27 @@
 # Runtime hooks into Zelda.rpx (address = function entry; "@ADDR" = instruction site, runs before it).
-@02AF0EDC  # main01: top of the frame loop (interp.cpp: save states)
+@02AF0EDC  # main01: top of the frame loop (interp.cpp: save states, hold passes)
 029196A0  # dPeekZ_c::peekData: depth peeks answered from GPU readbacks (peekz.cpp)
+# frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
+028E13CC  # camera_draw
+02B5CF50  # J3DModel::viewCalc
+02AC08B4  # dScnPly_Draw
+02AF0A98  # main01: pad read
+02AD9F9C  # main01: audio
+02003ED8  # main01
+02AF09B8  # main01
+02AFA7A0  # main01: HD systems
+02AD6EB0  # fpcDt_Handler
+02AD9664  # fpcPi_Handler
+02AD6C78  # fpcCt_Handler
+02AD752C  # fpcEx_Handler
+0290DD38  # fpcM_Management, after execute
+02ACD0A8  # fapGm_After
+02BEF838  # cCt_Counter
+02902B4C  # dComIfG_Ccsp()->Move()
+028C2AB0  # dComIfG_Bgsp().ClrMoveFlag()
+02ACC800  # vibration Run
+0290CDAC  # daSus_c::execute
+028C2C00  # dComIfG_Bgsp().Move()
+02A9D6E4  # particle calc 3D
+02A9D41C  # particle calc 2D
+02AD5B3C  # fopScnM_ChangeReq

@@ -10,7 +10,7 @@
 # "v<t>:<seconds>" records the game window from wall-clock time t (bin/wincap, built from wincap.swift on first
 # use; needs screen recording permission).
 # Env: SAVE (save folder under build/audit/saves, default "route"), FRESH=1 starts that save folder empty,
-# LOAD=<slot> loads save state <slot> from build/audit/states at frame 60 and starts the route's clock at frame 90
+# LOAD=<slot> loads save state <slot> from build/audit/states at frame 60 and starts the route's clock a game second later
 # (take one with WWHD_STATE_SAVE_AT=<frame>:<slot>).
 # Other WWHD_* variables pass through, e.g. WWHD_WARP=150:<stage>,<point>,<room>,<layer> (tools/warplist.py).
 set -u
@@ -42,10 +42,11 @@ while read -r RANGE WHAT X Y; do
   esac
 done < "$ROUTE"
 
-ORIGIN=1; [ -n "${LOAD:-}" ] && ORIGIN=90
+FPS=30; [ "${WWHD_INTERP:-0}" = 1 ] && FPS=60  # frames per game second (shots are TV frames)
+ORIGIN=1; [ -n "${LOAD:-}" ] && ORIGIN=$((60 + FPS))  # one game second after the state loads (frame 60)
 DUMPS=; CLIPS_AT=()
 for SHOT in "$@"; do
-  if [[ $SHOT == v* ]]; then CLIPS_AT+=("$SHOT"); else DUMPS+="${DUMPS:+,}$(perl -e "print int($SHOT * 30 + $ORIGIN)")"; fi
+  if [[ $SHOT == v* ]]; then CLIPS_AT+=("$SHOT"); else DUMPS+="${DUMPS:+,}$(perl -e "print int($SHOT * $FPS + $ORIGIN)")"; fi
 done
 
 pkill -TERM -x wwhd 2>/dev/null && sleep 2
@@ -70,11 +71,11 @@ kill -0 $PID 2>/dev/null && echo "ALIVE at ${TOTAL}s" || echo "DIED"
 kill -TERM $PID 2>/dev/null; for _ in 1 2 3 4 5 6; do kill -0 $PID 2>/dev/null || break; sleep 0.5; done
 kill -9 $PID 2>/dev/null
 # frame dumps -> tNN.png at 480 wide (the GamePad copies are dropped unless KEEP_DRC=1: dNN.png)
-for SHOT in "$@"; do [[ $SHOT == v* || "${KEEP_DRC:-0}" != 1 ]] && continue; F=frame_$(perl -e "print int($SHOT * 30 + $ORIGIN)")_drc.png; [ -f "$F" ] && sips -Z 480 "$F" --out "d$SHOT.png" >/dev/null; done
+for SHOT in "$@"; do [[ $SHOT == v* || "${KEEP_DRC:-0}" != 1 ]] && continue; F=frame_$(perl -e "print int($SHOT * $FPS + $ORIGIN)")_drc.png; [ -f "$F" ] && sips -Z 480 "$F" --out "d$SHOT.png" >/dev/null; done
 rm -f frame_*_drc.png
 for SHOT in "$@"; do
   [[ $SHOT == v* ]] && continue
-  F=frame_$(perl -e "print int($SHOT * 30 + $ORIGIN)").png
+  F=frame_$(perl -e "print int($SHOT * $FPS + $ORIGIN)").png
   [ -f "$F" ] && sips -Z 480 "$F" --out "t$SHOT.png" >/dev/null && rm "$F" || echo "no frame for ${SHOT}s"
 done
 AFTER=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')

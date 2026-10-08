@@ -555,8 +555,6 @@ void tab_graphics() {
     help("60, 120 and 240 fps: frame interpolation. The game logic keeps its 30 steps a second, and the\n"
          "frames in between are drawn blended (1 in-between frame per step at 60 fps, 3 at 120 fps,\n"
          "7 at 240 fps). The display shows at most its refresh rate: higher choices draw that many.");
-    if (radio("True 60 (experimental)", m == 2)) post_changed([] { interp::set_mode(2); });
-    help("True 60 runs the game logic at 60 steps per second");
     // the display's refresh rate, and what the chosen rate draws on it (interp::output_fps)
     if (const int hz = interp::display_hz(); hz > 0) {
         const int out = interp::output_fps();
@@ -569,21 +567,12 @@ void tab_graphics() {
     } else if (m == 1 && f > 60) {
         note("Display refresh rate unknown: %d fps are drawn; frames beyond the display's rate are not shown.", f);
     }
-    if (m == 1) {
-        bool paced;
-        if (check("Keep game speed", interp::paced_interpolation(), &paced, !getenv("WWHD_INTERP_PACED")))
-            post_changed([paced] { interp::set_paced_interpolation(paced); });
-        help("When the computer cannot draw all frames, skip in-between frames instead of slowing the\n"
-             "whole game down. The performance overlay shows how many are drawn.\n"
-             "Saved separately for 60 fps (off by default) and 120/240 fps (on by default).");
-    }
     // debug only, not saved (gx2::uncapped)
     bool unc;
     if (check("Uncapped (debug: the game runs too fast)", gx2::uncapped(), &unc)) hostui::post([unc] { gx2::set_uncapped(unc); });
     help("Debug only, to see how many frames a second this computer can draw: no frame limit and no\n"
          "vsync. The game counts frames, so it runs faster than normal. The frame rate is in the window\n"
-         "title and the performance overlay. Not saved. (With frame interpolation and Keep game speed\n"
-         "on, the game logic still keeps 30 steps a second.)");
+         "title and the performance overlay. Not saved.");
 
     heading("Internal resolution");
     static const float scales[] = {1.0f, 1.5f, 2.0f, 3.0f};
