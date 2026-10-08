@@ -52,7 +52,8 @@ def run_game(binary, game, run_dir, env_extra, until, timeout):
     wait_for_quiet_machine()
     env = dict(os.environ)
     env.update({"WWHD_HIDDEN_WINDOWS": "1", "WWHD_NO_AUDIO": "1", "WWHD_NO_HOST_INPUT": "1", "WWHD_NO_GAMEPAD": "1",
-                "WWHD_RENDERER_RUNTIME": "metal", "WWHD_STATE_DIR": "states", "WWHD_SHADER_CACHE": "../shader_cache.bin"})
+                "WWHD_RENDERER_RUNTIME": "metal", "WWHD_STATE_DIR": "states", "WWHD_SHADER_CACHE": "../shader_cache.bin",
+                "WWHD_VK_SHADER_CACHE": "../vk_shader_cache"})  # private caches, never the player's
     env.update(env_extra)
     log_path = os.path.join(run_dir, "log")
     with open(log_path, "w") as log:
