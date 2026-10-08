@@ -1,0 +1,8 @@
+# From save state 1, warped to Ordon Village (WWHD_WARP=150:F_SP103,1,0,6): walk in, turn, walk on.
+6-12 STICK 0 1
+12-14 RSTICK 1 0
+14-20 STICK 0 1
+20-23 STICK 1 0.5
+23-29 STICK 0 1
+29-32 RSTICK -1 0
+32-38 STICK 0 1

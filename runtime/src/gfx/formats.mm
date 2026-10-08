@@ -121,11 +121,11 @@ void convert_row(Convert c, const uint8_t* src, uint8_t* dst, uint32_t n) {
             dst[4 * i + 3] = ex4((v >> 12) & 0xF);
         }
         break;
-    case Convert::RG4:
+    case Convert::RG4:  // R in the low nibble (TP HD's IA4-style textures put alpha, read from G, in the high one)
         for (uint32_t i = 0; i < n; i++) {
             uint8_t v = src[i];
-            dst[2 * i + 0] = ex4(v >> 4);
-            dst[2 * i + 1] = ex4(v & 0xF);
+            dst[2 * i + 0] = ex4(v & 0xF);
+            dst[2 * i + 1] = ex4(v >> 4);
         }
         break;
     case Convert::D24S8:

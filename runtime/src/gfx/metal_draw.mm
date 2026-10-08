@@ -1565,10 +1565,10 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     R.drawCount++;
     extern uint32_t g_draws_since_commit;
     g_draws_since_commit++;
-    DLOG("[draw] prim %X count %u idx %u@%08X VS %08X PS %08X CB0 %08X info %08X DB %08X depthctl %08X blend %08X mask %08X",
+    DLOG("[draw] prim %X count %u idx %u@%08X VS %08X PS %08X CB0 %08X info %08X DB %08X depthctl %08X blend %08X mask %08X blend0 %08X",
          prim, count, indexType, indexAddr, regs[mmSQ_PGM_START_VS] << 8, regs[mmSQ_PGM_START_PS] << 8, regs[mmCB_COLOR0_BASE],
          regs[mmCB_COLOR0_INFO], regs[mmDB_DEPTH_BASE], regs[REGADDR::DB_DEPTH_CONTROL], regs[REGADDR::CB_COLOR_CONTROL],
-         regs[REGADDR::CB_TARGET_MASK]);
+         regs[REGADDR::CB_TARGET_MASK], regs[REGADDR::CB_BLEND0_CONTROL]);
     if (!count || !instances) return;
     ((uint32_t*)regs)[REGADDR::VGT_PRIMITIVE_TYPE] = prim;
     if (regs[REGADDR::VGT_GS_MODE] & 3) { g_skip[SK_GS]++; return; }  // geometry shaders: not supported yet
