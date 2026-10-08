@@ -26,8 +26,8 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
   resolution for sharp shadows; `WWHD_SHADOW_FIX=1` keeps them at the console's 1024x1024 instead,
   for soft edges that never shimmer (issue #67).
 - **More languages (experimental):** with your own dump of the European or Japanese game, the port can
-  use its text, fonts and menus: German, Italian, British English, European French and Spanish (tested
-  with a European dump) or Japanese (untested). See [docs/language-packs.md](docs/language-packs.md).
+  use its text, fonts and menus: German, Italian, British English, European French and Spanish, or
+  Japanese. See [docs/language-packs.md](docs/language-packs.md).
 - **Fan translations as content mods**, including **Arabic and Hebrew** drawn right to left (issue #60),
   see [docs/mod-manager.md](docs/mod-manager.md) and [docs/rtl-text.md](docs/rtl-text.md).
 - **macOS: closing the TV window quits the game** (issue #65), as on Windows and Linux. During a game
