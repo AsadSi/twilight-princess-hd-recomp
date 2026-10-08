@@ -313,6 +313,18 @@ add_executable(write_watch_test runtime/tools/write_watch_test.cpp runtime/src/w
 target_include_directories(write_watch_test PRIVATE runtime/src)
 target_compile_options(write_watch_test PRIVATE -UNDEBUG)
 target_link_libraries(write_watch_test PRIVATE Threads::Threads)
+# recompiled spin waits see other threads' stores (PPC_LOOP in runtime/include/ppc.h, issue #62):
+# built with the game code's flags
+if(NOT WIN32)
+  add_executable(spin_wait_test runtime/tools/spin_wait_test.c)
+  target_include_directories(spin_wait_test PRIVATE runtime/include)
+  target_compile_options(spin_wait_test PRIVATE -O3 -ffp-contract=off -fno-strict-aliasing -w)
+  if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_compile_options(spin_wait_test PRIVATE -mcpu=apple-m1)
+  endif()
+  target_link_libraries(spin_wait_test PRIVATE Threads::Threads)
+  add_test(NAME spin_wait COMMAND spin_wait_test)
+endif()
 # host audio: TV mix, or TV + GamePad in Off-TV Play, from the game's faders (runtime/src/audio_output_mode.h)
 add_executable(audio_output_test runtime/tools/audio_output_test.cpp)
 target_include_directories(audio_output_test PRIVATE runtime/src)
