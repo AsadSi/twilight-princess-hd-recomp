@@ -1320,7 +1320,7 @@ std::unordered_set<uint64_t> g_known_pipelines;
 std::string cache_path() {
     if (const char* e = getenv("WWHD_SHADER_CACHE")) return e;
     const char* home = getenv("HOME");
-    std::string dir = std::string(home ? home : ".") + "/Library/Caches/wwhd";
+    std::string dir = std::string(home ? home : ".") + "/Library/Caches/tphd";
     mkdir(dir.c_str(), 0755);
     return dir + "/shaders.bin";
 }

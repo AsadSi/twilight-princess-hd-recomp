@@ -51,9 +51,10 @@ static NSWindow* g_tv;
 static double g_fps = 0;  // frames presented per second, measured over the last half second
 static NSString* const kTitle = @"Twilight Princess HD: Recompiled";
 
-// Graphics options are kept across launches (macOS user defaults, domain "wwhd"); an option's WWHD_*
-// environment variable overrides the saved value for that run and is not saved. Scripted test runs
-// (WWHD_NO_HOST_INPUT) neither read nor write them.
+// Graphics options are kept across launches (macOS user defaults, domain "tphd": the process is named
+// wwhd, like Wind Waker HD's, so not its own domain); an option's WWHD_* environment variable overrides
+// the saved value for that run and is not saved. Scripted test runs (WWHD_NO_HOST_INPUT) neither read nor
+// write them.
 static const bool g_prefs = getenv("WWHD_NO_HOST_INPUT") == nullptr;
 static bool g_prefs_loaded = false;  // nothing is saved before the saved values were applied
 static bool env_set(std::initializer_list<const char*> env) {
@@ -66,20 +67,21 @@ static NSString* portable_prefs_path() {
     return host::portable() ? @((host::portable_user_dir() + "/graphics.plist").c_str()) : nil;
 }
 static NSMutableDictionary* g_portable_prefs;
+static NSUserDefaults* const g_defaults = [[NSUserDefaults alloc] initWithSuiteName:@"tphd"];
 static id pref(NSString* key) {
     if (NSString* p = portable_prefs_path()) {
         if (!g_portable_prefs)
             g_portable_prefs = [[NSDictionary dictionaryWithContentsOfFile:p] mutableCopy] ?: [NSMutableDictionary new];
         return g_portable_prefs[key];
     }
-    return [NSUserDefaults.standardUserDefaults objectForKey:key];
+    return [g_defaults objectForKey:key];
 }
 static void set_pref(NSString* key, id value) {
     if (portable_prefs_path()) {
         pref(key);  // loads the file
         g_portable_prefs[key] = value;
     } else {
-        [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
+        [g_defaults setObject:value forKey:key];
     }
 }
 static void load_prefs() {
