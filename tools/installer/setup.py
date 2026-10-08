@@ -29,7 +29,7 @@ Language sources (experimental, docs/language-packs.md): the USA game plays with
 2D layouts of a European or Japanese copy of the game you also own. Only those language files are
 taken from it (content/Common/Pack/permanent_2d_*.pack, about 12 MB each) into data/game-lang/<EU|JP>;
 the game itself is still built from the USA game. Its languages then appear in the game's settings
-(Language). Untested with real European or Japanese files so far.
+(Language). Tested with the European game; untested with the Japanese game so far.
 Keys can also come from the WIIU_COMMON_KEY environment variable / IMAGE.key next to the image.
 Keys are never printed, logged or stored.
 """
@@ -986,7 +986,7 @@ def replace_dir(new, dst):
 # every message, the fonts and the layouts) by the console language and region, and the runtime can
 # give it the European or Japanese ones (runtime/src/game_languages.h). Only those packs (and the
 # disc's meta.xml, for its title id) are taken from the second game, into data/game-lang/<EU|JP>.
-# The second game's code is never used. UNTESTED with real European or Japanese files so far.
+# The second game's code is never used. Tested with the European game; untested with the Japanese one.
 
 LANGUAGE_SOURCE_TITLES = {"0005000010143600": "EU", "0005000010143400": "JP"}
 LANGUAGE_SOURCE_FILES = ["content/Common/Pack/permanent_2d_*.pack", "meta/meta.xml"]
@@ -1068,7 +1068,7 @@ def finish_language_source(tmp, region, title_id, source_name, data_dir):
     for name in ignored:
         say("  Not used: %s (the game does not know this pack)" % name)
     manifest = {"format_version": 1, "region": region, "title_id": title_id, "source": source_name,
-                "packs": packs, "untested": "made without real European or Japanese files: see docs/language-packs.md",
+                "packs": packs,
                 "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     with open(os.path.join(tmp, LANGUAGE_SOURCE_MANIFEST), "w") as f:
         json.dump(manifest, f, indent=1)
@@ -1895,9 +1895,9 @@ def run_language_source(args, ui, data_dir, path):
     manifests = add_language_source((kind, path), data_dir, keys, info)
     for m in manifests:
         say("Added the %s languages: %s. Choose one in the game's settings (F1, Language); it applies on the next "
-            "start. This is untested with real %s files so far: please report what looks wrong."
-            % (LANGUAGE_REGION_NAMES[m["region"]], ", ".join(p["language"] for p in m["packs"]),
-               LANGUAGE_REGION_NAMES[m["region"]]))
+            "start.%s" % (LANGUAGE_REGION_NAMES[m["region"]], ", ".join(p["language"] for p in m["packs"]),
+                          " This is untested with the Japanese game so far: please report what looks wrong."
+                          if m["region"] == "JP" else ""))
 
 
 def main():

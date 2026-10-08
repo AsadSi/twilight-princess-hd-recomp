@@ -322,7 +322,7 @@ EU_PACKS = ["permanent_2d_EuEnglish.pack", "permanent_2d_EuFrench.pack", "perman
 
 
 class LanguageSources(unittest.TestCase):
-    """setup --language-source on synthetic folders (untested with real European/Japanese files)."""
+    """setup --language-source on synthetic folders (no game files in the tests)."""
 
     def test_titles(self):
         self.assertEqual(setup.language_source_region("0005000010143600"), "EU")

@@ -134,8 +134,9 @@ static uint32_t console_language() {
         const int region = game_lang::region_from_code(region_text);
         const game_lang::Start s = game_lang::choose((int)v, region);
         if (s.pack) {
-            LOG("[config] %s from the language source (%s): %s (UNTESTED: made without European or Japanese game "
-                "files)", game_lang::name(s.language), game_lang::region_name(s.region), s.pack->host.c_str());
+            LOG("[config] %s from the language source (%s): %s%s", game_lang::name(s.language),
+                game_lang::region_name(s.region), s.pack->host.c_str(),
+                s.region == game_lang::kJapan ? " (untested with a Japanese game so far)" : "");
         } else {
             if (region != game_lang::kNoRegion && region != game_lang::kUsa)
                 LOG("[config] no %s language source has %s (%s); using the installed game's languages",

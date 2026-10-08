@@ -1361,8 +1361,8 @@ void tab_about() {
                 choose_language(langs[k], region);
         }
     }
-    if (!game_lang::source_packs().empty())
-        note("Language sources are untested with real European and Japanese files so far: report what looks wrong.");
+    if (!game_lang::source_languages(game_lang::kJapan).empty())
+        note("Japanese language sources are untested so far: report what looks wrong.");
     ImGui::EndDisabled();
     const bool from_source = U.language_region != game_lang::kNoRegion &&
                              game_lang::source_pack(U.language, U.language_region) != nullptr;

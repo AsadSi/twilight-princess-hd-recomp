@@ -267,4 +267,9 @@ int options_language(int language) {
     }
 }
 
+const char* german_genitive_suffix(const std::string& name) {
+    const char last = name.empty() ? '\0' : name.back();
+    return strchr("sxzSXZ", last) && last ? "'" : "s";
+}
+
 }  // namespace game_lang

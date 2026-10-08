@@ -13,8 +13,8 @@
 // language there after it (language_region.cpp), and the source's pack is read in place of the
 // installed game's file of that name (redirect()).
 //
-// UNTESTED with real European or Japanese game files (none were available when this was written):
-// only synthetic packs (dummy files with the expected names) were used.
+// Tested with a real European game (German, Italian, French, Spanish, English); UNTESTED with a
+// Japanese game (docs/language-packs.md).
 #pragma once
 #include <string>
 #include <vector>
@@ -89,5 +89,10 @@ std::string redirect(const std::string& guest);
 // The language byte of the save's options (save + 0x12F0 + 4, the GameCube PAL order: 0 English,
 // 1 German, 2 French, 3 Spanish, 4 Italian) for a console language; 0 for the others
 int options_language(int language);
+
+// The German genitive suffix the European game appends to the player's name in three messages (its
+// 0x025F85AC; language_region.cpp): "'" after a name ending in s, x or z (either case, last byte),
+// else "s"
+const char* german_genitive_suffix(const std::string& name);
 
 }  // namespace game_lang
