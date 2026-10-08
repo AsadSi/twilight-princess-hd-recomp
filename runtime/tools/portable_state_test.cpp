@@ -38,6 +38,11 @@ static State sample() {
     s.angle_y = -16384;
     s.link_proc = 0x88;
     s.on_ship = true;
+    s.has_ship = true;
+    s.ship_pos[0] = -199830.25f;
+    s.ship_pos[1] = -12.5f;
+    s.ship_pos[2] = 315420.0f;
+    s.ship_angle_y = 12345;
     s.time_of_day = 187.5f;
     s.date = 12;
     s.savedata.assign(kSaveDataSize, 0);
@@ -81,6 +86,12 @@ int main() {
     CHECK(r.start_point == 0 && r.start_room == 44 && r.layer == -1 && r.room == 44);
     CHECK(r.pos[0] == s.pos[0] && r.pos[1] == s.pos[1] && r.pos[2] == s.pos[2]);  // exact (9 digits)
     CHECK(r.angle_y == -16384 && r.link_proc == 0x88 && r.on_ship);
+    CHECK(r.has_ship && r.ship_angle_y == 12345 && r.ship_pos[0] == s.ship_pos[0] && r.ship_pos[1] == s.ship_pos[1] &&
+          r.ship_pos[2] == s.ship_pos[2]);
+    {
+        State x;  // on the boat without a boat: refused
+        CHECK(!read(reseal(replace(text, "has_ship = 1", "has_ship = 0")), x, why));
+    }
     CHECK(r.time_of_day == 187.5f && r.date == 12);
     CHECK(r.savedata == s.savedata && r.hd_player == s.hd_player && r.hd_status == s.hd_status &&
           r.hd_event == s.hd_event && r.hd_map == s.hd_map);

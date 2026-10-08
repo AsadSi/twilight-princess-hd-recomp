@@ -651,19 +651,21 @@ constexpr uint32_t kStartStage = kPlay + 0x5134;    // dStage_startStage_c: name
 constexpr uint32_t kNextStage = kPlay + 0x5140;     // dStage_nextStage_c: the same + enabled, wipe
 constexpr uint32_t kStageData = kPlay + 0x5150;     // dStage_stageDt_c (getStagInfo: vtable +0x15C)
 constexpr uint32_t kLinkPtr = kPlay + 0x5B34;       // mpPlayerPtr[0]: daPy_lk_c
+constexpr uint32_t kShipPtr = kPlay + 0x5B3C;       // dComIfGp_getShipActor: daShip_c (0 without a boat)
 constexpr uint32_t kActorPos = 0x314, kActorRoom = 0x326, kShapeAngleY = 0x32A;  // fopAc_ac_c (WWHD)
 constexpr uint32_t kLinkProc = 0x65F0;              // daPy_lk_c::mCurProc
 constexpr uint32_t kInfo = 0x20;                    // dSv_info_c in the save area
 constexpr uint32_t kDataNum = kInfo + 0x1290;       // dSv_info_c::mDataNum (Quest Log 0..2)
 constexpr uint32_t kReturnPlace = 0x50;             // dSv_player_return_place_c (0xC bytes)
 constexpr uint32_t kMemoryTable = kInfo + 0x380;    // dSv_save_c::mSave[16] (dSv_memory_c, 0x24 each)
+constexpr uint32_t kTurnRestart = kInfo + 0x1258;   // dSv_turnRestart_c: pos 0, param 0xC, angle 0x10, room 0x12, ship pos 0x24, ship angle 0x30, has ship 0x34
 constexpr uint32_t kRestart = kInfo + 0x1128;       // dSv_restart_c: room 0, angle 0x16, pos 0x18, param 0x24, last speed 0x28, last mode 0x2C
 constexpr uint32_t kHdArea = 0x12C0;                // HD per-file data (SaveMgr getters 027200A0..)
 constexpr uint32_t kCardStatusB = 0x18;             // status B in the card block: time 0xC (f32), date 0x10 (u16)
 // game functions
 constexpr uint32_t fn_memory_to_card = 0x025BA9FC, fn_card_to_memory = 0x025BA7B0, fn_putSave = 0x025B9D24,
                    fn_getSave = 0x025B9C9C, fn_setGameStartStage = 0x025217F8, fn_danInit = 0x025B9174,
-                   fn_eventInit = 0x025B8B10, fn_refreshGame = 0x02721880;
+                   fn_eventInit = 0x025B8B10, fn_refreshGame = 0x02721880, fn_turnRestartSet = 0x025B998C;
 // HD sections: (slot getter, live getter, live <- slot copy) and size in the file (SaveMgr read/write 02724764..)
 struct HdSection { uint32_t slot_get, live_get, copy; size_t size; std::vector<uint8_t> pstate::State::*field; };
 const HdSection kHdSections[] = {
@@ -719,6 +721,31 @@ bool gameplay_ready(std::string& why, bool& retry) {
     if (!in_mem2(link)) { why = "Link is not in the scene"; retry = true; return false; }
     if (ld8(kNextStage + 12)) { why = "a stage change is in progress"; retry = true; return false; }
     if (ld8(sv + kDataNum) > 2) { why = "no Quest Log loaded"; retry = true; return false; }
+    return true;
+}
+
+// Link is under the player's control: the conditions under which the game opens its pause menu
+// (dMw_c, d_menu_window.cpp: no event for 5 frames, no message box, no menu, no stage change or
+// wipe in progress, Link is the controlled actor). Updated every frame for the event delay.
+constexpr uint32_t kEventRun = kPlay + 0x5292;     // dComIfGp_event_runCheck (dEvt_control_c mode)
+constexpr uint32_t kMesgStatus = kPlay + 0x5BB2;   // dComIfGp_getMesgStatus (messageState 025F795C)
+constexpr uint32_t kScopeMesgStatus = kPlay + 0x5BB3;
+constexpr uint32_t kMenuFlag = 0x101EA069;         // dMenu_flag (025986BC)
+constexpr uint32_t kPlayerPtr = kPlay + 0x5B2C;    // mpPlayer[0]: the controlled actor
+constexpr uint32_t fn_ovlpDoingReq = 0x025DBE38;   // fopOvlpM_IsDoingReq (a wipe or scene overlap runs)
+int g_event_wait = 0;                              // d_menu_window.cpp event_wait_frame
+void track_events() {
+    if (ld8(kEventRun)) g_event_wait = 5;
+    else if (g_event_wait > 0) g_event_wait--;
+}
+bool player_has_control(Cpu* c, std::string& why) {
+    if (ld8(kEventRun) || g_event_wait > 0) { why = "a cutscene or event is running"; return false; }
+    if (ld8(kMesgStatus) || ld8(kScopeMesgStatus)) { why = "a message or dialogue is open"; return false; }
+    if (ld8(kMenuFlag)) { why = "a game menu is open"; return false; }
+    if (ld8(kNextStage + 12)) { why = "a stage change is in progress"; return false; }
+    if (ld32(kPlayerPtr) != ld32(kLinkPtr)) { why = "Link is not the controlled character"; return false; }
+    CallScope scope(c);
+    if (guest_call(c, fn_ovlpDoingReq) & 0xFF) { why = "a scene transition is in progress"; return false; }
     return true;
 }
 
@@ -822,7 +849,14 @@ bool capture_portable(Cpu* c, pstate::State& s, std::string& why) {
     s.room = (int8_t)ld8(link + kActorRoom);
     s.angle_y = (int16_t)ld16(link + kShapeAngleY);
     s.link_proc = (int)ld32(link + kLinkProc);
-    s.on_ship = s.link_proc >= 0x86 && s.link_proc <= 0x91 && s.link_proc != 0x90;  // daPyProc_SHIP_* (not GET_OFF)
+    const uint32_t ship = ld32(kShipPtr);
+    s.has_ship = in_mem2(ship);
+    if (s.has_ship) {
+        for (int i = 0; i < 3; i++) s.ship_pos[i] = (float)ldf32(ship + kActorPos + 4 * i);
+        s.ship_angle_y = (int16_t)ld16(ship + kShapeAngleY);
+    }
+    // daPyProc_SHIP_READY..SHIP_RESTART (not SHIP_GET_OFF): riding the boat
+    s.on_ship = s.has_ship && s.link_proc >= 0x86 && s.link_proc <= 0x91 && s.link_proc != 0x90;
     s.time_of_day = be_f32(&s.savedata[kCardStatusB + 0xC]);
     s.date = s.savedata[kCardStatusB + 0x10] << 8 | s.savedata[kCardStatusB + 0x11];
     return true;
@@ -850,7 +884,9 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     guest_call(c, fn_eventInit, {info + 0x1158});             // dSv_info_c::mTmp (temporary flags)
     apply_hd_sections(c, s);
     guest_call(c, fn_refreshGame, {0});  // SaveMgr: item buttons and equipment from the loaded data (does not use its object)
-    // Link's place: the void-out restart (dStage_restartRoom / dStage_playerInit point -1)
+    // Link's place: the void-out restart (dStage_restartRoom / dStage_playerInit point -1), or with the
+    // boat the restart the Song of Passing uses (daPy_lk_c tact, dStage_turnRestart: point -3, the
+    // boat back at its position by dStage_setShipPos, Link on it with start mode 2)
     const uint32_t rs = sv + kRestart;
     st8(rs + 0, (uint8_t)s.room);
     st16(rs + 0x16, (uint16_t)s.angle_y);
@@ -862,7 +898,20 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     char name[8] = {};
     memcpy(name, s.stage.data(), std::min<size_t>(s.stage.size(), 7));
     for (int i = 0; i < 8; i++) st8(kNextStage + i, (uint8_t)name[i]);
-    st16(kNextStage + 8, 0xFFFF);  // point -1: the restart position
+    uint16_t point = 0xFFFF;  // point -1: the restart position
+    if (s.has_ship) {
+        // daPy_lk_c::getDayNightParamData without the Wind Waker parts (event 0xCC, flag 0x40: the
+        // conducting animation): room, start mode 2 on the boat / 0 beside it, no event, boat flag 0x100
+        uint32_t param = (uint32_t)(s.room & 0x3F) | (uint32_t)(s.on_ship ? 2 : 0) << 12 | 0xFF000000u | 0x100u;
+        for (int i = 0; i < 3; i++) {
+            stf32(buf + 4 * i, s.pos[i]);
+            stf32(buf + 0x10 + 4 * i, s.ship_pos[i]);
+        }
+        guest_call(c, fn_turnRestartSet, {sv + kTurnRestart, buf, (uint32_t)(uint16_t)s.angle_y, (uint32_t)(uint8_t)s.room, param,
+                                          buf + 0x10, (uint32_t)(uint16_t)s.ship_angle_y, 1});
+        point = 0xFFFD;  // -3: the turn restart
+    }
+    st16(kNextStage + 8, point);
     st8(kNextStage + 10, (uint8_t)s.room);
     st8(kNextStage + 11, (uint8_t)s.layer);
     st8(kNextStage + 13, 0);  // wipe: fade
@@ -919,6 +968,14 @@ struct Arrival { std::string stage; float pos[3]; uint64_t frame = 0; uint32_t l
 void do_portable_save(Cpu* c, int slot) {
     pstate::State s;
     std::string why;
+    bool retry;
+    // only while the player controls Link (decision: no portable states mid-cutscene/dialogue; full states stay allowed)
+    if (gameplay_ready(why, retry) && !player_has_control(c, why)) {
+        LOG("[savestate] slot %d: portable state refused: %s", slot, why.c_str());
+        message("Slot %d: can't save during a cutscene or dialogue - try again when you have control of Link", slot);
+        report_done(slot, false, "Can't save during a cutscene or dialogue (" + why + "): try again when you have control of Link.");
+        return;
+    }
     if (!capture_portable(c, s, why)) {
         message("Slot %d: not saved (%s)", slot, why.c_str());
         report_done(slot, false, why);
@@ -932,14 +989,27 @@ void do_portable_save(Cpu* c, int slot) {
     }
     struct stat st{};
     stat(path.c_str(), &st);
-    LOG("[savestate] slot %d: portable state written (%lld bytes; %s room %d at %.1f %.1f %.1f, angle %d, Quest Log %d)", slot,
-        (long long)st.st_size, s.stage.c_str(), s.room, s.pos[0], s.pos[1], s.pos[2], s.angle_y, s.file_slot + 1);
+    LOG("[savestate] slot %d: portable state written (%lld bytes; %s room %d at %.1f %.1f %.1f, angle %d, Quest Log %d%s)", slot,
+        (long long)st.st_size, s.stage.c_str(), s.room, s.pos[0], s.pos[1], s.pos[2], s.angle_y, s.file_slot + 1,
+        s.on_ship ? ", on the boat" : s.has_ship ? ", boat nearby" : "");
+    if (s.has_ship)
+        LOG("[savestate] slot %d: boat at %.1f %.1f %.1f, angle %d", slot, s.ship_pos[0], s.ship_pos[1], s.ship_pos[2], s.ship_angle_y);
+    // decision: an older full state in the same slot is kept (never deleted), but the player is told
+    struct stat full{};
+    std::string older;
+    if (stat(slot_path(slot).c_str(), &full) == 0) {
+        char b[96];
+        snprintf(b, sizeof b, "; the slot also keeps an older full state (%.0f MB)", full.st_size / 1048576.0);
+        older = b;
+        LOG("[savestate] slot %d also holds an older full state (%s, %.0f MB); it is kept", slot, slot_path(slot).c_str(),
+            full.st_size / 1048576.0);
+    }
     render::request_tv_dump(slot_path(slot, "png"), 0);  // the slot's picture (stays on this computer)
     {
         std::lock_guard<std::mutex> lk(g_mu);
         g_last_portable = path;
     }
-    message("Saved to slot %d (%s)", slot, area_label(s.stage.c_str()).c_str());
+    message("Saved to slot %d (%s)%s", slot, area_label(s.stage.c_str()).c_str(), older.c_str());
     report_done(slot, true, "");
 }
 
@@ -953,6 +1023,8 @@ void service_portable_load(Cpu* c) {
     if (!p.s) return;
     std::string why;
     bool retry = false;
+    const uint32_t sv0 = ld32(kSaveInfoPtr);
+    const int current_log = in_mem2(sv0) ? ld8(sv0 + kDataNum) : -1;
     if (!apply_portable(c, *p.s, why, retry)) {
         if (retry) {
             if (!g_pload_waiting) message("%s: waiting to load (%s)", portable_label(p.slot).c_str(), why.c_str());
@@ -963,8 +1035,16 @@ void service_portable_load(Cpu* c) {
     } else {
         LOG("[savestate] %s: portable state applied: entering %s room %d layer %d at %.1f %.1f %.1f", portable_label(p.slot).c_str(),
             p.s->stage.c_str(), p.s->room, p.s->layer, p.s->pos[0], p.s->pos[1], p.s->pos[2]);
-        message("Loaded %s (%s; progress and position)", p.slot ? ("slot " + std::to_string(p.slot)).c_str() : "portable state",
-                area_label(p.s->stage.c_str()).c_str());
+        if (current_log >= 0 && current_log <= 2 && current_log != p.s->file_slot) {
+            // decision: loading goes into the Quest Log being played; say so when the state is from another one
+            LOG("[savestate] %s: this state is from Quest Log %d; it is loaded into Quest Log %d", portable_label(p.slot).c_str(),
+                p.s->file_slot + 1, current_log + 1);
+            message("This state is from Quest Log %d; it is loaded into Quest Log %d (saving in game will write it there).",
+                    p.s->file_slot + 1, current_log + 1);
+        } else {
+            message("Loaded %s (%s; progress and position)", p.slot ? ("slot " + std::to_string(p.slot)).c_str() : "portable state",
+                    area_label(p.s->stage.c_str()).c_str());
+        }
         g_arrival = Arrival{p.s->stage, {p.s->pos[0], p.s->pos[1], p.s->pos[2]}, render::frame_count(), ld32(ld32(kLinkPtr) + 4), 0, p.s};
         std::lock_guard<std::mutex> lk(g_mu);
         g_last_portable = p.path;
@@ -996,6 +1076,18 @@ void watch_arrival(Cpu* c) {
     float dx = p[0] - g_arrival.pos[0], dy = p[1] - g_arrival.pos[1], dz = p[2] - g_arrival.pos[2];
     LOG("[savestate] portable load: arrived in %s room %d at %.1f %.1f %.1f (distance %.1f from the saved position)",
         stage_name().c_str(), (int8_t)ld8(link + kActorRoom), p[0], p[1], p[2], sqrtf(dx * dx + dy * dy + dz * dz));
+    if (g_arrival.s->has_ship) {
+        const uint32_t ship = ld32(kShipPtr);
+        const int proc = (int)ld32(link + kLinkProc);
+        if (!in_mem2(ship)) LOG("[savestate] portable load: no boat in the stage");
+        else {
+            float q[3];
+            for (int i = 0; i < 3; i++) q[i] = (float)ldf32(ship + kActorPos + 4 * i) - g_arrival.s->ship_pos[i];
+            LOG("[savestate] portable load: boat at %.1f %.1f %.1f angle %d (distance %.1f), Link %s the boat (procedure 0x%X)",
+                ldf32(ship + kActorPos), ldf32(ship + kActorPos + 4), ldf32(ship + kActorPos + 8), (int16_t)ld16(ship + kShapeAngleY),
+                sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]), proc >= 0x86 && proc <= 0x91 && proc != 0x90 ? "on" : "not on", proc);
+        }
+    }
     g_arrival = Arrival{};
 }
 
@@ -1119,7 +1211,14 @@ SlotInfo portable_slot_info(int slot) {
 
 SlotInfo slot_info(int slot) {
     if (is_auto(slot)) return full_slot_info(slot);
-    return newer_is_portable(slot) ? portable_slot_info(slot) : full_slot_info(slot);
+    SlotInfo info = newer_is_portable(slot) ? portable_slot_info(slot) : full_slot_info(slot);
+    // the slot's other, older file (kept; shown so it is not forgotten)
+    struct stat st{};
+    if (stat(slot_path(slot, info.portable ? "bin" : pstate::kExtension).c_str(), &st) == 0) {
+        info.older_other = true;
+        info.older_bytes = (uint64_t)st.st_size;
+    }
+    return info;
 }
 
 void request_save_full(int slot) {
@@ -1256,7 +1355,7 @@ std::string bug_report_text() {
 
 std::string last_message() {
     std::lock_guard<std::mutex> lk(g_mu);
-    if (g_message.empty() || std::chrono::steady_clock::now() - g_message_time > std::chrono::seconds(4)) return "";
+    if (g_message.empty() || std::chrono::steady_clock::now() - g_message_time > std::chrono::seconds(g_message.size() > 60 ? 7 : 4)) return "";
     return g_message;
 }
 
@@ -1293,6 +1392,7 @@ void service(Cpu* c) {
         return true;
     }();
     (void)env_load;
+    track_events();
     if (int slot = g_psave_req.exchange(0)) do_portable_save(c, slot);
     service_portable_load(c);
     watch_arrival(c);

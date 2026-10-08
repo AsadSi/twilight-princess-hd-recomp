@@ -9,6 +9,7 @@
 #include <functional>
 #include <atomic>
 #include <chrono>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -463,6 +464,15 @@ void tab_saves() {
                 if (!s.portable) d += "  (full)";
                 if (!s.compatible) d += "  (incompatible)";
                 ImGui::TextUnformatted(d.c_str());
+                if (s.older_other && s.portable) {
+                    // decision: an older full state stays on disk; say so (it is large and must not be shared)
+                    ImGui::TextDisabled("also holds an older full state (slot%d.bin, %.0f MB)", i, s.older_bytes / 1048576.0);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Kept on disk, not loaded: the newer portable state is. It contains game data: "
+                                          "don't share it. Delete it in the states folder if you no longer need it.");
+                } else if (s.older_other) {
+                    ImGui::TextDisabled("also holds an older portable state (slot%d.wwstate)", i);
+                }
             }
             ImGui::TableNextColumn();
             if (ImGui::Button("Save")) {
@@ -1654,8 +1664,11 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     read_controller();
     // the game's text prompt shows unless the menu is open over it (the menu has the input then)
     const bool open = is_open(), perf = perf_shown(), text = !open && text_entry::active();
+    // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
+    // game for a few seconds while the menu is closed (the window title is not visible everywhere)
+    const std::string toast = open ? std::string() : ss::last_message();
     U.linearized = false;
-    if (!open && !perf && !text) {
+    if (!open && !perf && !text && toast.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -1709,6 +1722,19 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         }
     }
     if (perf) perf_window(open);
+    if (!toast.empty()) {
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 24), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+        ImGui::SetNextWindowBgAlpha(0.7f);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(io.DisplaySize.x * 0.8f, FLT_MAX));
+        const ImGuiWindowFlags fl = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+        if (ImGui::Begin("##savestate_notice", nullptr, fl)) {
+            ImGui::PushTextWrapPos(io.DisplaySize.x * 0.75f);
+            ImGui::TextUnformatted(toast.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::End();
+    }
     ImGui::Render();
     return ImGui::GetDrawData();
 }

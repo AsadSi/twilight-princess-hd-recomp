@@ -22,6 +22,7 @@ const Blob kBlobs[] = {
 const char* const kTextKeys[] = {
     "format", "title_id", "title_version", "game_hash", "runtime", "created", "file_slot", "player_name",
     "stage", "start_point", "start_room", "layer", "room", "link_pos", "link_angle_y", "link_proc", "on_ship",
+    "has_ship", "ship_pos", "ship_angle_y",
     "time_of_day", "date",
 };
 constexpr size_t kMaxText = 128;  // longest value of a text key
@@ -221,6 +222,9 @@ std::string write(const State& s, std::string& why) {
     kv("link_angle_y", std::to_string(s.angle_y));
     kv("link_proc", std::to_string(s.link_proc));
     kv("on_ship", s.on_ship ? "1" : "0");
+    kv("has_ship", s.has_ship ? "1" : "0");
+    kv("ship_pos", fnum(s.ship_pos[0]) + " " + fnum(s.ship_pos[1]) + " " + fnum(s.ship_pos[2]));
+    kv("ship_angle_y", std::to_string(s.ship_angle_y));
     kv("time_of_day", fnum(s.time_of_day));
     kv("date", std::to_string(s.date));
     for (auto& b : kBlobs) kv(b.key, hex(s.*b.field));
@@ -304,15 +308,25 @@ bool read(const std::string& text, State& out, std::string& why) {
         dst = (int)n;
         return true;
     };
-    int tv = 0, ship = 0;
+    int tv = 0, ship = 0, has_ship = 0;
     if (!get_int("title_version", 0, 0xFFFF, tv) || !get_int("file_slot", 0, 2, s.file_slot) ||
         !get_int("start_point", -32768, 32767, s.start_point) || !get_int("start_room", -128, 127, s.start_room) ||
         !get_int("layer", -128, 127, s.layer) || !get_int("room", -128, 127, s.room) ||
         !get_int("link_angle_y", -32768, 65535, s.angle_y) || !get_int("link_proc", -1, 0xFFFF, s.link_proc) ||
-        !get_int("on_ship", 0, 1, ship) || !get_int("date", 0, 0xFFFF, s.date))
+        !get_int("on_ship", 0, 1, ship) || !get_int("date", 0, 0xFFFF, s.date) || !get_int("has_ship", 0, 1, has_ship) ||
+        !get_int("ship_angle_y", -32768, 65535, s.ship_angle_y))
         return false;
     s.title_version = (uint32_t)tv;
     s.on_ship = ship != 0;
+    s.has_ship = has_ship != 0;
+    if (!m.count("ship_pos") || !parse_floats(m["ship_pos"], s.ship_pos, 3)) {
+        why = "missing or invalid ship_pos";
+        return false;
+    }
+    if (s.on_ship && !s.has_ship) {
+        why = "on_ship without has_ship";
+        return false;
+    }
     if (!m.count("link_pos") || !parse_floats(m["link_pos"], s.pos, 3)) {
         why = "missing or invalid link_pos";
         return false;

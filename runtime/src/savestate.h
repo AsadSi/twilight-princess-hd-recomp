@@ -74,6 +74,8 @@ struct SlotInfo {
     std::string when;  // local time of the save
     std::string area;  // stage name, if known
     std::string path;  // the slot's file
+    bool older_other = false;  // the slot also has an older file of the other kind (kept, never deleted)
+    uint64_t older_bytes = 0;
 };
 SlotInfo slot_info(int slot);           // 1..5 (101..103: crash recovery's automatic states, crashrec.h)
 void request_save(int slot);            // the kind full_states() selects (automatic states: always full)

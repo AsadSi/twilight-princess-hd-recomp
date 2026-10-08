@@ -54,8 +54,11 @@ struct State {
     int room = 0;               // Link's room (fopAcM_GetRoomNo)
     float pos[3] = {0, 0, 0};   // Link's current.pos
     int angle_y = 0;            // shape_angle.y (s16)
-    int link_proc = -1;         // daPy_lk_c::mCurProc (informational; ship procedures restore on the ship)
-    bool on_ship = false;
+    int link_proc = -1;         // daPy_lk_c::mCurProc (informational)
+    bool on_ship = false;       // Link rides the boat (a daPyProc_SHIP_* procedure): he starts on it
+    bool has_ship = false;      // the boat (dComIfGp_getShipActor) is in the stage: it goes back to its place
+    float ship_pos[3] = {0, 0, 0};
+    int ship_angle_y = 0;
     float time_of_day = 0;      // dSv_player_status_b_c::mTime (degrees, 0..360)
     int date = 0;               // mDate (day counter; day of week = date % 7)
     // save data
