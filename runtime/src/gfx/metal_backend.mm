@@ -22,6 +22,7 @@ void set_aniso(bool v);
 bool fxaa_enabled();
 void set_fxaa(bool v);
 std::string device_name();
+void peek_z(const uint32_t* p, uint32_t n);
 }  // namespace gfx
 
 namespace render {
@@ -36,6 +37,7 @@ const Backend& metal_backend() {
         b.clear_depth_stencil = gfx::clear_depth_stencil;
         b.copy_surface = gfx::copy_surface;
         b.copy_to_scan = gfx::copy_to_scan;
+        b.peek_z = gfx::peek_z;
         b.swap = gfx::swap;
         b.set_frame_aspect = gfx::set_frame_aspect;
         b.target_aspect_factors = gfx::target_aspect_factors;

@@ -39,11 +39,13 @@ enum Op : uint32_t {
     // aspect ratio (aspect.cpp), appended to keep the numbers of recorded display lists
     OP_SET_PROJ_REGS,   // first register, 16 values: a layout projection matrix (narrowed when drawing to the TV)
     OP_LAYOUT_ROOT,     // nw::lyt root pane: drawn into the target bound now (which screen it goes to)
+    OP_PEEK_Z,          // depth image, then (x, y, result address) per point: depth peeks (peekz.cpp)
     OP_COUNT
 };
 
 // emit a command (records into the active display list, or executes now)
 void emit(Op op, const uint32_t* payload, uint32_t n);
+uint32_t converted_depth();  // image GX2ConvertDepthBufferToTextureSurface last copied the depth buffer to
 inline void emit(Op op, std::initializer_list<uint32_t> payload) { emit(op, payload.begin(), (uint32_t)payload.size()); }
 
 // register writes

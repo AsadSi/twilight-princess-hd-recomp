@@ -1,2 +1,3 @@
 # Runtime hooks into Zelda.rpx (address = function entry; "@ADDR" = instruction site, runs before it).
 @02AF0EDC  # main01: top of the frame loop (interp.cpp: save states)
+029196A0  # dPeekZ_c::peekData: depth peeks answered from GPU readbacks (peekz.cpp)

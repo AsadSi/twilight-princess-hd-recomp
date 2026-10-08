@@ -4,6 +4,8 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <atomic>
+#include <cmath>
+#include <vector>
 #include <set>
 
 #include "gx2/gx2.h"
@@ -206,6 +208,56 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
             sourceSize:MTLSizeMake(w, h, 1) toTexture:scr.tex destinationSlice:0 destinationLevel:0
      destinationOrigin:MTLOriginMake(0, 0, 0)];
     [b endEncoding];
+}
+
+// Depth peeks (peekz.cpp): p = depth buffer image, then (x, y in its guest pixels, key) per point. The
+// pixels are copied when the GPU gets here; the answers go to peekz::publish when it is done (24-bit,
+// 0xFFFFFF = far).
+}  // namespace gfx
+namespace peekz { void publish(uint32_t key, uint32_t depth); }
+namespace gfx {
+void peek_z(const uint32_t* p, uint32_t n) {
+    Surface* depth = nullptr;
+    auto range = R.surfaces.equal_range(p[0]);
+    for (auto it = range.first; it != range.second; ++it) {
+        Surface* s = it->second.get();
+        if (s->isDepth && s->gpuWritten && s->tex && (!depth || s->writeSeq > depth->writeSeq)) depth = s;
+    }
+    uint32_t points = std::min<uint32_t>((n - 1) / 3, 64);
+    if (!depth || !points) return;
+    MTLPixelFormat format = depth->tex.pixelFormat;
+    if (format != MTLPixelFormatDepth32Float && format != MTLPixelFormatDepth32Float_Stencil8 && format != MTLPixelFormatDepth16Unorm) return;
+    id<MTLBuffer> staging = [R.device newBufferWithLength:points * 256 options:MTLResourceStorageModeShared];
+    if (!staging) return;
+    std::vector<uint32_t> xy(p + 1, p + 1 + points * 3);
+    end_encoder();
+    id<MTLBlitCommandEncoder> b = [command_buffer() blitCommandEncoder];
+    for (uint32_t i = 0; i < points; i++) {
+        NSUInteger x = std::min<NSUInteger>((NSUInteger)(xy[3 * i] * depth->sx), depth->tex.width - 1);
+        NSUInteger y = std::min<NSUInteger>((NSUInteger)(xy[3 * i + 1] * depth->sy), depth->tex.height - 1);
+        [b copyFromTexture:depth->tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(x, y, 0)
+                sourceSize:MTLSizeMake(1, 1, 1) toBuffer:staging destinationOffset:i * 256 destinationBytesPerRow:256
+            destinationBytesPerImage:256
+                   options:format == MTLPixelFormatDepth32Float_Stencil8 ? MTLBlitOptionDepthFromDepthStencil : MTLBlitOptionNone];
+    }
+    [b endEncoding];
+    [command_buffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+        if (cb.status != MTLCommandBufferStatusCompleted) return;
+        const uint8_t* raw = (const uint8_t*)staging.contents;
+        for (uint32_t i = 0; i < points; i++) {
+            uint32_t d;
+            if (format == MTLPixelFormatDepth16Unorm) {
+                uint16_t v;
+                memcpy(&v, raw + i * 256, 2);
+                d = v == 0xFFFF ? 0xFFFFFF : (uint32_t)v << 8;
+            } else {
+                float v;
+                memcpy(&v, raw + i * 256, 4);
+                d = !std::isfinite(v) || v >= 1.0f ? 0xFFFFFF : (uint32_t)(std::max(v, 0.0f) * 16777215.0f);
+            }
+            peekz::publish(xy[3 * i + 2], d);
+        }
+    }];
 }
 
 // debug: WWHD_DUMP_FRAMES=100,300 writes the TV image of those frames to frame_<n>.png

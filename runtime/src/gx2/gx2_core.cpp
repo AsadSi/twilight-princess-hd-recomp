@@ -392,7 +392,7 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
     case OP_SET_REGS: case OP_SET_PROJ_REGS: kind = rprof::kOpRegs; break;
     case OP_DRAW: case OP_DRAW_INDEXED: kind = rprof::kOpDraw; rprof::classify_draw(); break;
     case OP_CLEAR_COLOR: case OP_CLEAR_DEPTH: case OP_CLEAR_BUFFERS: kind = rprof::kOpClear; break;
-    case OP_COPY_SURFACE: kind = rprof::kOpCopy; break;
+    case OP_COPY_SURFACE: case OP_PEEK_Z: kind = rprof::kOpCopy; break;
     case OP_COPY_TO_SCAN: kind = rprof::kOpScan; break;
     case OP_INVALIDATE: kind = rprof::kOpInvalidate; break;
     case OP_FLUSH: kind = rprof::kOpFlush; break;
@@ -447,6 +447,7 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     case OP_CALL: execute((const uint32*)mem::ptr(p[0]), p[1] / 4); break;
     case OP_SET_CONTEXT: set_context(p[0]); break;
     case OP_INVALIDATE: render::invalidate(p[0], p[1], p[2]); break;
+    case OP_PEEK_Z: render::peek_z(p, n); break;
     case OP_EXPAND_COLOR: case OP_EXPAND_DEPTH: break;  // MSAA/HiZ decompression: nothing to do on the host
     case OP_FLUSH: render::guest_flush(); break;  // Vulkan: asynchronous submission
     case OP_DRAW_DONE:
@@ -728,8 +729,11 @@ static void copy_surface(Cpu* c, uint32 src, uint32 srcMip, uint32 srcSlice, uin
 HLE(gx2, GX2CopySurface) { copy_surface(c, arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3), arg(c, 4), arg(c, 5)); }
 // (GX2DepthBuffer*, dst GX2Surface*, dstMip, dstSlice): a copy of the depth buffer's view, as Cemu.
 // TP HD samples the result (R24_X8) in its water and other depth effects, and peeks it (dPeekZ).
+static std::atomic<uint32> g_converted_depth{0};
+uint32 gx2::converted_depth() { return g_converted_depth.load(std::memory_order_relaxed); }
 HLE(gx2, GX2ConvertDepthBufferToTextureSurface) {
     uint32 db = arg(c, 0), dst = arg(c, 1);
+    g_converted_depth = ld32(dst + 0x24);
     if (ld32(db + 0x24) == ld32(dst + 0x24)) return;  // same image: re-tiling in place, nothing to copy
     uint32 mip = ld32(db + 0x74), first = ld32(db + 0x78), n = std::max<uint32>(ld32(db + 0x7C), 1);
     for (uint32 i = 0; i < n; i++) copy_surface(c, db, mip, first + i, dst, arg(c, 2), arg(c, 3) + i);

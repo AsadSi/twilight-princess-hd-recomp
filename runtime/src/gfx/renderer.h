@@ -34,6 +34,7 @@ struct Backend {
     void (*clear_depth_stencil)(const uint32_t* regs, uint32_t depthBuffer, float depth, uint32_t stencil, uint32_t flags);
     void (*copy_surface)(uint32_t src, uint32_t srcMip, uint32_t srcSlice, uint32_t dst, uint32_t dstMip, uint32_t dstSlice);
     void (*copy_to_scan)(uint32_t colorBuffer, uint32_t target);
+    void (*peek_z)(const uint32_t* p, uint32_t n);  // depth image, then x, y, key per point (peekz.cpp); may be null
     void (*swap)();
     void (*set_frame_aspect)(float a);
     bool (*target_aspect_factors)(uint32_t w, uint32_t h, float& kx, float& ky);
@@ -110,6 +111,7 @@ inline void copy_surface(uint32_t src, uint32_t srcMip, uint32_t srcSlice, uint3
     g_backend->copy_surface(src, srcMip, srcSlice, dst, dstMip, dstSlice);
 }
 inline void copy_to_scan(uint32_t cb, uint32_t target) { g_backend->copy_to_scan(cb, target); }
+inline void peek_z(const uint32_t* p, uint32_t n) { if (g_backend->peek_z) g_backend->peek_z(p, n); }
 inline void swap() { g_backend->swap(); }
 inline void set_frame_aspect(float a) { g_backend->set_frame_aspect(a); }
 inline bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) { return g_backend->target_aspect_factors(w, h, kx, ky); }
