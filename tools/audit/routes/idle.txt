@@ -1,0 +1,1 @@
+# Nothing pressed: the game idles (stage audits, warps from a save state).

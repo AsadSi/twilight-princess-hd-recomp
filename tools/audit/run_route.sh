@@ -69,7 +69,8 @@ kill -0 $PID 2>/dev/null && echo "ALIVE at ${TOTAL}s" || echo "DIED"
 (( ${#CLIPS[@]} )) && wait "${CLIPS[@]}"
 kill -TERM $PID 2>/dev/null; for _ in 1 2 3 4 5 6; do kill -0 $PID 2>/dev/null || break; sleep 0.5; done
 kill -9 $PID 2>/dev/null
-# frame dumps -> tNN.png at 480 wide (the GamePad copies are dropped)
+# frame dumps -> tNN.png at 480 wide (the GamePad copies are dropped unless KEEP_DRC=1: dNN.png)
+for SHOT in "$@"; do [[ $SHOT == v* || "${KEEP_DRC:-0}" != 1 ]] && continue; F=frame_$(perl -e "print int($SHOT * 30 + $ORIGIN)")_drc.png; [ -f "$F" ] && sips -Z 480 "$F" --out "d$SHOT.png" >/dev/null; done
 rm -f frame_*_drc.png
 for SHOT in "$@"; do
   [[ $SHOT == v* ]] && continue

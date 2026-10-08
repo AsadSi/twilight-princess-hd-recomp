@@ -9,6 +9,8 @@
 #include "runtime.h"
 #include "../aspect.h"
 
+#include <set>
+
 using namespace Latte;
 using gx2::set_reg;
 using gx2::set_regs;
@@ -33,13 +35,16 @@ HLE(gx2, GX2GetSurfaceFormatBits) {
     ret(c, GetFormatBits(f) / (IsCompressedFormat(f) ? 16 : 1));
 }
 
-// TP HD's dPeekZ (the GameCube's GXPeekZ, used by the sun's lens flare) reads the depth texture made by
-// GX2ConvertDepthBufferToTextureSurface through a CPU-linear tiling aperture. Depth isn't read back to
-// guest memory yet, so no aperture is given: with address 0 the game reads every peek as the far plane.
+// A CPU-linear view of a tiled surface. TP HD's dPeekZ took one of the depth copy (peekData is hooked
+// instead, peekz.cpp); a pixel test at 02A37BA0 (R8_G8 or R8_G8_B8_A8 surfaces) takes one too. Surfaces
+// aren't read back to guest memory, so no aperture is given (address 0): each new caller is logged once.
 // (surface, level, slice, endian, u32* handle, u32* address)
 HLE(gx2, GX2AllocateTilingApertureEx) {
-    static bool once = false;
-    if (!once) once = true, LOG("[gx2] tiling apertures not supported: depth peeks read as far");
+    static std::set<uint32_t> seen;
+    const uint32_t s = arg(c, 0);
+    if (seen.insert(c->lr).second)
+        LOG("[gx2] no tiling aperture for surface %08X (%ux%u format %#x), called from %08X", ld32(s + 0x24),
+            ld32(s + 0x04), ld32(s + 0x08), ld32(s + 0x14), c->lr);
     st32(arg(c, 4), 0);
     st32(arg(c, 5), 0);
 }

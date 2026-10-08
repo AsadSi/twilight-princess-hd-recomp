@@ -1,0 +1,10 @@
+# From save state 1 (Link's house): D-pad down opens Collection; the stick moves down to Save Game; A, then A to
+# confirm the prompts.
+2-2.2 DOWN
+4-4.3 STICK 0 -1
+5-5.3 STICK 0 -1
+6-6.3 STICK 0 -1
+8-8.2 A
+11-11.2 A
+14-14.2 A
+17-17.2 A
