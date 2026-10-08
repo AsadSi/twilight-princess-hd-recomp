@@ -10,8 +10,29 @@ How it works and how it differs from running the game in Cemu: [docs/how-it-work
 
 ## What's new in this update
 
-### Next update
+### v0.2.8
 
+- **Fixed: the game could freeze at startup with 0 fps on some Macs** (issue #62, MacBook Air M1).
+  Newer Apple compilers turned the game's spin-wait loops into endless loops that never saw the other
+  core release the lock. Every loop in the game code now re-reads memory on each pass; no measurable
+  speed cost.
+- **Fixed: Android crashed when changing the aspect ratio or internal resolution on some phones**
+  (issue #72, Adreno 830). Phones whose driver cannot blit depth buffers now copy them with a small
+  draw instead; nothing aborts any more if a device can do neither. Thanks to @Blivii for the analysis
+  and the patch.
+- **Fixed: grid pattern in contact shadows at higher internal resolutions** (issue #66). The game's
+  shadow and ambient-occlusion blur now covers the same area as on the console at every resolution;
+  1x is unchanged and there is no measurable speed cost. Shadow maps still scale with the internal
+  resolution for sharp shadows; `WWHD_SHADOW_FIX=1` keeps them at the console's 1024x1024 instead,
+  for soft edges that never shimmer (issue #67).
+- **More languages (experimental):** with your own dump of the European or Japanese game, the port can
+  use its text, fonts and menus: German, Italian, British English, European French and Spanish (tested
+  with a European dump) or Japanese (untested). See [docs/language-packs.md](docs/language-packs.md).
+- **Fan translations as content mods**, including **Arabic and Hebrew** drawn right to left (issue #60),
+  see [docs/mod-manager.md](docs/mod-manager.md) and [docs/rtl-text.md](docs/rtl-text.md).
+- **macOS: closing the TV window quits the game** (issue #65), as on Windows and Linux. During a game
+  it asks first: **Quit**, **Cancel** or **Save State and Quit**. `WWHD_QUIT_PROMPT=0` turns the
+  question off.
 - **Faster on Linux and Steam Deck (Vulkan):** the guest buffer cache is now on by default on desktop
   Linux, as on macOS. It keeps unchanged vertex, index and uniform data on the GPU instead of copying it
   every frame, which removed a 20 fps lock in busy views on an RK3588 board (issue #50). If you see broken
