@@ -492,10 +492,17 @@ static Shader* get_shader_uncached(const uint32_t* regs, bool vertex, LatteFetch
     opt.strictMul = true;  // Cemu's default (accurate shader mul): MUL/MULADD give 0 for 0 * inf, as on the GPU
     if (!vertex) opt.areaSampledTextures = gfx::area_sample::units_for_pixel_shader(mem::ptr(addr), size);
     LatteDecompilerOutput_t out{};
+    // Rect lists are drawn as triangles here (build_indices), so a shader first met in one is translated as for
+    // triangles: for rects Cemu's Metal decompiler emits an object shader, which these pipelines can't take
+    // (building one crashed Apple's compiler service each time, and TP HD's GamePad minimap stayed black)
+    uint32_t& prim = ((uint32_t*)regs)[REGADDR::VGT_PRIMITIVE_TYPE];
+    const uint32_t drawnPrim = prim;
+    if (prim == 0x11) prim = 4;
     if (vertex)
         LatteDecompiler_DecompileVertexShader(base, (uint32*)regs, mem::ptr(addr), size, fs, opt, &out);
     else
         LatteDecompiler_DecompilePixelShader(base, (uint32*)regs, mem::ptr(addr), size, opt, &out);
+    prim = drawnPrim;
     if (!out.shader || out.shader->hasError || !out.shader->strBuf_shaderSource) {
         LOG("[gfx] %s shader %08X failed to translate", vertex ? "vertex" : "pixel", addr);
         s->state = CS_FAILED;
@@ -678,10 +685,11 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
     }
     const int attempt = ++pl->attempts;
     const bool injectFailure = attempt <= g_test_fail_compiles;
-    auto pipelineFailed = [h, attempt](NSError* err) {
+    auto pipelineFailed = [h, attempt, vk = vs->key, pk = ps->key](NSError* err) {
         const char* why = err ? err.localizedDescription.UTF8String : "no error given";
-        LOG("[gfx] pipeline %016llx creation failed (attempt %d of %d%s): %s", (unsigned long long)h, attempt, kCompileAttempts,
-            attempt < kCompileAttempts ? ", will retry" : "", why ? why : "?");
+        LOG("[gfx] pipeline %016llx (vs %016llx, ps %016llx) creation failed (attempt %d of %d%s): %s", (unsigned long long)h,
+            (unsigned long long)vk, (unsigned long long)pk, attempt, kCompileAttempts, attempt < kCompileAttempts ? ", will retry" : "",
+            why ? why : "?");
     };
 
     MTLRenderPipelineDescriptor* d = [MTLRenderPipelineDescriptor new];
