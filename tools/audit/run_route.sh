@@ -12,6 +12,7 @@
 # Env: SAVE (save folder under build/audit/saves, default "route"), FRESH=1 starts that save folder empty,
 # LOAD=<slot> loads save state <slot> from build/audit/states at frame 60 and starts the route's clock at frame 90
 # (take one with WWHD_STATE_SAVE_AT=<frame>:<slot>).
+# Other WWHD_* variables pass through, e.g. WWHD_WARP=150:<stage>,<point>,<room>,<layer> (tools/warplist.py).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ROUTE=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); TOTAL=$2; shift 2

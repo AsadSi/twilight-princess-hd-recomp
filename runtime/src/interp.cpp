@@ -49,5 +49,9 @@ void step_done() { mods::packages::frame(++g_steps); }  // GX2SwapScanBuffers, g
 }  // namespace interp
 
 // main01's frame loop (02AF0EDC, top of each pass): the main thread's state is all in guest memory and
-// its registers, so save states are taken and restored here (savestate.cpp)
-extern "C" void site_02AF0EDC(Cpu* c) { ss::service(c); }
+// its registers, so save states are taken and restored here (savestate.cpp); test warps are requested here
+namespace warp { void service(Cpu* c); }  // warp.cpp
+extern "C" void site_02AF0EDC(Cpu* c) {
+    ss::service(c);
+    warp::service(c);
+}
