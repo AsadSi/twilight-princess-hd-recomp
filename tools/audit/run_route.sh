@@ -49,7 +49,7 @@ BEFORE=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')
 cd "$OUT"
 WWHD_TEST_ORIGIN=1 WWHD_TEST_PRESS=$PRESS WWHD_TEST_STICK=$STICK WWHD_TEST_RSTICK=$RSTICK WWHD_DUMP_FRAMES=$DUMPS \
   "$APP" --game "$ROOT/game" --save "$SAVEDIR" > log.txt 2>&1 &
-PID=$!; START=$(date +%s)
+PID=$!; disown $PID; START=$(date +%s)
 elapsed_lt() { perl -MTime::HiRes=time -e "exit !(time - $START < $1)"; }
 CLIPS=()
 for SHOT in "${CLIPS_AT[@]+"${CLIPS_AT[@]}"}"; do
