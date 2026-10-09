@@ -12,15 +12,17 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 #include "runtime.h"
 
 namespace aspect {
-constexpr int kWideW = 808;  // l_tvSize's 16:9 width
+constexpr int kWideW = 808;                 // l_tvSize's 16:9 width
+constexpr uint32_t kTvSize = 0x100A4CE4;  // l_tvSize
 namespace {
 constexpr float kBase = 16.0f / 9.0f;
-constexpr uint32_t kTvSize = 0x100A4CE4, kSetTvSize = 0x02AEC704, kOnWide2D = 0x02A387B4;
+constexpr uint32_t kSetTvSize = 0x02AEC704, kOnWide2D = 0x02A387B4;
 constexpr int kWideH = 448;
 int env_mode() {
     const char* e = getenv("WWHD_ASPECT");
@@ -96,14 +98,36 @@ void service(Cpu* c) {
 
 // J2DPane::draw (02B34334). TP HD stretches each 2D screen, laid out in the Wii's 608 units, to the screen's width
 // (a root pane's x by ortho width / 608 about x = 304) and undoes it for panes whose user tag is 'n_43'. What it
-// draws comes out right only at 16:9 (808 units wide), so on a wider screen, while these draw:
-// - stretched text, and the D-pad's labels, are drawn narrow so that 16:9's stretch gives them their shape: their
-//   own x is scaled back to that stretch (808 / width) around their position, and a label keeps its 16:9 offset
-//   from the D-pad;
-// - the HUD's groups (the 'n_43' panes in the meter's n_base: hearts, rupees, the X/Y/A/B cluster, ...) hold their
-//   parts as unstretched offsets from a stretched point, so the parts drift inward.
-// A part keeps its 16:9 distance from the edge it is nearest to (left or right third), or from the center.
+// draws comes out right only at 16:9 (808 units wide). On a wider screen:
+// - the HUD (the meter's draw, dMeter2Draw_c::draw 02A31164..02A32000) keeps to the screen's edges: stretched text,
+//   and the D-pad's labels, are drawn narrow so that 16:9's stretch gives them their shape (their own x scaled back
+//   to that stretch, 808 / width, around their position; a label keeps its 16:9 offset from the D-pad), and the
+//   HUD's groups (the 'n_43' panes in the meter's n_base: hearts, rupees, the X/Y/A/B cluster, ...), which hold
+//   their parts as unstretched offsets from a stretched point, have each part keep its 16:9 distance from the edge
+//   it is nearest to (left or right third), or from the center;
+// - every other screen on the TV (menus, messages, the title) is drawn at 16:9 in the middle, as a whole: the
+//   root's stretch is narrowed to 16:9's around the center, and a 'n_43' pane's undoing of it with it (a full-screen
+//   menu, whose art lines up with its text, shows black at the sides). Pictures beside the layout (off screen at
+//   16:9) keep the full stretch and stay off screen, and so do a screen's top layers that reach well past both
+//   edges (fills made to cover any screen). Where the game asks for a menu pane's place on screen
+//   (CPaneMgr::getGlobalVtx, 02A95A78: the field map's clip rectangle and icons) it gets the centered place.
+// The GamePad's screens are left alone.
 namespace {
+constexpr uint32_t kN43 = 0x6E5F3433;  // 'n_43': HD undoes the stretch for this pane
+enum Screen { kMenu, kHud, kGamePad };
+int g_screen = kMenu;  // the screen being drawn, from its root's caller
+int g_full = 0;        // > 0: inside a pane drawn at the full stretch (a menu's backdrop)
+int g_map = 0;         // > 0: the TV's field map is drawing
+std::unordered_map<uint32_t, int> g_tv_screens;  // root pane -> how it was last drawn on the TV
+
+int screen_of(uint32_t sp) {  // the callers' return addresses, up the stack's back chain
+    for (int i = 0; i < 8 && (sp = ld32(sp)); i++) {
+        const uint32_t lr = ld32(sp + 4);
+        if (lr == 0x02AEC510) return kGamePad;  // the painter's call into HD's GamePad drawing
+        if (lr >= 0x02A31164 && lr < 0x02A32000) return kHud;
+    }
+    return kMenu;
+}
 // the x range of a pane's shown pictures and text at 16:9, from its own x there (offsets only; the HUD's parts are
 // unscaled; hidden ones are often parked off screen)
 void content_x(uint32_t p, double x, double& lo, double& hi, int depth = 0) {
@@ -116,7 +140,6 @@ uint32_t parent_of(uint32_t pane) {
     const uint32_t list = pane ? ld32(pane + 0xE4) : 0;
     return list ? ld32(list + 0xC) : 0;
 }
-constexpr uint32_t kN43 = 0x6E5F3433;  // 'n_43': HD undoes the stretch for this pane
 bool unstretched(uint32_t p) {
     for (; p; p = parent_of(p))
         if (ld32(p + 20) == kN43) return true;
@@ -128,23 +151,66 @@ bool dpad_group(uint32_t p) { return p && ld64(p + 8) == 0x6A756A695F6EULL; }  /
 extern "C" void f_02B34334_orig(Cpu* c);
 extern "C" void hook_02B34334(Cpu* c) {
     const uint32_t pane = c->r[3], ctx = c->r[4], parent = parent_of(pane);
-    if (!parent || ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // a root pane, or not a J2DOrthoGraph
-    const double x0 = ldf32(ctx + 0xBC), w = ldf32(ctx + 0xC4) - x0, k = aspect::kWideW / w;
-    const bool label = dpad_group(parent) && ld32(pane + 20) != kN43;  // the D-pad's labels ("Minimap", ...)
-    const bool text = ld32(pane + 4) >> 8 == 0x544258 && !dpad_group(parent_of(parent)) && !unstretched(pane);  // 'TBX'
-    const bool group = ld32(pane + 20) == kN43 && ld64(parent + 8) == 0x6E5F62617365ULL;  // in the meter's n_base
-    if (k > 0.999 || (!text && !label && !group)) return f_02B34334_orig(c);
-    const double s = ldf32(parent + 0x78), g = ldf32(parent + 0x84) + s * ldf32(pane + 0x54);  // its x on screen
-    const double g16 = 304 + ((g - x0) * 608 / w - 304) * aspect::kWideW / 608, half = (w - aspect::kWideW) / 2;
-    auto anchor = [&](double x16) { return x16 < 169.33 ? -half : x16 > 438.67 ? half : 0; };  // 16:9's thirds
+    if (ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // not a J2DOrthoGraph
+    if (!parent) {                                                   // a screen's root
+        const int outer = g_screen;
+        g_screen = screen_of(c->r[1]);
+        if (g_screen != kGamePad) g_tv_screens[pane] = g_screen;
+        f_02B34334_orig(c);
+        g_screen = outer;
+        return;
+    }
+    const double x0 = ldf32(ctx + 0xBC), w = ldf32(ctx + 0xC4) - x0, k = aspect::kWideW / w, mid = x0 + w / 2;
+    if (k > 0.999 || g_screen == kGamePad) return f_02B34334_orig(c);
+    const uint32_t kind = ld32(pane + 4) >> 8;
+    const bool text = kind == 0x544258;  // 'TBX'
     std::vector<std::pair<uint32_t, uint32_t>> saved;  // (address, word) to put back after the draw
     auto set = [&](uint32_t a, double v) { saved.push_back({a, ld32(a)}); stf32(a, v); };
+    auto squeeze = [&](uint32_t mtx, double f) {  // a matrix's x about the screen's middle
+        for (int i = 0; i < 3; i++) set(mtx + 4 * i, ldf32(mtx + 4 * i) * f);
+        set(mtx + 12, mid + (ldf32(mtx + 12) - mid) * f);
+    };
+    int full = 0;
+    if (g_screen == kMenu) {
+        if (!parent_of(parent)) squeeze(parent + 0x78, k);  // the root's stretch, for its whole tree
+        else if (g_full) {
+            if (text && !unstretched(pane)) for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) * k);
+        } else if (ld8(pane + 0xA8) && kind != 0x50414E && !text) {  // a picture or window: is it a backdrop?
+            const uint32_t m = parent + 0x78, l = pane + 0x48;
+            double g[4];  // its global x row = parent's x row x its own matrix
+            for (int j = 0; j < 4; j++)
+                g[j] = ldf32(m) * ldf32(l + 4 * j) + ldf32(m + 4) * ldf32(l + 16 + 4 * j) + ldf32(m + 8) * ldf32(l + 32 + 4 * j) + (j == 3 ? ldf32(m + 12) : 0);
+            double lo = 1e9, hi = -1e9;
+            for (float bx : {ldf32(pane + 0x18), ldf32(pane + 0x20)})
+                for (float by : {ldf32(pane + 0x1C), ldf32(pane + 0x24)}) {
+                    const double u = (mid + (g[0] * bx + g[1] * by + g[3] - mid) / k - x0) * 608 / w;  // in the layout's units
+                    lo = std::min(lo, u), hi = std::max(hi, u);
+                }
+            int depth = 0;  // a screen's layers are the children of its top group (root -> ROOT -> group -> layer)
+            for (uint32_t p = parent; p; p = parent_of(p)) depth++;
+            if (hi < 1 || lo > 607 || (depth <= 3 && lo < -50 && hi > 658))  // beside, or a top layer well past both edges
+                squeeze(parent + 0x78, 1 / k), full = 1;
+        } else if (ld32(pane + 20) == kN43 && !unstretched(parent))
+            for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) / k);  // its undoing was for the full stretch
+        g_full += full;
+        f_02B34334_orig(c);
+        g_full -= full;
+        for (auto it = saved.rbegin(); it != saved.rend(); ++it) st32(it->first, it->second);
+        return;
+    }
+    const bool label = dpad_group(parent) && ld32(pane + 20) != kN43;  // the D-pad's labels ("Minimap", ...)
+    const bool hud_text = text && !dpad_group(parent_of(parent)) && !unstretched(pane);
+    const bool group = ld32(pane + 20) == kN43 && ld64(parent + 8) == 0x6E5F62617365ULL;  // in the meter's n_base
+    if (!hud_text && !label && !group) return f_02B34334_orig(c);
+    const double s = ldf32(parent + 0x78), gx = ldf32(parent + 0x84) + s * ldf32(pane + 0x54);  // its x on screen
+    const double g16 = 304 + ((gx - x0) * 608 / w - 304) * aspect::kWideW / 608, half = (w - aspect::kWideW) / 2;
+    auto anchor = [&](double x16) { return x16 < 169.33 ? -half : x16 > 438.67 ? half : 0; };  // 16:9's thirds
     if (group) {
         for (uint32_t l = ld32(pane + 0xD4); l; l = ld32(l + 0xC)) {
             const uint32_t part = ld32(l);
             double lo = 1e9, hi = -1e9;
             content_x(part, g16 + ldf32(part + 0x54), lo, hi);  // where the part shows at 16:9 (the group is unscaled)
-            set(part + 0x54, ldf32(part + 0x54) + g16 - g + anchor(lo <= hi ? (lo + hi) / 2 : g16 + ldf32(part + 0x54)));
+            set(part + 0x54, ldf32(part + 0x54) + g16 - gx + anchor(lo <= hi ? (lo + hi) / 2 : g16 + ldf32(part + 0x54)));
         }
     } else {
         for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) * k);
@@ -157,4 +223,37 @@ extern "C" void hook_02B34334(Cpu* c) {
     }
     f_02B34334_orig(c);
     for (auto& [a, v] : saved) st32(a, v);
+}
+
+extern "C" void f_02A95A78_orig(Cpu* c);
+extern "C" void hook_02A95A78(Cpu* c) {  // CPaneMgr::getGlobalVtx(Vec* out, CPaneMgr*, J2DPane*, Mtx*, u8 corner, ...)
+    const uint32_t out = c->r[3], sp = c->r[1];
+    uint32_t root = c->r[5];
+    for (uint32_t p = root; p; p = parent_of(p)) root = p;
+    f_02A95A78_orig(c);
+    const double k = aspect::kWideW / double(ld16(aspect::kTvSize + 4));
+    const auto it = g_tv_screens.find(root);
+    if (k < 0.999 && it != g_tv_screens.end() && it->second == kMenu && screen_of(sp) != kGamePad)
+        stf32(out, 304 + (ldf32(out) - 304) * k);
+}
+
+// The field map (dMenu_Fmap2DBack_c::draw, 029DF284) draws its region art with J2DPicture::draw(x, y, w, h)
+// (02B3DB9C) at the full stretch: on the TV it is narrowed to 16:9's around the middle, as the menu is (the full
+// screen's backgrounds stay as they are).
+extern "C" void f_029DF284_orig(Cpu* c);
+extern "C" void hook_029DF284(Cpu* c) {
+    const int tv = screen_of(c->r[1]) != kGamePad;
+    g_map += tv;
+    f_029DF284_orig(c);
+    g_map -= tv;
+}
+
+extern "C" void f_02B3DB9C_orig(Cpu* c);
+extern "C" void hook_02B3DB9C(Cpu* c) {
+    const double w = ld16(aspect::kTvSize + 4), k = aspect::kWideW / w;
+    if (g_map && k < 0.999 && c->f[3].ps0 < w - 1) {
+        c->f[1].ps0 = c->f[1].ps1 = 304 + (c->f[1].ps0 - 304) * k;
+        c->f[3].ps0 = c->f[3].ps1 = c->f[3].ps0 * k;
+    }
+    f_02B3DB9C_orig(c);
 }
