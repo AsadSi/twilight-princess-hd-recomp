@@ -1757,12 +1757,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         (capturing() && count <= 6)) {
         uint32_t vb = regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START];
         uint32_t stride = (regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + 2] >> 11) & 0xFFFF;
+        auto v = [&](uint32_t a) { return vb ? bitsf_(ld32(vb + a)) : 0.0f; };  // draws without a vertex buffer have vb 0
         char line[4096];
         int n = snprintf(line, sizeof line, "[trace] f%llu #%llu tex %08X vb %08X v0 %.1f,%.1f v1 %.1f,%.1f v2 %.1f,%.1f v3 %.1f,%.1f |",
                          (unsigned long long)R.frame, (unsigned long long)thisDraw, regs[REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS + 2] << 8, vb,
-                         bitsf_(ld32(vb)), bitsf_(ld32(vb + 4)), bitsf_(ld32(vb + stride)), bitsf_(ld32(vb + stride + 4)),
-                         bitsf_(ld32(vb + 2 * stride)), bitsf_(ld32(vb + 2 * stride + 4)), bitsf_(ld32(vb + 3 * stride)),
-                         bitsf_(ld32(vb + 3 * stride + 4)));
+                         v(0), v(4), v(stride), v(stride + 4), v(2 * stride), v(2 * stride + 4), v(3 * stride), v(3 * stride + 4));
         int k = 0;
         for (auto& e : vs->dec->list_remappedUniformEntries_register) {
             if (k++ >= 4) break;
@@ -1799,9 +1798,10 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     if (psMatch) {
         uint32_t vb = regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START];
         uint32_t stride = (regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + 2] >> 11) & 0xFFFF;
-        LOG("[dbg] vb %08X stride %u: (%f %f %f) (%f %f %f) (%f %f %f)", vb, stride, bitsf_(ld32(vb)), bitsf_(ld32(vb + 4)),
-            bitsf_(ld32(vb + 8)), bitsf_(ld32(vb + stride)), bitsf_(ld32(vb + stride + 4)), bitsf_(ld32(vb + stride + 8)),
-            bitsf_(ld32(vb + 2 * stride)), bitsf_(ld32(vb + 2 * stride + 4)), bitsf_(ld32(vb + 2 * stride + 8)));
+        if (vb)
+            LOG("[dbg] vb %08X stride %u: (%f %f %f) (%f %f %f) (%f %f %f)", vb, stride, bitsf_(ld32(vb)), bitsf_(ld32(vb + 4)),
+                bitsf_(ld32(vb + 8)), bitsf_(ld32(vb + stride)), bitsf_(ld32(vb + stride + 4)), bitsf_(ld32(vb + stride + 8)),
+                bitsf_(ld32(vb + 2 * stride)), bitsf_(ld32(vb + 2 * stride + 4)), bitsf_(ld32(vb + 2 * stride + 8)));
         bool dx9 = regs[REGADDR::SQ_CONFIG] & 1;
         LOG("[dbg] dx9consts=%d cull=%08X remapped entries reg=%zu bufgroups=%zu idx %u@%08X first idx %u %u %u", dx9,
             regs[REGADDR::PA_SU_SC_MODE_CNTL], vs->dec->list_remappedUniformEntries_register.size(),
