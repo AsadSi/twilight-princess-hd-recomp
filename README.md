@@ -229,6 +229,21 @@ developer map select, and more warps can follow, separated by `;` (`tools/warpli
 1,987 places; Ordon Village on day 1 is `F_SP103,1,0,6`). `WWHD_STATE_SAVE_AT=<frame>:<slot>` takes a save state at a frame. Scripted routes
 with screenshots: `tools/audit/run_route.sh`.
 
+**Shader head start.** The first time the game meets a shader it translates and compiles it. A head start
+translates the shaders your play has met so far at the next start instead, from the game's own
+`content/Shaders.pack.gz` and a template of the states they were drawn with, recorded from your shader cache.
+Both are made on your machine and must not be shared; the setup app does not make them. In a source checkout,
+after playing for a while:
+
+```sh
+python3 tools/shaderprep.py template ~/Library/Caches/tphd/shaders.bin   # -> game/shadercache/template.bin
+python3 tools/shaderprep.py build                                          # -> game/shadercache/headstart.bin
+```
+
+`--merge game/shadercache/template.bin` adds a later session to the template, and `./build/cmake/wwhd
+--warm-shaders` compiles everything once to fill the macOS shader cache. The game loads
+`game/shadercache/headstart.bin` by itself (`WWHD_HEADSTART=<file>` or `0` changes or disables it).
+
 Settings, controls, mod packages and save states are kept in `~/Library/Application Support/TPHD`,
 the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged folder). Crashes write
 `captures/crash-<time>.log`.

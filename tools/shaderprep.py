@@ -11,24 +11,20 @@ Usage:
   shaderprep.py build    [OUT] [--template T] [--max N]          head start from the game files + template
                          [--no-pipelines]                        (default OUT: game/shadercache/headstart.bin)
 
-Where the shaders are (Wind Waker HD, USA):
-  - SHARCFB archives ("BAHS" = byte-swapped "SHAB", AGL binary shader archive, version 9, little-endian
-    header): standalone in content/Common/Shaders/{Prim,particle,render_buffer}/*.sharcfb, inside the AGL
-    resource SARCs (content/Cafe/Common/agl_resource_cafe*.sarc) and inside many Yaz0-compressed SARC
-    archives (*.szs, and the *.pack SARCs that bundle szs files) - e.g. model.sharcfb (8976 shaders),
-    agl_technique_{pfx,lght,shdw}.sharcfb, wii_pipeline.sharcfb and per-stage archives (zl, pz, vf_*...).
-    About 30,000 distinct shaders in total.
-  - SHARCFB layout (kinnay/Nintendo-File-Formats documents v8; v9 matches for what we use):
-      header: magic, version, filesize, endianness, 0, name length, name
-      binary section: section size, count, then entries {entry size, type (0 VS, 1 PS, 2 GS), unknown,
-        data size, data[]}. The data is the GX2VertexShader / GX2PixelShader structure stored
-        little-endian, pointers as offsets from the start of the data. The microcode is stored
-        byte-for-byte as the game later hands it to the GPU (95% of the programs the game uses from boot
-        to Outset Island are found this way).
-      program section: named programs referencing binaries (variations = macro combinations).
-  - GX2VertexShader: 52 register words (0x00..0xCC), shader size @0xD0, shader offset @0xD4.
-    GX2PixelShader: 41 register words (0x00..0xA0), shader size @0xA4, shader offset @0xA8.
-  - .gsh (GFX2) files only hold the AGL primitive renderer's few shaders; not used by this tool.
+Where the shaders are (Twilight Princess HD, USA):
+  - content/Shaders.pack.gz, a gzipped TMPK archive (big-endian: "TMPK", file count, alignment, 0, then
+    {name offset, data offset, size, 0} per file) of 1,567 GFX2 shader files (.gsh), each one vertex and
+    one pixel shader: Shaders/rvl_wrap/gx_<hash>.gsh (the Wii version's GX setups as GX2 programs) and
+    HD's own aa, bloom, blur, dof and misc. No other file on the disc holds shaders (the other .pack.gz
+    hold .gtx textures and .gmx models).
+  - GFX2 layout: header ("Gfx2", header size, version 7.1, ...), then blocks {"BLK{", header size,
+    version, type, data size, id, index, data[]}: 3 vertex shader header, 5 its program, 6 pixel shader
+    header, 7 its program (2 padding, 1 end). A header is the GX2VertexShader / GX2PixelShader structure
+    (big-endian, relocated pointers); a program is the microcode byte-for-byte as the game later hands it
+    to the GPU (220 of the 222 programs the game used from save state 1 through Ordon Village are found
+    this way; the other two are HD's copy shaders in Zelda.rpx's data, 100CF700 and 100CF900).
+  - GX2VertexShader: 52 register words (0x00..0xCC), shader size @0xD0.
+    GX2PixelShader: 41 register words (0x00..0xA0), shader size @0xA4.
 
 The head start is written in the runtime's recipe format (runtime/src/gfx/metal_draw.mm, cache_write):
 records of {u32 type, u32 raw size, u32 compressed size, zlib(raw)}; a shader record is
@@ -42,7 +38,7 @@ own play sessions: for each program a hash of its microcode and the register sta
 with, the vertex fetch shaders (tiny attribute-layout descriptors) and the pipeline recipes recorded in
 those sessions. It is derived from the game, so it is not part of this repository; make it from your
 own runtime cache after playing for a while (the further you get, the more it covers):
-  shaderprep.py template ~/Library/Caches/wwhd/shaders.bin
+  shaderprep.py template ~/Library/Caches/tphd/shaders.bin
   shaderprep.py build
 `build` then writes:
   - type 1 records: programs from the template with their recorded states ("known"); the runtime
@@ -56,11 +52,9 @@ own runtime cache after playing for a while (the further you get, the more it co
     compiling everything once so the macOS Metal shader cache already has the code later.
 """
 import collections
-import ctypes
-import glob
+import gzip
 import os
 import struct
-import subprocess
 import sys
 import zlib
 
@@ -73,84 +67,38 @@ VS, PS, GS = 0, 1, 2
 
 
 # ---------------------------------------------------------------- containers
-_yaz0 = None
+GSH_HEADERS = {3: (VS, 52, 0xD0), 6: (PS, 41, 0xA4)}  # GFX2 block type: shader type, register words, size offset
 
 
-def yaz0(b):
-    global _yaz0
-    if _yaz0 is None:
-        lib = os.path.join(ROOT, "build", "libyaz0.dylib")
-        if not os.path.exists(lib):
-            os.makedirs(os.path.dirname(lib), exist_ok=True)
-            subprocess.check_call(["clang", "-O2", "-shared", "-o", lib, os.path.join(HERE, "yaz0.c")])
-        _yaz0 = ctypes.CDLL(lib)
-        _yaz0.yaz0_decompress.restype = ctypes.c_long
-    n = struct.unpack_from(">I", b, 4)[0]
-    out = ctypes.create_string_buffer(n)
-    r = _yaz0.yaz0_decompress(b, len(b), out, n)
-    return out.raw[:r] if r >= 0 else b""
+def tmpk(b):
+    """yield (name, bytes) for every file of a TMPK archive"""
+    for i in range(struct.unpack_from(">I", b, 4)[0]):
+        name, off, size, _ = struct.unpack_from(">IIII", b, 0x10 + 16 * i)
+        yield b[name:b.index(b"\0", name)].decode(), b[off:off + size]
 
 
-def sarc(b):
-    e = ">" if b[6:8] == b"\xfe\xff" else "<"
-    hl = struct.unpack_from(e + "H", b, 4)[0]
-    doff = struct.unpack_from(e + "I", b, 0xC)[0]
-    n = struct.unpack_from(e + "H", b, hl + 6)[0]
-    sfnt = hl + 12 + 16 * n
-    for i in range(n):
-        h, attr, s, t = struct.unpack_from(e + "IIII", b, hl + 12 + 16 * i)
-        name = "%08x" % h
-        if attr & 0x01000000:
-            off = sfnt + 8 + (attr & 0xFFFF) * 4
-            name = b[off:b.index(b"\0", off)].decode(errors="replace")
-        yield name, b[doff + s:doff + t]
-
-
-def walk(b, path):
-    """yield (path, bytes) for every file inside Yaz0/SARC nesting"""
-    if b[:4] == b"Yaz0":
-        yield from walk(yaz0(b), path)
-    elif b[:4] == b"SARC":
-        for n, f in sarc(b):
-            yield from walk(f, path + "/" + n)
-    else:
-        yield path, b
-
-
-def sharcfb_shaders(b):
-    """yield (type, register words, microcode) for every vertex/pixel shader binary"""
-    if b[:4] != b"BAHS":
-        return
-    u = lambda o: struct.unpack_from("<I", b, o)[0]
-    o = 0x18 + u(0x14)
-    count = u(o + 4)
-    p = o + 8
-    for _ in range(count):
-        size, typ, _unk, dsz = u(p), u(p + 4), u(p + 8), u(p + 12)
-        data = b[p + 16:p + 16 + dsz]
-        p += size
-        w = lambda off: struct.unpack_from("<I", data, off)[0]
-        if typ == VS and len(data) >= 0xDC:
-            nregs, sz_off, ptr_off = 52, 0xD0, 0xD4
-        elif typ == PS and len(data) >= 0xAC:
-            nregs, sz_off, ptr_off = 41, 0xA4, 0xA8
-        else:
-            continue
-        size_c, ptr = w(sz_off), w(ptr_off)
-        if ptr + size_c > len(data):
-            continue
-        yield typ, [w(4 * i) for i in range(nregs)], data[ptr:ptr + size_c]
+def gsh_shaders(b):
+    """yield (type, register words, microcode) for the shaders of a GFX2 file"""
+    o = struct.unpack_from(">I", b, 4)[0]
+    head = None
+    while o + 0x20 <= len(b):
+        hsize, _, _, typ, dsize = struct.unpack_from(">5I", b, o + 4)
+        data = b[o + hsize:o + hsize + dsize]
+        o += hsize + dsize
+        if typ in GSH_HEADERS:
+            t, nregs, sz_off = GSH_HEADERS[typ]
+            head = t, list(struct.unpack_from(">%dI" % nregs, data)), struct.unpack_from(">I", data, sz_off)[0]
+        elif typ in (5, 7) and head:  # the program block after its header
+            yield head[0], head[1], data[:head[2]]
 
 
 def game_shaders(game):
-    """all distinct (type, microcode) -> (register words, container path)"""
+    """all distinct (type, microcode) -> (register words, shader file)"""
     out = {}
-    for f in sorted(glob.glob(os.path.join(game, "**", "*"), recursive=True)):
-        if not (os.path.isfile(f) and f.endswith((".szs", ".pack", ".sarc", ".sharcfb"))):
-            continue
-        for path, b in walk(open(f, "rb").read(), os.path.relpath(f, game)):
-            for typ, regs, code in sharcfb_shaders(b):
-                out.setdefault((typ, code), (regs, path))
+    for name, b in tmpk(gzip.decompress(open(os.path.join(game, "Shaders.pack.gz"), "rb").read())):
+        if b[:4] == b"Gfx2":
+            for typ, regs, code in gsh_shaders(b):
+                out.setdefault((typ, code), (regs, name))
     return out
 
 
@@ -282,7 +230,7 @@ def read_template(path):
     if not os.path.isfile(path):
         sys.exit("no state template at %s\n"
                  "make one from your own runtime cache after playing for a while:\n"
-                 "  tools/shaderprep.py template ~/Library/Caches/wwhd/shaders.bin" % path)
+                 "  tools/shaderprep.py template ~/Library/Caches/tphd/shaders.bin" % path)
     d = open(path, "rb").read()
     if d[:4] != b"WWHT":
         sys.exit("not a template: " + path)
@@ -316,7 +264,7 @@ def read_template(path):
 # ---------------------------------------------------------------- commands
 def cmd_scan(game):
     shaders = game_shaders(game)
-    per = collections.Counter(p.split("/")[0] + "/" + os.path.basename(p) for (_, (_, p)) in shaders.items())
+    per = collections.Counter(os.path.dirname(p) for (_, (_, p)) in shaders.items())
     kinds = collections.Counter(t for t, _ in shaders)
     print("distinct shaders: %d (VS %d, PS %d)" % (len(shaders), kinds[VS], kinds[PS]))
     for k, v in per.most_common(20):
