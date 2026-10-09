@@ -67,7 +67,7 @@ std::string host_path_exact(const std::string& guest) {
 }
 
 #ifndef _WIN32
-// Wii U volumes are case-insensitive (the game asks for Common/Audiores, the disc folder is AudioRes);
+// Wii U volumes are case-insensitive (a request for res/object/... opens the disc's res/Object/...);
 // case-sensitive host file systems (Linux, case-sensitive APFS) need the path resolved one component
 // at a time. Exact matches cost one stat(); resolved directories are cached. Components that don't
 // exist yet (new save files) keep the guest's spelling.

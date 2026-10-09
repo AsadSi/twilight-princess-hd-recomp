@@ -35,7 +35,7 @@ enum Mods : int { kShift = 1, kCtrl = 2, kAlt = 4, kSuper = 8 };
 // returns true when the overlay used the key: F1 toggles, and every key while it is open
 bool key(int code, bool down, bool repeat, int mods);
 // pointer in the TV window, normalised to its content area (0..1 from the top left); return true while
-// the overlay is open (the event is the overlay's, not the game's or the mouse camera's)
+// the overlay is open (the event is the overlay's, not the game's)
 bool mouse_move(float nx, float ny);
 bool mouse_button(int button, bool down);  // 0 left, 1 right, 2 middle
 bool mouse_wheel(float dx, float dy);      // in lines, +y = away from the user

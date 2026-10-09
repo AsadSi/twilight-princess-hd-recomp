@@ -40,8 +40,6 @@ std::string current_profile();
 bool create_profile(const std::string& name,std::string& error);
 bool select_profile(const std::string& name,std::string& error);
 bool delete_profile(const std::string& name,std::string& error);
-void remember_builtin(const std::string& id,bool on);
-void remember_option(const std::string& id,double value);
 using ReadMemory=int(*)(uint32_t,void*,size_t);
 using WriteMemory=int(*)(uint32_t,const void*,size_t);
 void set_memory_access(ReadMemory read,WriteMemory write);

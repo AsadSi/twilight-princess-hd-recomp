@@ -125,7 +125,7 @@ void install_overlay_input() {
         }
         default: break;
         }
-        return nil;  // the overlay's, not the game's (mouse camera, GamePad touch)
+        return nil;  // the overlay's, not the game's (GamePad touch)
     }];
 }
 

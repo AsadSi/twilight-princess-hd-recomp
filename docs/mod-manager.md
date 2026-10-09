@@ -30,16 +30,13 @@ guide the design; any future reuse requires a separate license review.
 ## Player workflow
 
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
-the menu) and select **Mods**. The searchable built-in catalogue manages the
-mods that are part of this build: direct camera, mouse camera, first-person
-shortcut, wall climbing, quick doors and fast scenes. Descriptions and options
-appear beside the selected entry. All defaults are off.
+the menu) and select **Mods**.
 
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages
 start disabled; nothing from a package is loaded until you enable it. Enabling
-resolves required dependencies; missing versions, cycles, declared conflicts and
-overlapping settings presets produce an error. The details show metadata, status
+resolves required dependencies; missing versions, cycles and declared conflicts
+produce an error. The details show metadata, status
 and bool/number/string/enum options. String edits commit with Enter. Disable a
 package and wait for its next game update before updating or removing it.
 Reinstall the same ID while disabled to update; configuration is preserved by
@@ -62,9 +59,8 @@ package's library for this platform (the file named in `binaries`). It applies
 to every profile. Installing an update whose library differs asks again;
 removing a package forgets its confirmation. Only that one library is
 fingerprinted; anything the library itself loads from its folder is not.
-Built-in mods, settings presets, content mods and Cemu graphics packs never ask:
-they contain no native code, and the manager loads native code only through
-`kind: native` packages.
+Content mods and Cemu graphics packs never ask: they contain no native code, and
+the manager loads native code only through `kind: native` packages.
 
 Native code is never loaded without a matching confirmation, also when a
 profile switch, an older `profiles.json` or an updated library would enable it.
@@ -75,14 +71,13 @@ on it report that a dependency failed to load, as for any failed load. The
 manager API enforces this as well (`enable()` refuses unconfirmed native code;
 `unconfirmed_native()` and `confirm_native()` serve the dialog).
 
-Profiles save package toggles/configuration and built-in choices. Clone current
-creates another profile; select it in Active profile. Switch away before deleting
-a profile. Disable all covers both built-ins and external packages. Explicit
-startup environment values, including zero, override saved choices at startup.
+Profiles save package toggles and configuration. Clone current creates another
+profile; select it in Active profile. Switch away before deleting a profile.
+Disable all switches off every package.
 
 Storage is `<host config directory>/ModManager`: `Mods/<id>/manifest.json` plus
 package files, and `profiles.json`. `WWHD_MOD_MANAGER_DIR` selects isolated
-storage. `WWHD_NO_HOST_INPUT` skips user preferences and package storage unless
+storage. `WWHD_NO_HOST_INPUT` skips package storage unless
 an explicit manager directory is supplied for a test. Content mods are copied locally into manager storage; the original game files
 are preserved. Game assets and saves are never committed, uploaded or redistributed.
 
@@ -122,16 +117,15 @@ Package manifest fields:
 | --- | --- |
 | `format_version` | `1` |
 | `id`, `name`, `version` | Stable lowercase ASCII identifier, display name, three-part version |
-| `game_id` | `wwhd-usa` (the runtime also verifies its exact RPX entry) |
+| `game_id` | `tphd-usa` (the runtime also verifies its exact RPX entry) |
 | `author`, `description` | Optional display metadata |
 | `minimum_manager_version` | Optional three-part minimum |
-| `kind` | `native`, `settings`, `content` or `cemu` |
+| `kind` | `native`, `content` or `cemu` |
 | `abi_version`, `binaries` | Native ABI `1`; platform-to-relative-library map |
 | `content_dir` | Content package: relative folder holding game-relative replacement files |
 | `cemu_dir` | Cemu package: relative folder holding `rules.txt` and shader files (empty for the package root) |
-| `settings` | Settings preset: built-in IDs to booleans |
-| `dependencies` | Objects with `id` and optional `minimum_version`; `builtin:<id>` allowed |
-| `conflicts` | Package or `builtin:<id>` IDs |
+| `dependencies` | Objects with `id` and optional `minimum_version` |
+| `conflicts` | Package IDs |
 | `options` | Typed defaults and names; numeric min/max/step or enum choices |
 
 Platform keys include `macos-arm64`, `macos-x86_64`, `windows-x86_64`,
@@ -150,14 +144,12 @@ with the same permissions as the game: install only mods you trust.
 
 ## Validation
 
-The standalone `mod_manager` CTest checks defaults, saved settings, invalid
-values, explicit environment precedence, persistence and test isolation.
 `mod_packages` loads an independently compiled fixture library and exercises
 install, profiles, missing dependencies, live configuration, disable/unload and
 removal. It also checks the native confirmation: an unconfirmed library is not
 enabled or loaded, a confirmed one loads in a second process on the same storage
 without asking, a changed library asks again (also through a profile switch),
-removal forgets the confirmation, settings presets never ask, and the test aid
+removal forgets the confirmation, and the test aid
 applies without writing to `profiles.json`. The same test installs synthetic
 Cemu and content packs: legacy imports, loose files, preset validation,
 replacement conflicts, the rejection of code, shader, rule and region mismatches,
@@ -303,8 +295,3 @@ enabled packs and duplicate shader variants are rejected. Both imported presets
 and changes to an enabled pack are checked before saving the profile.
 
 Primary format reference: [Cemu graphics pack documentation](https://github.com/cemu-project/cemu_graphic_packs/wiki/How-to-create-Graphic-Packs).
-Compatibility was checked against the public [WWHD Resolution pack](https://github.com/cemu-project/cemu_graphic_packs/tree/master/Resolutions/WindWakerHD_Resolution)
-and [WWHD Contrasty pack](https://github.com/cemu-project/cemu_graphic_packs/tree/master/Enhancements/WindWakerHD_Contrasty);
-their sources are not part of the repository, and the host tests use synthetic
-fixtures only. This covers the tested adapter paths, not universal Cemu
-graphics-pack compatibility or the visual accuracy of every preset.

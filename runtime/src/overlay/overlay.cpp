@@ -825,7 +825,7 @@ void package_controls() {
         if (installed.size() == 1) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
         bool expanded = ImGui::TreeNode("details", "%s · %s", mod.name.c_str(), mod.version.c_str());
         if (expanded) {
-            note("%s · %s", mod.kind == "native" ? "Native mod" : mod.kind == "cemu" ? "Cemu graphics / shader pack" : mod.kind == "content" ? "Model / texture / UI replacement" : "Built-in settings preset",
+            note("%s · %s", mod.kind == "native" ? "Native mod" : mod.kind == "cemu" ? "Cemu graphics / shader pack" : mod.kind == "content" ? "Model / texture / UI replacement" : "Mod package",
                  mod.pending_restart ? "Restart required" : mod.active ? "Active" : mod.enabled ? "Waiting for game update" : "Disabled");
             if (mod.kind == "native" && mod.compatible)
                 note(mod.native_confirmed ? "Runs native code with the game's permissions (you confirmed this version)."
@@ -1054,8 +1054,7 @@ void gyro_window(bool& open) {
         ImGui::SliderFloat("Mouse: degrees per point", &g.mouse_degrees, 0.01f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
         help("How far one point of mouse movement turns the GamePad (before the sensitivity above). With Steam "
              "Input's gyro to mouse, tune this and Steam's own sensitivity together.");
-        note("While the game aims, the pointer is captured and the mouse turns the GamePad (the mouse camera mod "
-             "leaves it alone then).");
+        note("While the game aims, the pointer is captured and the mouse turns the GamePad.");
     }
     if (g.source == motion::kCemuhook) {
         static char host[256] = "";

@@ -929,17 +929,6 @@ void display_set_tv_fullscreen(bool on) {
 }
 void* display_tv_window() { return (__bridge void*)g_tv_window; }
 
-// mouse camera (mods/mouse.mm): a click on the GamePad overlay is a touch, not a capture
-bool drc_overlay_hit(void* window, double wx, double wy) {
-    NSWindow* w = (__bridge NSWindow*)window;
-    if (!w || w != g_tv_window) return false;
-    NSView* v = w.contentView;
-    NSPoint p = [v convertPoint:NSMakePoint(wx, wy) fromView:nil];
-    NSSize sz = v.bounds.size;
-    float tx, ty;
-    return sz.width > 0 && sz.height > 0 && overlay_hit(p.x / sz.width, 1.0f - p.y / sz.height, &tx, &ty);
-}
-
 // ---------------------------------------------------------------- Display menu
 }  // namespace gfx
 

@@ -1,17 +1,9 @@
 // Standalone host-side tests; no game files, player settings or guest code needed.
-#include "mods/manager.h"
-#include "mods/mods.h"
-#include "overlay/hostui.h"
 #include <cassert>
 #include <cstdlib>
-#include <map>
 #include <string>
 
 namespace {
-bool state[6]{};
-float speed = 1, sensitivity = .15f;
-std::map<std::string,std::string> preferences;
-int reads = 0, writes = 0;
 void env(const char* key, const char* value) {
 #ifdef _WIN32
     _putenv_s(key, value ? value : "");
@@ -19,25 +11,6 @@ void env(const char* key, const char* value) {
     if (value) setenv(key,value,1); else unsetenv(key);
 #endif
 }
-}
-namespace mods {
-bool direct_camera() { return state[0]; } void set_direct_camera(bool b) { state[0]=b; }
-bool mouse_camera() { return state[1]; } void set_mouse_camera(bool b) { state[1]=b; }
-bool first_person_wheel() { return state[2]; } void set_first_person_wheel(bool b) { state[2]=b; }
-bool quick_doors() { return state[4]; } void set_quick_doors(bool b) { state[4]=b; }
-bool fast_scenes() { return state[5]; } void set_fast_scenes(bool b) { state[5]=b; }
-float camera_speed() { return speed; }
-void set_camera_speed(float f) { speed=f; }
-float mouse_sensitivity() { return sensitivity; }
-void set_mouse_sensitivity(float f) { sensitivity=f; }
-}
-namespace hostui {
-bool get(const char* k, std::string& value) {
-    ++reads; auto it=preferences.find(k);
-    if(it==preferences.end()) return false;
-    value=it->second;return true;
-}
-void set(const char* k, const std::string& value) { ++writes;preferences[k]=value; }
 }
 #include "mods/packages.h"
 #include "mods/content.h"
@@ -130,34 +103,35 @@ int main(int argc, char** argv) {
     env("WWHD_MOD_MANAGER_DIR",(root/"storage").string().c_str());
     initialize();
     std::string error;
-    auto package=[&](const char* id, const char* extra, const char* setting="fast-scenes") {
-        auto path=root/id;fs::create_directories(path);
+    // the fixture library under other IDs, for the checks that need no particular mod
+    auto package=[&](const char* id, const char* extra) {
+        auto path=root/id;fs::create_directories(path);fs::copy_file(argv[2],path/"fixture.dylib");
         std::ofstream(path/"manifest.json") << "{\"format_version\":1,\"id\":\"" << id
-          << "\",\"name\":\"" << id << "\",\"version\":\"1.0.0\",\"game_id\":\"tphd-usa\","
-          << "\"kind\":\"settings\",\"settings\":{\"" << setting << "\":true}" << extra << "}";
+          << "\",\"name\":\"" << id << "\",\"version\":\"1.0.0\",\"game_id\":\"tphd-usa\",\"kind\":\"native\",\"abi_version\":1,"
+          << "\"binaries\":{\"" << platform_key() << "\":\"fixture.dylib\"}" << extra << "}";
         return path.string();
     };
-    assert(install(package("climb-preset",""),error));
-    assert(list().size()==1 && list()[0].id=="climb-preset");
-    assert(list()[0].native_confirmed && unconfirmed_native("climb-preset").empty()); // settings presets never ask
-    assert(enable("climb-preset",true,error));frame(1);assert(state[5] && list()[0].active);
-    assert(!remove("climb-preset",error));
-    assert(enable("climb-preset",false,error));frame(2);assert(!state[5]);
+    assert(install(package("basic",""),error));
+    assert(list().size()==1 && list()[0].id=="basic" && confirm_native("basic",error));
+    assert(enable("basic",true,error));frame(1);assert(list()[0].active);
+    assert(!remove("basic",error));
+    assert(enable("basic",false,error));frame(2);assert(!list()[0].active);
     assert(create_profile("Adventure",error));
-    assert(enable("climb-preset",true,error));frame(20);assert(state[5]);
-    assert(select_profile("Adventure",error));frame(21);assert(!state[5]);
+    assert(enable("basic",true,error));frame(20);assert(list()[0].active);
+    assert(select_profile("Adventure",error));frame(21);assert(!list()[0].active);
     assert(current_profile()=="Adventure");assert(!delete_profile("Adventure",error));
     assert(select_profile("Default",error));assert(delete_profile("Adventure",error));
     assert(install(package("missing-dep",",\"dependencies\":[{\"id\":\"absent\"}]"),error));
-    assert(!enable("missing-dep",true,error));
+    assert(!enable("missing-dep",true,error));assert(error.find("Missing dependency")!=std::string::npos);
     assert(remove("missing-dep",error));
     assert(install(package("cycle-a",",\"dependencies\":[{\"id\":\"cycle-b\"}]"),error));
-    assert(install(package("cycle-b",",\"dependencies\":[{\"id\":\"cycle-a\"}]","quick-doors"),error));
+    assert(install(package("cycle-b",",\"dependencies\":[{\"id\":\"cycle-a\"}]"),error));
     assert(!enable("cycle-a",true,error));assert(error.find("cycle")!=std::string::npos);
     assert(remove("cycle-a",error));assert(remove("cycle-b",error));
-    assert(install(package("conflicting",",\"conflicts\":[\"climb-preset\"]","quick-doors"),error));
-    assert(!enable("conflicting",true,error));assert(remove("conflicting",error));
-    assert(install(package("typed",R"(,"options":[{"id":"toggle","name":"Toggle","type":"bool","default":false},{"id":"rate","name":"Rate","type":"number","min":1,"max":10,"default":2},{"id":"mode","name":"Mode","type":"enum","choices":["a","b"],"default":"a"}])","quick-doors"),error));
+    assert(install(package("conflicting",",\"conflicts\":[\"basic\"]"),error));assert(confirm_native("conflicting",error));
+    assert(!enable("conflicting",true,error));assert(error.find("conflicts")!=std::string::npos);assert(remove("conflicting",error));
+    assert(enable("basic",false,error));assert(remove("basic",error));
+    assert(install(package("typed",R"(,"options":[{"id":"toggle","name":"Toggle","type":"bool","default":false},{"id":"rate","name":"Rate","type":"number","min":1,"max":10,"default":2},{"id":"mode","name":"Mode","type":"enum","choices":["a","b"],"default":"a"}])"),error));
     assert(configure("typed","toggle",true,error));assert(!configure("typed","toggle",1,error));
     assert(configure("typed","rate",5,error));assert(!configure("typed","rate",11,error));
     assert(configure("typed","mode","b",error));assert(!configure("typed","mode","c",error));
@@ -177,16 +151,15 @@ int main(int argc, char** argv) {
     auto pending=unconfirmed_native("fixture");assert(pending.size()==1 && pending[0].first=="fixture" && pending[0].second=="Fixture");
     assert(!enable("fixture",true,error));assert(error.find("native code")!=std::string::npos);
     frame(3);assert(!find().active && !find().enabled);
-    // A settings preset that requires the native package names it in the confirmation.
-    assert(install(package("needs-native",",\"dependencies\":[{\"id\":\"fixture\"}]","fast-scenes"),error));
-    pending=unconfirmed_native("needs-native");assert(pending.size()==1 && pending[0].first=="fixture");
+    // A package that requires the native package names both in the one confirmation.
+    assert(install(package("needs-native",",\"dependencies\":[{\"id\":\"fixture\"}]"),error));
+    pending=unconfirmed_native("needs-native");assert(pending.size()==2 && pending[0].first=="fixture" && pending[1].first=="needs-native");
     assert(!enable("needs-native",true,error));assert(remove("needs-native",error));
     // Test aid: pre-confirmed only in isolated test runs, and never written to profiles.json.
     env("WWHD_TEST_TRUST_NATIVE_MODS","other,fixture");assert(find().native_confirmed && unconfirmed_native("fixture").empty());
     env("WWHD_TEST_TRUST_NATIVE_MODS",nullptr);assert(!find().native_confirmed && trusted().empty());
     assert(confirm_native("fixture",error));assert(trusted().size()==64);
     assert(find().native_confirmed && unconfirmed_native("fixture").empty());
-    assert(!confirm_native("climb-preset",error));
     assert(enable("fixture",true,error));frame(6);
     assert(find().active && find().status=="initial");
     assert(configure("fixture","label","changed",error));frame(4);assert(find().status=="changed");
@@ -217,7 +190,7 @@ int main(int argc, char** argv) {
     // Removing forgets the confirmation; reinstalling asks again.
     assert(remove("fixture",error));assert(trusted().empty());
     assert(install(native.string(),error));assert(!find().native_confirmed);
-    assert(remove("fixture",error));assert(enable("climb-preset",false,error));frame(30);assert(remove("climb-preset",error));
+    assert(remove("fixture",error));
     assert(list().empty());
     if(argc == 4) {
         assert(install(argv[3],error));
@@ -232,7 +205,7 @@ int main(int argc, char** argv) {
     std::ofstream(graphics/"rules.txt")<<"[Definition]\nname=Resolution\ntitleIds=000500001019e500\nversion=4\n[Preset]\nname=Normal\n$scale=1\n[Preset]\nname=Double\n$scale=2\n[TextureRedefine]\nwidth=1280\nheight=720\noverwriteWidth=1280*$scale\noverwriteHeight=720*$scale\n";
     assert(install(graphics.string(),error));auto graphicsView=list().at(0);
     assert(graphicsView.kind=="cemu"&&graphicsView.restart_required&&graphicsView.options.size()==1);
-    assert(graphicsView.native_confirmed&&unconfirmed_native(graphicsView.id).empty()); // no native code: never asks
+    assert(graphicsView.native_confirmed&&unconfirmed_native(graphicsView.id).empty()&&!confirm_native(graphicsView.id,error)); // no native code: never asks
     assert(configure(graphicsView.id,"preset-0","Double",error));
     assert(!configure(graphicsView.id,"preset-0","Unknown",error));
     assert(enable(graphicsView.id,true,error));frame(45);
@@ -275,5 +248,5 @@ int main(int argc, char** argv) {
     std::ofstream(duplicate/"content"/"res"/"Object"/"A.arc")<<"fixture";std::ofstream(duplicate/"content"/"res"/"object"/"a.arc")<<"fixture";
     // A case-sensitive volume can represent the conflict; a case-insensitive volume collapses it.
     if(std::distance(fs::directory_iterator(duplicate/"content"/"res"),fs::directory_iterator{})==2)assert(!install(duplicate.string(),error));
-    std::cout << "Package install, settings, profiles, dependencies, native load/config/unload passed\n";
+    std::cout << "Package install, profiles, dependencies, native load/config/unload passed\n";
 }

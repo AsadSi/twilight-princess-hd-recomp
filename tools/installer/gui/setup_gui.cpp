@@ -3,10 +3,10 @@
 // The release contains no game code, so the first start prepares the game once (choose the dump,
 // keys for a disc image, then extract/translate/compile); later starts launch the built game directly, without a
 // window of their own. Holding Shift while starting (macOS, Windows) or --setup opens the setup
-// screens again (repair, update, change the game, import saves).
+// screens again (repair, update, change the game).
 //
 // Only a front end. Everything the installation does (keys, extraction, recompiling, compiling,
-// the app, save import) is tools/installer/setup.py, which this program runs as a child process
+// the app) is tools/installer/setup.py, which this program runs as a child process
 // through the release's own launcher ("Install Twilight Princess HD.command" or install.sh; they also fetch Python
 // where needed) or, on Windows, directly with the embeddable Python the release ships in tools\python
 // (console_setup_win.cpp), with --gui-protocol: JSON lines on the child's stdout (events) and stdin (requests).

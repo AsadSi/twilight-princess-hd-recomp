@@ -31,7 +31,6 @@
 #include "build_info.h"
 #include "crashrec.h"
 #include "input.h"
-#include "mods/manager.h"
 #include "mods/packages.h"
 #include "runtime.h"
 #ifdef __ANDROID__
@@ -329,7 +328,6 @@ int main(int argc, char** argv) {
         return result;
     }
 #endif
-    mods::manager::load_saved();  // player choices, before the game starts
     mods::cemu::set_vulkan(render::requested()==render::Api::Vulkan);
     mods::content::set_game_root(config::game_dir);  // loose imported files find their game path
     mods::packages::initialize();
