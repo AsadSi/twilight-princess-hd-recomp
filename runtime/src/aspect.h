@@ -17,6 +17,7 @@ float requested();                 // what the setting asks for now
 float on_swap();
 float game();                      // aspect the game draws with this frame
 uint64_t game_frame();             // swaps so far
+bool full_menu();                  // the last swapped frame drew a full-screen menu at 16:9 in a wider picture
 void ss_reset();  // save state loaded: the game's screen size is set again
 void service(Cpu* c);  // main01's frame loop: applies a changed aspect to the game (setTvSize)
 }  // namespace aspect

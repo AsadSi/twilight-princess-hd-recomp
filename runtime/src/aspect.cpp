@@ -37,6 +37,7 @@ std::atomic<int> g_mode{env_mode()};
 std::atomic<float> g_window{kBase};
 std::atomic<float> g_game{kBase};  // the aspect the game draws with (set on the main thread)
 std::atomic<uint64_t> g_swaps{0};
+std::atomic<bool> g_menu_drawn{false}, g_menu_shown{false};  // a full-screen menu at 16:9 in the middle (this frame, the last)
 float g_applied = 0;  // main thread: the requested aspect setTvSize last ran for (0: run it again)
 }  // namespace
 
@@ -64,9 +65,11 @@ void set_window_aspect(float a) {
 float requested() { return mode() == kWindow ? g_window.load() : mode_value(mode()); }
 float on_swap() {
     g_swaps.fetch_add(1, std::memory_order_relaxed);
+    g_menu_shown = g_menu_drawn.exchange(false);
     return g_game;
 }
 float game() { return g_game; }
+bool full_menu() { return g_menu_shown; }
 uint64_t game_frame() { return g_swaps.load(std::memory_order_relaxed); }
 void ss_reset() { g_applied = 0; }
 
@@ -107,7 +110,8 @@ void service(Cpu* c) {
 //   root's stretch is narrowed to 16:9's around the center, and a 'n_43' pane's undoing of it with it (a full-screen
 //   menu, whose art lines up with its text, shows black at the sides). Pictures beside the layout (off screen at
 //   16:9) keep the full stretch and stay off screen, and so do a screen's top layers that reach well past both
-//   edges (fills made to cover any screen). Where the game asks for a menu pane's place on screen
+//   edges (fills made to cover any screen). A full-screen menu (a top layer from an edge past the middle) has the presenter
+//   paint the TV picture black beside it (full_menu). Where the game asks for a menu pane's place on screen
 //   (CPaneMgr::getGlobalVtx, 02A95A78: the field map's clip rectangle and icons) it gets the centered place.
 // The GamePad's screens are left alone.
 namespace {
@@ -188,6 +192,8 @@ extern "C" void hook_02B34334(Cpu* c) {
             for (uint32_t p = parent; p; p = parent_of(p)) depth++;
             if (hi < 1 || lo > 607 || (depth <= 3 && lo < -50 && hi > 658))  // beside, or a top layer well past both edges
                 squeeze(parent + 0x78, 1 / k), full = 1;
+            else if (depth <= 3 && ((lo < 1 && hi > 303) || (hi > 607 && lo < 305)))  // a background, or half of one
+                aspect::g_menu_drawn = true;
         } else if (ld32(pane + 20) == kN43 && !unstretched(parent))
             for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) / k);  // its undoing was for the full stretch
         g_full += full;

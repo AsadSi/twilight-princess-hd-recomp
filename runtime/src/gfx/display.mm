@@ -726,6 +726,11 @@ static void compose_tv(id<MTLTexture> target, const Layout& L) {
     float dw = target.width, dh = target.height;
     MTLPixelFormat fmt = target.pixelFormat;
     draw_image(e, fmt, dw, dh, R.tv.tex, R.tv.srgb, L.tv, 1.0f);
+    if (aspect::full_menu()) {  // black beside a full-screen menu drawn at 16:9 (aspect.cpp), not the game world
+        const float side = L.tv.w * (1 - 16.0f / 9.0f / aspect::game()) / 2, black[4] = {0, 0, 0, 1};
+        draw_solid(e, fmt, dw, dh, {L.tv.x, L.tv.y, side, L.tv.h}, black);
+        draw_solid(e, fmt, dw, dh, {L.tv.x + L.tv.w - side, L.tv.y, side, L.tv.h}, black);
+    }
     if (L.pip_on && R.drc.tex) {
         float op = L.drc_only ? 1.0f : g_pip_opacity.load(), bw = std::max(1.0f, roundf(L.pip.w / 200.0f));
         float frame[4] = {0, 0, 0, 0.6f * op};
