@@ -168,28 +168,37 @@ void draw_wide(Cpu* c, uint32_t pane, uint32_t ctx, uint32_t parent, Saved& save
     };
     int full = 0;
     if (g_screen == kMenu) {
+        // the field map's cursor ('f_po_n' in zelda_field_map_point_cursor.blo) is moved to a place HD reckons with
+        // the full stretch: its origin goes where the unsqueezed parent puts it (its shape as any pane's, below)
+        if (ld64(pane + 8) == 0x665F706F5F6EULL) {
+            const double p00 = ldf32(parent + 0x78), p03 = ldf32(parent + 0x84);
+            set(pane + 0x54, (p00 / k * ldf32(pane + 0x54) + mid + (p03 - mid) / k - p03) / p00);
+        }
         if (!parent_of(parent)) squeeze(parent + 0x78, k);  // the root's stretch, for its whole tree
         else if (g_full) {
             if (text && !unstretched(pane)) for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) * k);
-        } else if (ld8(pane + 0xA8) && kind != 0x50414E && !text) {  // a picture or window: is it a backdrop?
-            const uint32_t m = parent + 0x78, l = pane + 0x48;
-            double g[4];  // its global x row = parent's x row x its own matrix
-            for (int j = 0; j < 4; j++)
-                g[j] = ldf32(m) * ldf32(l + 4 * j) + ldf32(m + 4) * ldf32(l + 16 + 4 * j) + ldf32(m + 8) * ldf32(l + 32 + 4 * j) + (j == 3 ? ldf32(m + 12) : 0);
-            double lo = 1e9, hi = -1e9;
-            for (float bx : {ldf32(pane + 0x18), ldf32(pane + 0x20)})
-                for (float by : {ldf32(pane + 0x1C), ldf32(pane + 0x24)}) {
-                    const double u = (mid + (g[0] * bx + g[1] * by + g[3] - mid) / k - x0) * 608 / w;  // in the layout's units
-                    lo = std::min(lo, u), hi = std::max(hi, u);
-                }
-            int depth = 0;  // a screen's layers are the children of its top group (root -> ROOT -> group -> layer)
-            for (uint32_t p = parent; p; p = parent_of(p)) depth++;
-            if (hi < 1 || lo > 607 || (depth <= 3 && lo < -50 && hi > 658))  // beside, or a top layer well past both edges
-                squeeze(parent + 0x78, 1 / k), full = 1;
-            else if (depth <= 3 && ((lo < 1 && hi > 303) || (hi > 607 && lo < 305)))  // a background, or half of one
-                aspect::g_menu_drawn = true;
-        } else if (ld32(pane + 20) == kN43 && !unstretched(parent))
-            for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) / k);  // its undoing was for the full stretch
+        } else {
+            if (ld32(pane + 20) == kN43 && !unstretched(parent))  // its undoing was for the full stretch
+                for (int i = 0; i < 3; i++) set(pane + 0x48 + 4 * i, ldf32(pane + 0x48 + 4 * i) / k);
+            if (ld8(pane + 0xA8) && kind != 0x50414E && !text) {  // a picture or window: is it a backdrop?
+                const uint32_t m = parent + 0x78, l = pane + 0x48;
+                double g[4];  // its global x row = parent's x row x its own matrix
+                for (int j = 0; j < 4; j++)
+                    g[j] = ldf32(m) * ldf32(l + 4 * j) + ldf32(m + 4) * ldf32(l + 16 + 4 * j) + ldf32(m + 8) * ldf32(l + 32 + 4 * j) + (j == 3 ? ldf32(m + 12) : 0);
+                double lo = 1e9, hi = -1e9;
+                for (float bx : {ldf32(pane + 0x18), ldf32(pane + 0x20)})
+                    for (float by : {ldf32(pane + 0x1C), ldf32(pane + 0x24)}) {
+                        const double u = (mid + (g[0] * bx + g[1] * by + g[3] - mid) / k - x0) * 608 / w;  // in the layout's units
+                        lo = std::min(lo, u), hi = std::max(hi, u);
+                    }
+                int depth = 0;  // a screen's layers are the children of its top group (root -> ROOT -> group -> layer)
+                for (uint32_t p = parent; p; p = parent_of(p)) depth++;
+                if (hi < 1 || lo > 607 || (depth <= 3 && lo < -50 && hi > 658))  // beside, or a top layer well past both edges
+                    squeeze(parent + 0x78, 1 / k), full = 1;
+                else if (depth <= 3 && ((lo < 1 && hi > 303) || (hi > 607 && lo < 305)))  // a background, or half of one
+                    aspect::g_menu_drawn = true;
+            }
+        }
         g_full += full;
         f_02B34334_orig(c);
         g_full -= full;
@@ -264,4 +273,3 @@ extern "C" void hook_02B3420C(Cpu* c) {
     st32(0x100AAA5C, lo);
     st32(0x100AAA60, hi);
 }
-
