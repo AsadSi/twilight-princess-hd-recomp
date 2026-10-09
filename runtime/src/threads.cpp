@@ -974,21 +974,19 @@ static bool event_wait(uint32_t addr, const std::chrono::steady_clock::time_poin
     return false;
 }
 
-HLE(coreinit, OSInitEvent) {
-    uint32_t e = arg(c, 0);
-    if (g_trace_msg) LOG("[evt] init %08X signaled=%u auto=%u lr=%08X", e, arg(c, 1), arg(c, 2), c->lr);
+// also for HLE libraries that own a game's event (nn_nfp)
+void os_init_event(uint32_t e, bool signaled, bool auto_reset) {
     HEvent* ev = g_events.get(e);
     {
         std::lock_guard<std::mutex> lk(ev->m);
-        ev->signaled = arg(c, 1) != 0;
-        ev->auto_reset = arg(c, 2) != 0;  // OS_EVENT_MODE_AUTO = 1
+        ev->signaled = signaled;
+        ev->auto_reset = auto_reset;
     }
     if (ev->signaled) ev->cv.notify_all();
     st32(e, 0x65566E54);              // "eVnT"
 }
-HLE(coreinit, OSSignalEvent) {
-    if (g_trace_msg) LOG("[evt] signal %08X lr=%08X thread=%08X", arg(c, 0), c->lr, threads::current_thread());
-    HEvent* ev = g_events.get(arg(c, 0));
+void os_signal_event(uint32_t e) {
+    HEvent* ev = g_events.get(e);
     {
         std::lock_guard<std::mutex> lk(ev->m);
         if (ev->auto_reset && !ev->waiters.empty()) {
@@ -1001,6 +999,14 @@ HLE(coreinit, OSSignalEvent) {
         }
     }
     ev->cv.notify_all();
+}
+HLE(coreinit, OSInitEvent) {
+    if (g_trace_msg) LOG("[evt] init %08X signaled=%u auto=%u lr=%08X", arg(c, 0), arg(c, 1), arg(c, 2), c->lr);
+    os_init_event(arg(c, 0), arg(c, 1) != 0, arg(c, 2) != 0);  // OS_EVENT_MODE_AUTO = 1
+}
+HLE(coreinit, OSSignalEvent) {
+    if (g_trace_msg) LOG("[evt] signal %08X lr=%08X thread=%08X", arg(c, 0), c->lr, threads::current_thread());
+    os_signal_event(arg(c, 0));
 }
 HLE(coreinit, OSSignalEventAll) {
     HEvent* ev = g_events.get(arg(c, 0));

@@ -21,6 +21,7 @@
 #include "imgui.h"
 #include "hostui.h"
 #include "controls_view.h"
+#include "../amiibo.h"
 #include "../aspect.h"
 #include "../look.h"
 #include "../crashrec.h"
@@ -1212,6 +1213,18 @@ void tab_controls() {
         help("Aim in first person by moving a controller with a gyro, a Cemuhook (DSU) source or the mouse (Steam Input)");
     }
     gyro_window(gyro_open);
+    ImGui::SameLine(0, 24);
+    if (ImGui::Button("Tap amiibo...")) ImGui::OpenPopup("amiibo");
+    help("Puts a figure on the GamePad's reader until the game reads it: on the Collection screen, and Wolf Link\n"
+         "also on the title and Quest Log screens");
+    if (ImGui::BeginPopup("amiibo")) {
+        for (int f = 0; f < amiibo::kFigures; f++)
+            if (ImGui::Selectable(amiibo::name(f), amiibo::on_reader() == f)) {
+                amiibo::tap(f);
+                set_open(false);  // back to the game, which reads it
+            }
+        ImGui::EndPopup();
+    }
     ImGui::SameLine(0, 24);
     if (ImGui::Button("Reset to defaults")) input_map::set_current(input_map::Mapping::defaults());
 }

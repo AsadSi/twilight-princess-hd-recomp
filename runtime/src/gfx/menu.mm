@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <ctime>
 
+#include "../amiibo.h"
 #include "../interp.h"
 #include "../savestate.h"
 #include "../crashrec.h"
@@ -244,12 +245,14 @@ static WWStateMenu* g_state_menu;
 - (void)setAspect:(NSMenuItem*)item { aspect::set_mode((int)item.tag); update_title(); }
 - (void)setBloom:(NSMenuItem*)item { look::set_bloom((int)item.tag); update_title(); }
 - (void)toggleHud:(NSMenuItem*)item { look::set_hud(!look::hud()); update_title(); }
+- (void)tapAmiibo:(NSMenuItem*)item { amiibo::tap((int)item.tag); }
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
     if (item.action == @selector(setRes:))
         item.state = fabsf(kResScales[item.tag] - current_res_scale()) < 0.01f ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setAspect:)) item.state = item.tag == aspect::mode() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setBloom:)) item.state = item.tag == look::bloom() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(toggleHud:)) item.state = look::hud() ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(tapAmiibo:)) item.state = item.tag == amiibo::on_reader() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setRenderer:)) {
         render::Api a = (render::Api)item.tag;
         item.state = a == render::preferred() ? NSControlStateValueOn : NSControlStateValueOff;
@@ -360,6 +363,14 @@ void install_menu(NSWindow* tv) {
     [in addItem:[NSMenuItem separatorItem]];
     add(in, @"Show GamePad screen (\u2318G)", @selector(toggleDrcWindow:), @"");
     [in addItem:gfx::controls_menu_item()];
+    [in addItem:[NSMenuItem separatorItem]];
+    // virtual amiibo (amiibo.h): checked while the figure waits on the reader
+    NSMenu* am = [[NSMenu alloc] initWithTitle:@"Tap amiibo"];
+    for (int f = 0; f < amiibo::kFigures; f++) add(am, @(amiibo::name(f)), @selector(tapAmiibo:), @"", f);
+    NSMenuItem* amItem = [in addItemWithTitle:@"Tap amiibo" action:nil keyEquivalent:@""];
+    amItem.submenu = am;
+    amItem.toolTip = @"Puts the figure on the GamePad's reader until the game reads it: on the Collection screen, "
+                     @"and Wolf Link also on the title and Quest Log screens";
     inItem.submenu = in;
     install_display_menu(bar);  // Display: full screen, scaling, GamePad screen mode (display.mm)
 

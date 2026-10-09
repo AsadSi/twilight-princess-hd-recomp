@@ -1,0 +1,3 @@
+# Title: PLUS skips the fly-over to the logo (PRESS START), where Wolf Link with quick-start data (registered by
+# amiibo_wolf.txt) starts its Quest Log. Tap with WWHD_AMIIBO=wolf_link@721 (24 s).
+20-20.3 PLUS

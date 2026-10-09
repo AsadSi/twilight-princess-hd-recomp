@@ -1,0 +1,10 @@
+# Wolf Link on the Quest Log screen (save folder as in amiibo_load.txt): Title -> Controller Selection (GamePad) ->
+# Quest Log 1, where the game reads Wolf Link and offers to register the Quest Log as its quick-start data; Yes,
+# then the figure again for the write.
+# Taps: WWHD_AMIIBO=wolf_link@1021,wolf_link@1351 (34 s: waits on the reader until 36 s; 45 s).
+20-20.3 PLUS
+25-25.3 PLUS
+30-30.3 A
+36-36.3 A
+41-41.2 LEFT
+42-42.2 A

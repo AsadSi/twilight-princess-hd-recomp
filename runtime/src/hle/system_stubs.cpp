@@ -61,29 +61,7 @@ HLE(nn_olv, AddCommonData__Q3_2nn3olv15UploadParamBaseFUiPCUcT1) { ret(c, kResul
 HLE(nn_olv, GetDataTypeNum__Q3_2nn3olv15UploadParamBaseCFUi) { ret(c, 0); }
 HLE(nn_olv, UploadPostDataByPostApp__Q2_2nn3olvFPCQ3_2nn3olv28UploadPostDataByPostAppParam) { ret(c, kResultFail); }
 
-// ---- nn_nfp (amiibo): the reader works and never sees a figure, so the activate event never fires
-HLE(nn_nfp, Initialize__Q2_2nn3nfpFv) { ret(c, kResultOk); }
-HLE(nn_nfp, Finalize__Q2_2nn3nfpFv) { ret(c, kResultOk); }
-HLE(nn_nfp, SetActivateEvent__Q2_2nn3nfpFP7OSEvent) { ret(c, kResultOk); }
-HLE(nn_nfp, SetDeactivateEvent__Q2_2nn3nfpFP7OSEvent) { ret(c, kResultOk); }
-HLE(nn_nfp, StartDetection__Q2_2nn3nfpFv) { ret(c, kResultOk); }
-HLE(nn_nfp, StopDetection__Q2_2nn3nfpFv) { ret(c, kResultOk); }
-HLE(nn_nfp, Unmount__Q2_2nn3nfpFv) { ret(c, kResultOk); }
-HLE(nn_nfp, GetErrorCode__Q2_2nn3nfpFRCQ2_2nn6Result) { ret(c, 0); }
-HLE(nn_nfp, InitializeCreateInfo__Q2_2nn3nfpFPQ3_2nn3nfp25ApplicationAreaCreateInfo) { ret(c, kResultOk); }
-HLE(nn_nfp, InitializeAmiiboSettingsArgsIn__Q2_2nn3nfpFPQ3_2nn3nfp20AmiiboSettingsArgsIn) { ret(c, kResultOk); }
-// no tag: everything that needs one fails
-HLE(nn_nfp, Mount__Q2_2nn3nfpFv) { ret(c, kResultFail); }
-HLE(nn_nfp, Flush__Q2_2nn3nfpFv) { ret(c, kResultFail); }
-HLE(nn_nfp, GetTagInfo__Q2_2nn3nfpFPQ3_2nn3nfp7TagInfo) { ret(c, kResultFail); }
-HLE(nn_nfp, GetNfpCommonInfo__Q2_2nn3nfpFPQ3_2nn3nfp10CommonInfo) { ret(c, kResultFail); }
-HLE(nn_nfp, GetNfpRegisterInfo__Q2_2nn3nfpFPQ3_2nn3nfp12RegisterInfo) { ret(c, kResultFail); }
-HLE(nn_nfp, OpenApplicationArea__Q2_2nn3nfpFUi) { ret(c, kResultFail); }
-HLE(nn_nfp, ReadApplicationArea__Q2_2nn3nfpFPvUi) { ret(c, kResultFail); }
-HLE(nn_nfp, WriteApplicationArea__Q2_2nn3nfpFPCvUiRCQ3_2nn3nfp5TagId) { ret(c, kResultFail); }
-HLE(nn_nfp, CreateApplicationArea__Q2_2nn3nfpFRCQ3_2nn3nfp25ApplicationAreaCreateInfo) { ret(c, kResultFail); }
-HLE(nn_nfp, SwitchToAmiiboSettings__Q2_2nn3nfpFRCQ3_2nn3nfp20AmiiboSettingsArgsInPCcUi) { ret(c, kResultFail); }
-HLE(nn_nfp, GetAmiiboSettingsResult__Q2_2nn3nfpFPQ3_2nn3nfp20AmiiboSettingsResultRC15SysArgDataBlock) { ret(c, kResultFail); }
+// ---- nn_nfp (amiibo): see nfp.cpp
 
 // ---- sockets / curl
 HLE(nsysnet, socket_lib_init) { ret(c, 0); }

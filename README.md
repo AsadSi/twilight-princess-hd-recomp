@@ -153,7 +153,7 @@ Display, Save States) has most of the same options.
 - **Display**: full screen, picture scaling (smooth, sharp, integer) and the GamePad screen.
 - **Mods**: mod packages and profiles.
 - **Controls**: GamePad or Pro Controller, remapping on a drawing of the controller or as a list,
-  stick dead zone, inverted camera up/down.
+  stick dead zone, inverted camera up/down, Tap amiibo.
 - **Language / About**: the text language.
 
 ## Features
@@ -197,6 +197,14 @@ whole running game, about 190 MB, restored exactly. It contains game code and da
 States live in `~/Library/Application Support/TPHD/states` (`WWHD_STATE_DIR` changes it) and are
 tied to the game file they were made with.
 
+**amiibo.** Virtual figures, no reader or figure files: Input > Tap amiibo (or Tap amiibo... in the
+Controls tab) puts Wolf Link, Link, Zelda or Ganondorf on the GamePad's reader until the game reads it.
+On the Collection screen, once the game enables amiibo in Faron Woods, Link refills arrows, Zelda
+refills hearts, Ganondorf offers to double the damage you take and Wolf Link opens the Cave of Shadows;
+on the Quest Log screen Wolf Link stores a Quest Log for quick start, which touching it on the title
+screen starts. Wolf Link's data is kept in `~/Library/Application Support/TPHD/amiibo/`.
+`WWHD_AMIIBO=<figure>@<frame>` taps one for tests.
+
 **GamePad screen.** A separate window, picture-in-picture in a corner of the TV window (corner, size
 and opacity selectable), automatic picture-in-picture (shown for a few seconds when the GamePad
 picture changes a lot), off, or the GamePad picture alone in the TV window. Window positions, full
@@ -227,7 +235,7 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
   right, their frames and slots come out wider.
 - Not working yet: mouse as a gyro, and Off-TV Play sound (the TV mix plays).
 - Not carried over from Cemu's TP HD graphic packs: distant fog and negative LOD bias.
-- amiibo is answered as "no amiibo".
+- amiibo: the Cave of Shadows has been entered with Wolf Link but not played through.
 - Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
   reached through the temple, as in play, it works.
 

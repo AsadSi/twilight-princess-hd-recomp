@@ -1,0 +1,14 @@
+# amiibo in Collection, from a save past Faron Woods (amiibo are enabled there: event 0610), e.g. the disc's QA save
+# content/DebugSaves/QASaves/ZTP79.dat (Palace of Twilight) copied to build/audit/saves/amiibo_qa/user/ZTP00.dat,
+# run with SAVE=amiibo_qa. Title -> Controller Selection (GamePad) -> Quest Log 1 -> Start; D-pad down opens
+# Collection; A closes the game's amiibo message, B leaves Collection.
+# Taps: WWHD_AMIIBO=zelda@2401,link@2701 (80 s, 90 s; or ganondorf, wolf_link).
+20-20.3 PLUS
+25-25.3 PLUS
+30-30.3 A
+36-36.3 A
+41-41.3 A
+75-75.2 DOWN
+84-84.2 A
+94-94.2 A
+98-98.2 B
