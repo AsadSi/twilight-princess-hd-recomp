@@ -20,6 +20,10 @@ Non-interactive use (tests, scripts):
   setup.py --yes --archive GAME.wua [...]
   setup.py --yes --game-dir EXTRACTED_GAME [...]
   setup.py --yes --gen-dir GENERATED_C --no-launch   (build check with placeholder code, no game)
+  setup.py --import-save SAVE_FOLDER [--data-dir DIR]
+                                                     (a Cemu or Wii U save: the game's save folder, e.g. Cemu's
+                                                     mlc01/usr/save/00050000/1019e500, or a folder with ZTP00.dat;
+                                                     a save already there is moved to a backup folder first)
 Keys can also come from the WIIU_COMMON_KEY environment variable / IMAGE.key next to the image.
 Keys are never printed, logged or stored.
 """
@@ -1248,6 +1252,79 @@ def remove_toolchain(data_dir):
 
 
 # ---------------------------------------------------------------------------------------------
+# saves: a save of the game from Cemu or a Wii U
+#
+# The game keeps its save in /vol/save/user, which is save/user in the data folder (--save): one file per Quest
+# Log, ZTP00.dat to ZTP02.dat (3,584 bytes each), and COMMON.dat (512 bytes; nothing in the common slot).
+# Cemu keeps /vol/save/user in mlc01/usr/save/00050000/1019e500/user/80000001 (the account); a save dumped from
+# a Wii U (SaveMii) has the same <account>/ folder.
+
+QUEST_LOGS = ["ZTP00.dat", "ZTP01.dat", "ZTP02.dat"]
+QUEST_LOG_BYTES = 3584
+# Cemu's default mlc01 on macOS is in its user data folder (ActiveSettings::GetDefaultMLCPath)
+CEMU_SAVE = os.path.expanduser("~/Library/Application Support/Cemu/mlc01/usr/save/00050000/1019e500")
+
+
+def save_files(path):
+    """The game's files [(name, source)] of a Cemu or Wii U save. path is the game's save folder (in Cemu:
+    mlc01/usr/save/00050000/1019e500), its user folder, an account folder (80000001), any folder with the
+    Quest Logs, or one of them."""
+    def names(d):
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    path = os.path.normpath(os.path.dirname(path) if os.path.isfile(path) else path)
+    account = path
+    if not set(names(path)) & set(QUEST_LOGS):
+        user = os.path.join(path, "user") if os.path.isdir(os.path.join(path, "user")) else path
+        found = [os.path.join(user, n) for n in names(user)
+                 if re.fullmatch(r"8[0-9a-fA-F]{7}", n) and set(names(os.path.join(user, n))) & set(QUEST_LOGS)]
+        if not found:
+            raise SetupError("no Twilight Princess HD save in %s: choose the folder with ZTP00.dat (a Quest Log) or "
+                             "the game's save folder (in Cemu: mlc01/usr/save/00050000/1019e500)" % path)
+        if len(found) > 1:
+            raise SetupError("%s has the saves of several Wii U users (%s): choose the folder of the one to import"
+                             % (user, ", ".join(os.path.basename(f) for f in found)))
+        account = found[0]
+    files = [(n, os.path.join(account, n)) for n in names(account) if n in QUEST_LOGS + ["COMMON.dat"]]
+    for n, src in files:
+        if n in QUEST_LOGS and os.path.getsize(src) != QUEST_LOG_BYTES:
+            raise SetupError("%s is not a Twilight Princess HD Quest Log: it has %d bytes, a Quest Log has %d"
+                             % (src, os.path.getsize(src), QUEST_LOG_BYTES))
+    return files
+
+
+def cemu_save():
+    """Cemu's save of the game in its default folder, or None."""
+    try:
+        save_files(CEMU_SAVE)
+    except SetupError:
+        return None
+    return CEMU_SAVE
+
+
+def import_save(path, save_dir):
+    """Copies a Cemu or Wii U save (save_files) into save_dir/user. A save already there is moved to
+    save_dir/user.backup-<time> first. Returns a message."""
+    files = save_files(path)
+    user = os.path.join(save_dir, "user")
+    tmp = user + ".import"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    for n, src in files:
+        shutil.copyfile(src, os.path.join(tmp, n))
+    backup = None
+    if os.path.isdir(user) and os.listdir(user):
+        backup = user + ".backup-" + time.strftime("%Y%m%d-%H%M%S")
+        os.replace(user, backup)
+    os.replace(tmp, user)
+    msg = "Copied %s to %s." % (", ".join(n for n, _ in files), user)
+    if backup:
+        msg += " The save that was there is in %s." % backup
+    say("  " + msg)
+    return msg
+
+
+# ---------------------------------------------------------------------------------------------
 # main flow
 
 
@@ -1531,6 +1608,9 @@ def main():
     ap.add_argument("--shortcuts", action="store_true",
                     help="portable release: also add a shortcut (Applications / Start menu / applications menu)")
     ap.add_argument("--keep-work", action="store_true", help="keep the generated code and objects")
+    ap.add_argument("--import-save", metavar="FOLDER",
+                    help="copy a Cemu or Wii U save of the game (its save folder, e.g. Cemu's "
+                         "mlc01/usr/save/00050000/1019e500) into the save folder; a save already there is backed up")
     ap.add_argument("--gui-protocol", action="store_true",
                     help="machine interface for the graphical installer (JSON lines; see tools/installer/README.md)")
     args = ap.parse_args()
@@ -1569,6 +1649,9 @@ def run(args, ui):
     say("Install folder: %s" % data_dir)
     state = ctx.state()
     installed = ctx.installed()
+    if args.import_save:
+        import_save(os.path.abspath(clean_path(args.import_save)), os.path.join(data_dir, "save"))
+        return 0
 
     source = None  # ("image", path) | ("archive", path) | ("folder", path) | ("installed", game_dir) | ("gen", dir)
     if args.gen_dir:
@@ -1665,7 +1748,7 @@ def run(args, ui):
 # The graphical installer (tools/installer/gui) runs this script as a child process and talks to it
 # in JSON lines. Events (stdout) all carry "event"; replies to a request also carry its "id".
 #   hello      {version, platform, data_dir, app_dir, log, installed: {...}|null, game_files: bool,
-#               toolchain}
+#               toolchain, cemu_save (Cemu's save of the game, or "")}
 #   log        {text}                       progress  {label, done, total, detail}
 #   step       {n, total, title, id}        (ids: keys archive folder compiler extract copy translate compile app)
 #   reply      {id, ok, ...} for each request below; ok=false carries "problem" and "message"
@@ -1676,6 +1759,7 @@ def run(args, ui):
 #                                        -> title_id, files, bytes  (keys stay in memory for install)
 #   install      {source: image|archive|folder|installed, path?, jobs?}  -> streams step/progress/log, then
 #                                           reply {app, exe, data_dir}
+#   import_save  {path}                  -> message (what was copied, where the earlier save went)
 #   launch       {}                      -> starts the installed game
 #   quit         {}
 # Keys never leave this process: they are not logged, not echoed, not written to disk.
@@ -1725,7 +1809,7 @@ def gui_main(args):
                   "log": LOG.f.name if LOG.f else "", "portable": PORTABLE, "package": PKG,
                   "installed": st if ctx.installed() else None, "game_files": valid_game_folder(ctx.game_dir),
                   "game_dir": ctx.game_dir, "free_bytes": free_space(ctx.data_dir),
-                  "toolchain": ctx.manifest["toolchain"]})
+                  "toolchain": ctx.manifest["toolchain"], "cemu_save": cemu_save() or ""})
 
     def reply(req, ok=True, **kw):
         kw.update({"event": "reply", "id": req.get("id"), "cmd": req.get("cmd"), "ok": ok})
@@ -1835,6 +1919,12 @@ def gui_main(args):
               game_dir=state.get("game_dir", ""),
               toolchain_bytes=folder_size(tdir) if os.path.isdir(tdir) else 0)
 
+    def do_import_save(req):
+        try:
+            reply(req, message=import_save(req.get("path") or "", os.path.join(ctx.data_dir, "save")))
+        except SetupError as e:
+            fail(req, "save", str(e)[0].upper() + str(e)[1:])
+
     def do_remove_toolchain(req):
         reply(req, freed=remove_toolchain(ctx.data_dir))
 
@@ -1851,8 +1941,9 @@ def gui_main(args):
         launch(st, ctx.data_dir)
         reply(req)
 
-    handlers = {"probe": probe, "check_keys": check, "install": do_install, "remove_toolchain": do_remove_toolchain,
-                "shortcut": do_shortcut, "launch": do_launch, "hello": lambda req: hello()}
+    handlers = {"probe": probe, "check_keys": check, "install": do_install, "import_save": do_import_save,
+                "remove_toolchain": do_remove_toolchain, "shortcut": do_shortcut, "launch": do_launch,
+                "hello": lambda req: hello()}
     hello()
     for line in sys.stdin:
         line = line.strip()

@@ -14,7 +14,7 @@ A release folder contains `portable.txt`. Then everything stays in `<release>/da
 |---|---|
 | `data/bin/wwhd` (`.exe`) | the built game; `data/bin/portable.txt` puts the runtime in portable mode |
 | `data/game/` | game files extracted from a disc image or Cemu archive (an extracted folder chosen by the player is used where it is) |
-| `data/save/` | saves |
+| `data/save/` | saves (`user/ZTP00.dat` to `ZTP02.dat`, one per Quest Log, and `COMMON.dat`) |
 | `data/user/` | settings, controls, graphics options, save states, shader caches (`host::portable_user_dir()`) |
 | `data/captures/` | crash logs (the game runs in `data/`) |
 | `data/install.json`, `data/setup.log` | what was prepared (paths inside `data/` relative, so the folder can move), and the setup log |
@@ -54,11 +54,16 @@ The setup is only a front end: it runs the release's terminal setup with `--gui-
 process (so Python is found or fetched exactly as in the terminal setup; on Windows it starts
 `setup.py` directly with the Python the release ships, see below) and talks to `setup.py`
 over its stdin/stdout. Screens: welcome (or, when installed: play / update / repair / reinstall /
-open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
+import a save / open the folder), choose the disc image, Cemu archive or game folder (native file dialogs), keys
 (disc images only: disc key found next to the image or chosen; common key as a file or pasted into a hidden field), installation
-(a bar per step, an overall bar, the log under "Details"), done (Play, Open folder, Quit; in a portable
+(a bar per step, an overall bar, the log under "Details"), done (Play, Open folder, Quit, import a save; in a portable
 release also: remove the downloaded compiler, add a shortcut), and error screens with Retry and Copy
-log. On macOS it first checks for Apple's Command
+log. Import a save (2026-10-09): a save of the game from Cemu or a Wii U, offered from Cemu's default folder
+on macOS (`~/Library/Application Support/Cemu/mlc01/usr/save/00050000/1019e500`) when it has one, or a chosen
+folder: the game's save folder, its `user` folder, an account folder (`80000001`) or a folder with the Quest
+Logs. Only `ZTP00.dat` to `ZTP02.dat` (3,584 bytes each, checked) and `COMMON.dat` are copied, into
+`save/user`; a save already there is moved to `save/user.backup-<time>` first. The terminal setup does the same
+with `--import-save FOLDER`. On macOS it first checks for Apple's Command
 Line Tools and offers Apple's installer, as the Terminal launcher does.
 
 Finding the release folder: the program looks for `tools/installer/setup.py` next to itself (macOS: next
@@ -129,7 +134,7 @@ One JSON object per line. Events on stdout all have `"event"`:
 
 | event | fields |
 |---|---|
-| `hello` | `version`, `platform`, `data_dir`, `app_dir`, `log`, `portable`, `package`, `installed` (state or null), `game_files`, `game_dir`, `free_bytes`, `toolchain` |
+| `hello` | `version`, `platform`, `data_dir`, `app_dir`, `log`, `portable`, `package`, `installed` (state or null), `game_files`, `game_dir`, `free_bytes`, `toolchain`, `cemu_save` (Cemu's save of the game, or empty) |
 | `log` | `text` (also written to `setup.log`) |
 | `plan` | `steps`: `[{id, title}]` of the installation that starts |
 | `step` | `n`, `total`, `title`, `id` (`keys`, `archive`, `folder`, `compiler`, `extract`, `copy`, `translate`, `compile`, `app`) |
@@ -144,6 +149,7 @@ Requests on stdin: `{"cmd": ..., "id": n, ...}`
 | `probe` | `path` | `kind` (`image`/`archive`/`folder`), `disc_key` (found next to the image), `common_key` (where one was found); for a folder `in_place`, `bytes`; for an archive `title`, `folder`, `bytes`, `message` (which title is used and why); problem `wrong_title` when the archive has no usable game |
 | `check_keys` | `image`, optional `disc_key_file`, `common_key_file` or `common_key_hex` | `title_id`, `files`, `bytes`; problems `disc_key_wrong`, `common_key_wrong`, `wrong_title`, ... |
 | `install` | `source` (`image`/`archive`/`folder`/`installed`), `path`, optional `jobs` | streams `plan`/`step`/`progress`/`log`, then `app`, `exe`, `data_dir`, `game_dir`, `toolchain_bytes` |
+| `import_save` | `path` (a Cemu or Wii U save folder) | `message` (what was copied, where the save that was there went); problem `save` (no save there, several Wii U users, a Quest Log of the wrong size) |
 | `remove_toolchain` | | `freed` bytes |
 | `shortcut` | | `path` of the created shortcut |
 | `launch` | | starts the installed game |

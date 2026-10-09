@@ -1,0 +1,9 @@
+# A save imported by the setup (setup.py --import-save) on Choose a Quest Log: run with SAVE=<its save folder>.
+# Title -> Controller Selection -> Choose a Quest Log (Quest Log 1 is the imported one, about 34 s); A opens it,
+# A closes the quick-start note, A on Start loads it (in play by about 60 s).
+20-20.3 PLUS
+25-25.3 PLUS
+30-30.3 A
+36-36.3 A
+40-40.3 A
+48-48.3 A

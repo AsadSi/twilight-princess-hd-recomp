@@ -367,7 +367,7 @@ static bool shift_held() {
 // ---------------------------------------------------------------------------------------------
 // state
 
-enum class Screen { Starting, NeedCLT, Menu, Welcome, Source, Keys, Installing, Error, Done, Fatal };
+enum class Screen { Starting, NeedCLT, Menu, Welcome, Source, Keys, Installing, Error, Save, Done, Fatal };
 
 static const char* screen_name(Screen s) {
     switch (s) {
@@ -379,6 +379,7 @@ static const char* screen_name(Screen s) {
     case Screen::Keys: return "keys";
     case Screen::Installing: return "installing";
     case Screen::Error: return "error";
+    case Screen::Save: return "save";
     case Screen::Done: return "done";
     case Screen::Fatal: return "fatal";
     }
@@ -436,6 +437,11 @@ struct App {
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
     std::string after;                                       // then: play | quit | open
     bool exec_game = false;                                  // start the game when the window has closed
+
+    // save import (Cemu or Wii U)
+    std::string cemu_save, save_msg;  // cemu_save: Cemu's save of the game, when setup.py found one
+    bool save_ok = false;
+    Screen save_back = Screen::Menu;
 
     // log
     std::vector<std::string> log;
@@ -757,11 +763,20 @@ static void set_common_key_file(const std::string& p) { A.common_key_file = p, k
 static void set_common_mode(int m) {
     if (A.common_mode != m) A.common_mode = m, keys_changed();
 }
+static void import_save(const std::string& path) {
+    A.save_msg = "Copying the save...";
+    request("import_save", "\"path\":" + jstr(path));
+}
+static void open_save_screen(Screen back) {
+    A.save_back = back, A.save_msg.clear();
+    go(Screen::Save);
+}
 static void apply_dialog(const std::string& target, const std::string& path) {
     if (path.empty()) return;
     if (target == "source") set_source(path);
     else if (target == "disc_key") set_disc_key_file(path);
     else if (target == "common_key") set_common_key_file(path);
+    else if (target == "save") import_save(path);
 }
 
 static void start_install(const std::string& source) {
@@ -843,6 +858,9 @@ static void handle_reply(const J& ev) {
         }
     } else if (cmd == "remove_toolchain" || cmd == "shortcut") {
         if (!ok) addlog(ev.str("message"));
+    } else if (cmd == "import_save") {
+        A.save_ok = ok;
+        A.save_msg = ev.str("message");
     }
 }
 
@@ -862,6 +880,7 @@ static void handle_event(const J& ev) {
         A.package = ev.str("package");
         A.game_dir = ev.str("game_dir");
         A.free_bytes = ev.num("free_bytes");
+        A.cemu_save = ev.str("cemu_save");
         const J* inst = ev.get("installed");
         A.installed = inst && inst->t == J::Obj;
         A.installed_version = A.installed ? inst->str("version") : "";
@@ -1077,6 +1096,7 @@ static void screen_menu() {
     if (button("Repair", ImVec2(w, 0))) start_install("installed");
     muted("Rebuilds the game code from the installed game files.");
     if (button("Change the game (disc image, Cemu archive or game folder)", ImVec2(w, 0))) go(Screen::Source);
+    if (button("Import a save from Cemu or a Wii U", ImVec2(w, 0))) open_save_screen(Screen::Menu);
     if (button("Open the folder", ImVec2(w, 0))) open_folder(home_folder());
     if (footer({"Quit"}) == 0) A.exit_code = 0;
 }
@@ -1253,6 +1273,33 @@ static void screen_error() {
     }
 }
 
+static void screen_save() {
+    page_header("Import a save", "A Twilight Princess HD save from Cemu or a Wii U (for example a SaveMii backup).");
+    if (!A.cemu_save.empty()) {
+        ImGui::BeginChild("cemu", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+        heading("Cemu", 20);
+        ImGui::TextWrapped("Cemu has a save of the game:");
+        muted(A.cemu_save);
+        if (button("Import Cemu's save", ImVec2(0, 0), true, !busy())) import_save(A.cemu_save);
+        ImGui::EndChild();
+        ImGui::Spacing();
+    }
+    ImGui::TextWrapped("%sthe game's save folder (in Cemu: mlc01/usr/save/00050000/1019e500), its user or 80000001 "
+                       "folder, or a folder with the Quest Logs (ZTP00.dat to ZTP02.dat).",
+                       A.cemu_save.empty() ? "Choose " : "Or choose ");
+    if (button("Choose folder...##save", ImVec2(0, 0), A.cemu_save.empty(), !busy())) choose_folder("save");
+    if (!A.save_msg.empty()) {
+        ImGui::Spacing();
+        if (A.pending_cmd == "import_save") mark(1);
+        else mark(A.save_ok ? 2 : 3);
+        ImGui::TextWrapped("%s", A.save_msg.c_str());
+    }
+    ImGui::Spacing();
+    muted("The save is copied to " + A.data_dir + "/save/user. A save already there is moved to a backup folder "
+          "first.");
+    if (footer({"Back"}, -1, busy() ? 1 : 0) == 0) go(A.save_back);
+}
+
 static void screen_done() {
     page_header("Ready to play");
     mark(2);
@@ -1277,6 +1324,8 @@ static void screen_done() {
 #endif
         muted("Game files and saves: " + A.data_dir);
     }
+    if (button("Import a save from Cemu or a Wii U", ImVec2(0, 0), false, !busy() && A.after.empty()))
+        open_save_screen(Screen::Done);
     if (A.portable) {
         ImGui::Spacing();
         if (A.toolchain_bytes > 0) {
@@ -1603,7 +1652,7 @@ static void start_child() {
 // automation (tests): a JSON array of steps, each run when its screen is showing:
 //   {"screen": "keys", "set": {"common_mode": "file", "common_key_file": "..."}, "when_step": "compile",
 //    "idle": true, "shot": "03-keys.png", "click": "Check keys and install"}
-// "set" fields: source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
+// "set" fields: source and save (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
 // (file|paste), open_details (true). Screenshots are PNG files of the window. The run ends (exit 0)
 // after the last step, or with exit 2 on a 45-minute timeout.
 
@@ -1636,6 +1685,7 @@ static void automation_frame() {
             else if (k == "disc_key_file") set_disc_key_file(v);
             else if (k == "common_key_file") set_common_key_file(v);
             else if (k == "common_mode") set_common_mode(v == "paste" ? 1 : 0);
+            else if (k == "save") import_save(v);
             else if (k == "open_details") details_open = true;
         }
     }
@@ -1832,6 +1882,7 @@ int main(int argc, char** argv) {
         case Screen::Keys: screen_keys(); break;
         case Screen::Installing: screen_installing(); break;
         case Screen::Error: screen_error(); break;
+        case Screen::Save: screen_save(); break;
         case Screen::Done: screen_done(); break;
         case Screen::Fatal: screen_fatal(); break;
         }

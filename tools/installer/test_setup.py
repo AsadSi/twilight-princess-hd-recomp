@@ -289,6 +289,92 @@ class BundledPython(unittest.TestCase):
             self.assertIn('"tools\\\\python\\\\python.exe"', f.read())
 
 
+def _write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def _cemu_save(root, logs=("ZTP00.dat", "ZTP02.dat"), fill=b"\1"):
+    """A SYNTHETIC save in Cemu's shape (made-up bytes): <root>/1019e500/user/80000001/ZTP0x.dat and COMMON.dat.
+    Returns the title's save folder."""
+    title = os.path.join(root, "1019e500")
+    for n in logs:
+        _write(os.path.join(title, "user", "80000001", n), fill * setup.QUEST_LOG_BYTES)
+    _write(os.path.join(title, "user", "80000001", "COMMON.dat"), b"made-up common")
+    return title
+
+
+class SaveImport(unittest.TestCase):
+    """setup --import-save on synthetic Cemu / Wii U save folders."""
+
+    def test_folder_shapes(self):
+        with tempfile.TemporaryDirectory() as d:
+            title = _cemu_save(d)
+            account = os.path.join(title, "user", "80000001")
+            _write(os.path.join(title, "meta", "saveinfo.xml"), b"x")
+            full = [(n, os.path.join(account, n)) for n in ("COMMON.dat", "ZTP00.dat", "ZTP02.dat")]
+            for path in (title, os.path.join(title, "user"), account, account + os.sep):
+                self.assertEqual(setup.save_files(path), full, path)
+            # a folder with only the Quest Logs, or one of them; other files are left out
+            flat = os.path.join(d, "copied")
+            _write(os.path.join(flat, "ZTP01.dat"), bytes(setup.QUEST_LOG_BYTES))
+            _write(os.path.join(flat, "notes.txt"), b"x")
+            self.assertEqual([n for n, _ in setup.save_files(flat)], ["ZTP01.dat"])
+            self.assertEqual([n for n, _ in setup.save_files(os.path.join(flat, "ZTP01.dat"))], ["ZTP01.dat"])
+
+    def test_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(setup.SetupError, "no Twilight Princess HD save in"):
+                setup.save_files(d)
+            with self.assertRaisesRegex(setup.SetupError, "no Twilight Princess HD save in"):
+                setup.save_files(os.path.join(d, "missing"))
+            title = _cemu_save(d)
+            _write(os.path.join(title, "user", "80000002", "ZTP00.dat"), bytes(setup.QUEST_LOG_BYTES))
+            with self.assertRaisesRegex(setup.SetupError, "several Wii U users \\(80000001, 80000002\\)"):
+                setup.save_files(title)
+            self.assertEqual(len(setup.save_files(os.path.join(title, "user", "80000002"))), 1)  # one of them
+            _write(os.path.join(title, "user", "80000001", "ZTP02.dat"), b"short")
+            with self.assertRaisesRegex(setup.SetupError, "ZTP02.dat is not a Twilight Princess HD Quest Log: it has 5 "
+                                                          "bytes, a Quest Log has 3584"):
+                setup.save_files(os.path.join(title, "user", "80000001"))
+
+    def test_import_and_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            save = os.path.join(d, "data", "save")
+            user = os.path.join(save, "user")
+            msg = setup.import_save(_cemu_save(os.path.join(d, "a")), save)
+            self.assertEqual(os.listdir(save), ["user"])  # no backup: there was no save
+            self.assertEqual(sorted(os.listdir(user)), ["COMMON.dat", "ZTP00.dat", "ZTP02.dat"])
+            self.assertEqual(msg, "Copied COMMON.dat, ZTP00.dat, ZTP02.dat to %s." % user)
+            # a second save: the first one is moved to a dated backup folder next to it, not overwritten
+            msg = setup.import_save(_cemu_save(os.path.join(d, "b"), logs=("ZTP01.dat",), fill=b"\2"), save)
+            backup = [n for n in os.listdir(save) if n != "user"]
+            self.assertRegex(backup[0], r"^user\.backup-\d{8}-\d{6}$")
+            self.assertEqual(sorted(os.listdir(os.path.join(save, backup[0]))),
+                             ["COMMON.dat", "ZTP00.dat", "ZTP02.dat"])
+            self.assertEqual(sorted(os.listdir(user)), ["COMMON.dat", "ZTP01.dat"])
+            with open(os.path.join(user, "ZTP01.dat"), "rb") as f:
+                self.assertEqual(f.read(), b"\2" * setup.QUEST_LOG_BYTES)
+            self.assertIn("The save that was there is in %s." % os.path.join(save, backup[0]), msg)
+            # a refused save changes nothing
+            with self.assertRaises(setup.SetupError):
+                setup.import_save(os.path.join(d, "a"), save)
+            self.assertEqual(sorted(os.listdir(save)), sorted(backup + ["user"]))
+
+    def test_cemu_default_folder(self):
+        saved = setup.CEMU_SAVE
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                setup.CEMU_SAVE = os.path.join(d, "1019e500")
+                self.assertIsNone(setup.cemu_save())
+                _cemu_save(d)
+                self.assertEqual(setup.cemu_save(), setup.CEMU_SAVE)
+        finally:
+            setup.CEMU_SAVE = saved
+        self.assertTrue(saved.endswith("/Library/Application Support/Cemu/mlc01/usr/save/00050000/1019e500"))
+
+
 class NonInteractive(unittest.TestCase):
     def test_ui_refuses_to_prompt(self):
         ui = setup.UI(False)

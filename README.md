@@ -185,9 +185,12 @@ start: `WWHD_LANGUAGE=<code>` (0 Japanese, 1 English, 2 French, 3 German, 4 Ital
 `WWHD_LANGUAGE_REGION=us|eu|jp`.
 
 **Saves.** Saving in the game (Collection, then Save Game) writes one file per Quest Log to
-`save/user/`, `ZTP00.dat` for the first (`data/save/user/` in a packaged folder). A save from Cemu or a Wii U
-(`mlc01/usr/save/00050000/1019e500/user/80000001/ZTP0x.dat`) is used by copying its files into
-`save/user/`; the setup has no import for it.
+`save/user/`, `ZTP00.dat` for the first, with `COMMON.dat` next to them (`data/save/user/` in a packaged
+folder). A save from Cemu or a Wii U (`mlc01/usr/save/00050000/1019e500/user/80000001/`) is imported by the
+setup: hold Shift while starting the game, then **Import a save from Cemu or a Wii U** (it offers Cemu's save
+when Cemu has one in its default folder), or `tools/Setup in Terminal.command --import-save FOLDER`. A save
+already there is moved to `save/user.backup-<time>` first. Copying the files into `save/user/` by hand works
+too.
 
 **Save states.** Five slots (keys above, the Saves tab or the Save States menu). A state is the
 whole running game, about 190 MB, restored exactly. It contains game code and data: never share it.
@@ -222,7 +225,6 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 - At wider aspect ratios, menus such as Collection are stretched to the full width: their text is
   right, their frames and slots come out wider.
 - Not working yet: mouse as a gyro, and Off-TV Play sound (the TV mix plays).
-- The setup has no save import; copy a save by hand (see Saves).
 - Not carried over from Cemu's TP HD graphic packs: distant fog and negative LOD bias.
 - amiibo is answered as "no amiibo".
 - Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
