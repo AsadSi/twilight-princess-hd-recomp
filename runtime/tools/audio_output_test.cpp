@@ -1,68 +1,53 @@
-// Host audio output mode (runtime/src/audio_output_mode.h): TV play plays the TV mix bit-exactly,
-// Off-TV Play plays TV + GamePad, the switches in and out follow the game's own fades without a gap
-// or doubling, the "both" mode is not doubled, and the mode comes from game state alone (a boot or
-// a loaded save state in Off-TV Play gets it right).
+// Host audio output mode (runtime/src/audio_output_mode.h): TV play plays the TV mix bit-exactly, with the
+// game's sound on the GamePad (Off-TV Play) the host plays TV + GamePad, the switches in and out follow the
+// game's own fade with nothing it plays dropped or doubled (also what each device still had queued at a
+// flip), and the mode comes from game state alone (a boot or a loaded save state with the sound on the
+// GamePad gets it right).
 #include "audio_output_mode.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 
-using audio::Fader;
 using audio::OutputSelect;
 
-// the game's fader (nw, 02762258 set / 027621EC per-frame update)
-struct GameFader {
-    Fader f;
-    float step = 0;
-    void set(uint32_t frames, float v) {
-        if (f.value == v) { f.frames = 0; return; }  // (target left as it was)
-        f.target = v;
-        f.frames = frames;
-        if (frames == 0) { f.value = v; step = 0; }
-        else step = (f.value - v) / (float)frames;
-    }
-    void update() {
-        if (!f.frames) return;
-        if (--f.frames) f.value -= step;
-        else { f.value = f.target; step = 0; }
-    }
-};
-
-// the game: sound player master faders, per-frame volumes (0202F41C: TV t*t, GamePad d*d)
-struct Game {
-    GameFader tv, drc;
-    float tv_gain = 1, drc_gain = 0;
-    Game() { tv.f.value = tv.f.target = 1; }
-    void output_mode(int mode, uint32_t frames) {  // 02030880 (5 frames) / 020309AC (0)
-        float t = mode == 1 ? 0.f : 1.f, d = mode == 0 ? 0.f : 1.f;
-        tv.set(frames, t);
-        drc.set(frames, d);
-    }
+// the game's sound DSP (02B06FE0, 02B077A4): one mix on one device (0 TV, 1 GamePad) at level `fade`; asked
+// for the other device it fades out by 1/15 per DSP frame, switches once below 0.001 and fades back in.
+// The final mixes play what it queued kQueue frames earlier (about 11 audio frames, measured).
+constexpr int kQueue = 11;
+struct Dsp {
+    int dev = 0, want = 0;
+    float fade = 1;
+    std::deque<float> tv_q = std::deque<float>(kQueue, 1.0f), drc_q = std::deque<float>(kQueue, 0.0f);
+    float tv = 1, drc = 0;  // the levels the final mixes play this frame
     void frame() {
-        tv.update();
-        drc.update();
-        tv_gain = tv.f.value * tv.f.value;
-        drc_gain = drc.f.value * drc.f.value;
+        if (dev != want) {
+            fade -= 1 / 15.0f;
+            if (fade <= 0.001f) dev = want, fade = 0;
+        } else {
+            fade = std::min(1.0f, fade + 1 / 15.0f);
+        }
+        tv_q.push_back(dev == 0 ? fade : 0);
+        drc_q.push_back(dev == 1 ? fade : 0);
+        tv = tv_q.front(), drc = drc_q.front();
+        tv_q.pop_front(), drc_q.pop_front();
     }
 };
 
-// runs `ms` of time: game frames at 60 Hz, audio frames every 3 ms; one sound playing on whatever
-// devices the game routes it to. Returns min/max of the host level (1 = the sound at full level)
-struct Levels { double lo = 1e9, hi = 0; bool drc_end = false; };
-static Levels run(Game& g, OutputSelect& o, int ms) {
+// `frames` audio frames of a sound the game plays at full level throughout (1 = full): the host level each
+// frame must be what the devices carry. Returns the lowest level and whether the host ended on TV + GamePad
+struct Levels { double lo = 1e9; bool drc_end = false; };
+static Levels run(Dsp& d, OutputSelect& o, int frames) {
     Levels L;
-    double next_game = 0;
-    for (int t = 0; t < ms; t += 3) {
-        while (next_game <= t) { g.frame(); next_game += 1000.0 / 60; }
-        o.update(true, g.tv.f, g.drc.f);
-        double level = (o.play_tv ? g.tv_gain : 0) + (o.play_drc ? g.drc_gain : 0);
-        // nothing the game plays is dropped: the host hears every device that carries sound...
-        double carried = g.tv_gain + g.drc_gain;
-        bool tv_full = g.tv_gain >= 1;
-        assert(level >= (tv_full ? 1.0 : carried) - 1e-6);
-        if (level < L.lo) L.lo = level;
-        if (level > L.hi) L.hi = level;
+    for (int i = 0; i < frames; i++) {
+        d.frame();
+        o.update(true, d.dev == 1);
+        int32_t tl = (int32_t)(d.tv * 10000), dl = (int32_t)(d.drc * 10000), ol, orr;
+        o.mix(&tl, &tl, &dl, &dl, 1, &ol, &orr);
+        assert(ol == tl + dl);  // the host hears every device that carries the sound, once
+        L.lo = std::min(L.lo, ol / 10000.0);
         L.drc_end = o.play_drc;
     }
     return L;
@@ -72,8 +57,8 @@ int main() {
     {
         // TV play: the host gets the TV final mix bit-exactly, the GamePad mix not at all
         OutputSelect o;
-        Game g;
-        o.update(true, g.tv.f, g.drc.f);
+        Dsp d;
+        run(d, o, 50);
         assert(o.play_tv && !o.play_drc);
         int32_t tl[144], tr[144], dl[144], dr[144], ol[144], orr[144];
         srand(5);
@@ -83,23 +68,21 @@ int main() {
         }
         o.mix(tl, tr, dl, dr, 144, ol, orr);
         for (int i = 0; i < 144; i++) assert(ol[i] == tl[i] && orr[i] == tr[i]);
-        // before the game's sound player exists (boot): TV
-        o.update(false, Fader{}, Fader{});
-        assert(o.play_tv && !o.play_drc);
+        // before the game's DSP exists (boot): TV
+        OutputSelect boot;
+        boot.update(false, true);
+        assert(boot.play_tv && !boot.play_drc);
         printf("TV play: TV mix bit-exact\n");
     }
     {
-        // Off-TV Play (Minus): summed from the call on, through the fade, and while it lasts
+        // Off-TV Play: the TV fades out, the DSP switches, the GamePad fades in; the host follows it
         OutputSelect o;
-        Game g;
-        run(g, o, 200);
-        g.output_mode(1, 5);
-        o.update(true, g.tv.f, g.drc.f);
-        assert(o.play_drc);  // immediately, before the next game frame
-        Levels L = run(g, o, 300);
-        printf("into Off-TV Play: host level %.3f .. %.3f (the game's crossfade t^2 + d^2)\n", L.lo, L.hi);
-        assert(L.lo > 0.5 && L.hi <= 1.0 + 1e-6 && L.drc_end);
-        assert(g.tv_gain == 0 && g.drc_gain == 1);
+        Dsp d;
+        run(d, o, 50);
+        d.want = 1;
+        Levels L = run(d, o, 60);
+        printf("into Off-TV Play: host level down to %.3f (the game's fade), then %s\n", L.lo, L.drc_end ? "TV + GamePad" : "TV");
+        assert(L.drc_end && d.dev == 1 && d.drc == 1);
         int32_t tl[4] = {0, 0, 0, 0}, dl[4] = {100, -200, 300, -400}, ol[4], orr[4];
         o.mix(tl, tl, dl, dl, 4, ol, orr);
         for (int i = 0; i < 4; i++) assert(ol[i] == dl[i] && orr[i] == dl[i]);
@@ -107,67 +90,27 @@ int main() {
 
         // a save state taken now and loaded into a fresh session: the mode comes from game memory
         OutputSelect fresh;
-        fresh.update(true, g.tv.f, g.drc.f);
+        fresh.update(true, d.dev == 1);
         assert(fresh.play_drc);
         printf("save state in Off-TV Play: loads as Off-TV Play\n");
 
-        // back to the TV: summed until the fade is over, then the TV alone
-        g.output_mode(0, 5);
-        Levels B = run(g, o, 60);
-        printf("back to TV play: host level %.3f .. %.3f\n", B.lo, B.hi);
-        assert(B.lo > 0.5 && B.hi <= 1.0 + 1e-6);
-        Levels C = run(g, o, 200);
-        assert(!C.drc_end && C.lo == 1 && C.hi == 1);
-        assert(g.drc.f.value == 0 && g.tv.f.value == 1);
-        printf("TV play again: TV only\n");
-    }
-    {
-        // the instant variant (020309AC) both ways
-        OutputSelect o;
-        Game g;
-        g.output_mode(1, 0);
-        Levels L = run(g, o, 100);
-        assert(L.lo >= 1 - 1e-6 && L.hi <= 1 + 1e-6 && L.drc_end);
-        g.output_mode(0, 0);
-        L = run(g, o, 100);
-        assert(L.lo >= 1 - 1e-6 && L.hi <= 1 + 1e-6 && !L.drc_end);
-        printf("instant switches: level 1 throughout\n");
-    }
-    {
-        // "both" (mode 2) from TV play: both devices carry everything -> TV only, not doubled
-        OutputSelect o;
-        Game g;
-        g.output_mode(2, 5);
-        Levels L = run(g, o, 200);
-        assert(!L.drc_end && L.hi <= 1 + 1e-6);
-        printf("both mode: TV only, level %.3f\n", L.hi);
-    }
-    {
-        // a fader set to the value it is fading through keeps a stale target: the goal is its value
-        GameFader f;
-        f.f.value = 1;
-        f.set(5, 0);
-        f.update();
-        f.update();
-        f.set(5, f.f.value);
-        assert(f.f.frames == 0 && f.f.goal() == f.f.value);
-        Fader tv;
-        tv.value = 1;
-        assert(!audio::gamepad_audible(tv, Fader{}));
-        printf("stale fader target: handled\n");
+        // back to the TV: TV + GamePad until the GamePad has played out its queue, then the TV alone
+        d.want = 0;
+        Levels B = run(d, o, 20);  // switched (after 15), the GamePad's queue still playing
+        assert(B.drc_end && d.dev == 0);
+        B = run(d, o, 30);
+        assert(!B.drc_end && d.tv == 1);
+        printf("back to TV play: TV + GamePad until the GamePad's queue is played out, then TV only\n");
     }
     {
         // debug overrides
         OutputSelect o;
         assert(OutputSelect::parse(nullptr) == OutputSelect::kAuto && OutputSelect::parse("auto") == OutputSelect::kAuto);
         o.source = OutputSelect::parse("tv");
-        Game g;
-        g.output_mode(1, 0);
-        g.frame();
-        o.update(true, g.tv.f, g.drc.f);
+        o.update(true, true);
         assert(o.play_tv && !o.play_drc);
         o.source = OutputSelect::parse("gamepad");
-        o.update(false, Fader{}, Fader{});
+        o.update(false, false);
         assert(!o.play_tv && o.play_drc);
         printf("overrides: tv / gamepad\n");
     }

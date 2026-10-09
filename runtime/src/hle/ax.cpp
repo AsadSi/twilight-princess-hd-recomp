@@ -332,17 +332,15 @@ void init_buffers() {
     g_output.source = audio::OutputSelect::parse(getenv("WWHD_AUDIO_OUTPUT"));
 }
 
-// The game's output mode (Off-TV Play) came from Wind Waker's sound player faders; TP HD's are not
-// mapped yet, so the host plays the TV mix (WWHD_AUDIO_OUTPUT=gamepad still picks the GamePad's)
+// The game's output device (audio_output_mode.h): its sound DSP (*1012B6DC) mixes into the TV or,
+// with +0x34 set, the GamePad
 void update_output_mode() {
-    audio::Fader tv, drc;
-    bool ok = false;
+    const uint32_t dsp = ld32(0x1012B6DC);
+    const bool ok = dsp >= mem::kMem2Start && dsp < mem::kMem2End - 0x100;
     bool before = g_output.play_drc;
-    g_output.update(ok, tv, drc);
-    static bool stats = getenv("WWHD_AX_STATS") != nullptr;
-    if (stats && g_output.play_drc != before)
-        LOG("[ax] host output: %s (TV fader %.2f -> %.2f, GamePad fader %.2f -> %.2f)",
-            g_output.play_drc ? "TV + GamePad (Off-TV Play)" : "TV", tv.value, tv.goal(), drc.value, drc.goal());
+    g_output.update(ok, ok && ld8(dsp + 0x34));
+    if (g_output.play_drc != before)
+        LOG("[ax] host output: %s", g_output.play_drc ? "TV + GamePad (the game's sound is on the GamePad)" : "TV");
 }
 
 // a GamePad aux effect without input for this long has finished its tail: it is not called (in
@@ -517,7 +515,7 @@ void frame_thread() {
             process_voices();
         }
         bool took = threads::ensure_core();  // callbacks run guest code
-        update_output_mode();  // the game's faders: TV, or TV + GamePad (Off-TV Play)
+        update_output_mode();  // the game's output device: TV, or TV + GamePad (Off-TV Play)
         run_aux_callbacks(c);
         uint32_t cbs[64];
         {
