@@ -478,6 +478,63 @@ HOLD_SKIP(02A9D6E4)     // particle calc 3D
 HOLD_SKIP(02A9D41C)     // particle calc 2D
 HOLD_SKIP_OK(02AD5B3C)  // fopScnM_ChangeReq
 
+// The painter advances the screen fade (mDoGph_gInf_c::calcFade 02AEAD04: rate 1012B364 += speed 1012B368 while on,
+// 1012B3BE) and the wipe (dDlst_list_c::calcWipe 02919F48: rate 1011DAF0, speed 1011DAF4, on 1011DAFC) each pass and
+// draws what they reach: a hold pass draws them its share of a step ahead and puts them back. It also runs the menu
+// particles (dPa_control_c::calcMenu 02A9D7F8), which hold passes skip. Each had run at N+1 times its speed.
+static void draw_ahead(Cpu* c, void (*orig)(Cpu*), uint32_t rate, uint32_t speed, uint32_t on) {
+    using namespace interp;
+    if (!g_hold) return orig(c);
+    const uint32_t r = ld32(rate), s = ld32(speed);
+    const uint8_t o = ld8(on);
+    stf32(speed, u32_as_f32(s) * float(g_phase) / float(g_n + 1));
+    orig(c);
+    st32(rate, r), st32(speed, s), st8(on, o);
+}
+extern "C" void f_02AEAD04_orig(Cpu* c);
+extern "C" void f_02919F48_orig(Cpu* c);
+extern "C" void hook_02AEAD04(Cpu* c) { draw_ahead(c, f_02AEAD04_orig, 0x1012B364, 0x1012B368, 0x1012B3BE); }
+extern "C" void hook_02919F48(Cpu* c) { draw_ahead(c, f_02919F48_orig, 0x1011DAF0, 0x1011DAF4, 0x1011DAFC); }
+HOLD_SKIP(02A9D7F8)
+
+// The scene change fade is the display's JUTFader, run from the end of each pass's frame (JUTFader::control
+// 02B9F530 from 02B12F2C): status +0x00 (0 black, 1 clear, 2 fading in, 3 out), a pending status +0x20 taken after
+// +0x1C frames, duration u16 +0x04, count u16 +0x06, alpha +0x0B = count / duration once it has counted. A hold
+// pass advances nothing (the control's state is put back) and draws (count + t) / duration, the count and duration
+// scaled so the integer division lands there and the alpha stays below 256; HD's draw (02B9F63C, also called on
+// its own from 02005CF0) reckons (count + 1) / duration from the count. The fade had run at N+1 times its speed.
+static bool g_in_fader = false;
+static void scale_fader(uint32_t f, int ahead) {  // the caller reckons the alpha from count' + 1, as (count + ahead + t)
+    using namespace interp;
+    const uint32_t status = ld32(f), dur = ld16(f + 4), count = ld16(f + 6);
+    if ((status != 2 && status != 3) || !dur) return;
+    const uint32_t d = dur * (g_n + 1), k = std::min((count + ahead) * (g_n + 1) + g_phase, d - 1);  // alpha < 256
+    st16(f + 4, d);
+    st16(f + 6, k - 1);
+}
+extern "C" void f_02B9F530_orig(Cpu* c);
+extern "C" void hook_02B9F530(Cpu* c) {
+    if (!g_hold) return f_02B9F530_orig(c);
+    const uint32_t f = c->r[3];
+    static const uint32_t at[] = {0x00, 0x04, 0x08, 0x1C, 0x20};
+    uint32_t saved[5];
+    for (int i = 0; i < 5; i++) saved[i] = ld32(f + at[i]);
+    st32(f + 0x1C, 0xFFFFFFFF);  // no pending status this pass
+    scale_fader(f, 0);  // the control adds one as it counts
+    g_in_fader = true;
+    f_02B9F530_orig(c);
+    g_in_fader = false;
+    for (int i = 0; i < 5; i++) st32(f + at[i], saved[i]);
+}
+extern "C" void f_02B9F63C_orig(Cpu* c);
+extern "C" void hook_02B9F63C(Cpu* c) {
+    if (!g_hold || g_in_fader) return f_02B9F63C_orig(c);
+    const uint32_t f = c->r[3], w = ld32(f + 4);
+    scale_fader(f, 1);
+    f_02B9F63C_orig(c);
+    st32(f + 4, w);
+}
+
 extern "C" void f_02AD6EB0_orig(Cpu* c);
 extern "C" void hook_02AD6EB0(Cpu* c) {  // fpcDt_Handler
     restore_models();

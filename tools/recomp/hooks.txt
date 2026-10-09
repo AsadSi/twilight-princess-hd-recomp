@@ -28,6 +28,11 @@
 02ACD0A8  # fapGm_After
 02BEF838  # cCt_Counter
 02B520C4  # J3DFrameCtrl::update (in some actors' draw)
+02AEAD04  # mDoGph_gInf_c::calcFade (in the painter)
+02919F48  # dDlst_list_c::calcWipe (in the painter)
+02A9D7F8  # dPa_control_c::calcMenu (in the painter)
+02B9F530  # JUTFader::control: the scene change fade (from the display's end of frame)
+02B9F63C  # JUTFader::draw (HD's: alpha from the count)
 02902B4C  # dComIfG_Ccsp()->Move()
 028C2AB0  # dComIfG_Bgsp().ClrMoveFlag()
 02ACC800  # vibration Run
