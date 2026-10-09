@@ -19,6 +19,8 @@
 //                        (the TV is silent once it has played out what it had queued at the flip)
 //   back on the TV       host = TV + GamePad until the GamePad has played out its queue (its first
 //                        silent frame), then the TV alone. The game faded both sides of a switch itself.
+// The game drives the GamePad's small speaker at DSP volume 4.0 against the TV's 1.64 (7.7 dB louder);
+// both play on the same host speakers here, so the GamePad mix is played at the TV's level.
 // WWHD_AUDIO_OUTPUT=auto (default) | tv | gamepad overrides it (debug).
 #pragma once
 #include <cstdint>
@@ -45,14 +47,15 @@ public:
     }
     bool play_tv = true, play_drc = false;
     bool drc_sounds = false;  // the last GamePad frame was not silent
+    static constexpr float kDrcLevel = 1.64f / 4.0f;  // the GamePad mix at the TV's level
 
     // one frame of n samples per channel -> out (not clamped)
     void mix(const int32_t* tv_l, const int32_t* tv_r, const int32_t* drc_l, const int32_t* drc_r, int n, int32_t* out_l,
              int32_t* out_r) {
         drc_sounds = false;
         for (int i = 0; i < n; i++) {
-            out_l[i] = (play_tv ? tv_l[i] : 0) + (play_drc ? drc_l[i] : 0);
-            out_r[i] = (play_tv ? tv_r[i] : 0) + (play_drc ? drc_r[i] : 0);
+            out_l[i] = (play_tv ? tv_l[i] : 0) + (play_drc ? int32_t(drc_l[i] * kDrcLevel) : 0);
+            out_r[i] = (play_tv ? tv_r[i] : 0) + (play_drc ? int32_t(drc_r[i] * kDrcLevel) : 0);
             drc_sounds |= (drc_l[i] | drc_r[i]) != 0;
         }
     }

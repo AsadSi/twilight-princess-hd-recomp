@@ -46,7 +46,7 @@ static Levels run(Dsp& d, OutputSelect& o, int frames) {
         o.update(true, d.dev == 1);
         int32_t tl = (int32_t)(d.tv * 10000), dl = (int32_t)(d.drc * 10000), ol, orr;
         o.mix(&tl, &tl, &dl, &dl, 1, &ol, &orr);
-        assert(ol == tl + dl);  // the host hears every device that carries the sound, once
+        assert(ol == tl + int32_t(dl * OutputSelect::kDrcLevel));  // every device that carries the sound, once (the GamePad at the TV's level)
         L.lo = std::min(L.lo, ol / 10000.0);
         L.drc_end = o.play_drc;
     }
@@ -85,8 +85,8 @@ int main() {
         assert(L.drc_end && d.dev == 1 && d.drc == 1);
         int32_t tl[4] = {0, 0, 0, 0}, dl[4] = {100, -200, 300, -400}, ol[4], orr[4];
         o.mix(tl, tl, dl, dl, 4, ol, orr);
-        for (int i = 0; i < 4; i++) assert(ol[i] == dl[i] && orr[i] == dl[i]);
-        printf("Off-TV Play: host = TV + GamePad (= the GamePad mix)\n");
+        for (int i = 0; i < 4; i++) assert(ol[i] == int32_t(dl[i] * OutputSelect::kDrcLevel) && orr[i] == ol[i]);
+        printf("Off-TV Play: host = TV + GamePad (= the GamePad mix, at the TV's level)\n");
 
         // a save state taken now and loaded into a fresh session: the mode comes from game memory
         OutputSelect fresh;
