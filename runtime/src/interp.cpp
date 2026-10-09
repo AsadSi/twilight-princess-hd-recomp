@@ -535,9 +535,16 @@ extern "C" void hook_02B9F63C(Cpu* c) {
     st32(f + 4, w);
 }
 
+// mDoGph_gInf_c's wide zoom (1012B3C3: cutscenes framed for 4:3 drawn 1.33x larger) is set in execute, read by the
+// painter and camera_draw, and cleared at the end of each painter (offWideZoom 02AEAE60). Hold passes get it as the
+// last logic step left it, before the painter (main01's loop, below) and after it (fpcDt_Handler): every other frame
+// of those cutscenes had been drawn unzoomed.
+static uint8_t g_wide_zoom = 0;
+
 extern "C" void f_02AD6EB0_orig(Cpu* c);
 extern "C" void hook_02AD6EB0(Cpu* c) {  // fpcDt_Handler
     restore_models();
+    if (g_hold) st8(0x1012B3C3, g_wide_zoom);
     if (!g_hold) f_02AD6EB0_orig(c);
 }
 
@@ -558,6 +565,8 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     using namespace interp;
     if (g_hold && g_phase == g_n) g_records++;  // the record pass just ended
     g_passes++;
+    if (!g_hold) g_wide_zoom = ld8(0x1012B3C3);  // g_hold is still the pass that ended
+    else st8(0x1012B3C3, g_wide_zoom);
     // the next pass of the step (after the logic pass: hold pass 1; after hold pass N: the next logic pass); a
     // change of rate starts over with a logic pass
     const int n = g_on ? frames_per_step() - 1 : 0;
