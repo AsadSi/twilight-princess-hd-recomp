@@ -1,0 +1,14 @@
+# The map from a save loaded as Quest Log 1 (tools/audit/qasaves.sh ROUTE=map): the menus as routes/qasave.txt,
+# then D-pad Up opens the map (72 s), the stick moves its cursor, B closes it. In Lake Hylia and Hyrule Field the map
+# tests its region mask through a tiling aperture (gx2_resources.cpp).
+20-20.3 PLUS
+25-25.3 PLUS
+30-30.3 A
+36-36.3 A
+40-40.3 A
+48-48.3 A
+54-54.3 A
+72-72.2 UP
+76-78 STICK 1 0
+78-80 STICK 0 -1
+82-82.2 B

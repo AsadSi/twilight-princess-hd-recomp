@@ -8,6 +8,8 @@
 #include "gx2_texture_regs.h"
 #include "runtime.h"
 
+#include <algorithm>
+#include <cstring>
 #include <set>
 
 using namespace Latte;
@@ -34,18 +36,56 @@ HLE(gx2, GX2GetSurfaceFormatBits) {
     ret(c, GetFormatBits(f) / (IsCompressedFormat(f) ? 16 : 1));
 }
 
-// A CPU-linear view of a tiled surface. TP HD's dPeekZ took one of the depth copy (peekData is hooked
-// instead, peekz.cpp); a pixel test at 02A37BA0 (R8_G8 or R8_G8_B8_A8 surfaces) takes one too. Surfaces
-// aren't read back to guest memory, so no aperture is given (address 0): each new caller is logged once.
-// (surface, level, slice, endian, u32* handle, u32* address)
+// A CPU-linear view of a tiled surface level, element (x, y) at address + (pitch * y + x) * element size, as the
+// GPU's aperture maps it (surface, level, slice, endian, u32* handle, u32* address). TP HD's field map tests a
+// region mask's alpha through one (02A37BA0, from dMenu_Fmap: opening the map in Lake Hylia or Hyrule Field; the
+// address 0 it got before crashed the game). The view is the level's texels in guest memory, untiled into a
+// host-only buffer, which is kept for the next call while the surface's sampled words stay the same; writes
+// through it are not tiled back. Render targets and compressed formats get none (address 0): a render target's
+// texels are on the GPU. The frame begin takes one of the converted depth copy each frame (02BDE660, for dPeekZ;
+// peekData is hooked instead, peekz.cpp).
 HLE(gx2, GX2AllocateTilingApertureEx) {
-    static std::set<uint32_t> seen;
-    const uint32_t s = arg(c, 0);
-    if (seen.insert(c->lr).second)
-        LOG("[gx2] no tiling aperture for surface %08X (%ux%u format %#x), called from %08X", ld32(s + 0x24),
-            ld32(s + 0x04), ld32(s + 0x08), ld32(s + 0x14), c->lr);
-    st32(arg(c, 4), 0);
-    st32(arg(c, 5), 0);
+    GX2Surface* s = gp<GX2Surface>(arg(c, 0));
+    const uint32_t level = arg(c, 1), slice = arg(c, 2);
+    LatteAddrLib::AddrSurfaceInfo_OUT info{};
+    gx2calc::CalculateSurfaceInfo(s, level, &info);
+    const uint32_t base = level == 0 ? (uint32_t)s->imagePtr : level == 1 ? (uint32_t)s->mipPtr : s->mipPtr + s->mipOffset[level - 1];
+    const auto tm = (E_HWTILEMODE)info.hwTileMode;
+    const uint32_t bytes = info.bpp / 8, w = std::max(1u, s->width >> level), h = std::max(1u, s->height >> level);
+    if ((s->resFlag & 6) /* a color or depth buffer */ || IsCompressedFormat(s->format) || !bytes || !base || slice >= info.depth) {
+        static std::set<uint32_t> seen;
+        if (seen.insert(c->lr).second)
+            LOG("[gx2] no tiling aperture for surface %08X (%ux%u format %#x), called from %08X", base, (uint32_t)s->width,
+                (uint32_t)s->height, (uint32_t)s->format.value(), c->lr);
+        st32(arg(c, 4), 0);
+        st32(arg(c, 5), 0);
+        return;
+    }
+    static uint32_t buf = 0, buf_size = 0, key[6] = {}, sum = 0;
+    uint32_t k[6] = {base, (uint32_t)s->format.value(), w, h, info.pitch, slice}, h32 = 2166136261u;
+    for (uint32_t i = 0; i < 256; i++) h32 = (h32 ^ ld32(base + (uint32_t)(info.surfSize / 256 * i) / 4 * 4)) * 16777619u;
+    if (memcmp(k, key, sizeof k) || h32 != sum) {
+        const uint32_t size = info.pitch * h * bytes;
+        if (size > buf_size) buf = mem::host_alloc(size, 0x100), buf_size = size;
+        LatteAddrLib::CachedSurfaceAddrInfo ci;
+        if (TM_IsMacroTiled(tm))
+            LatteAddrLib::SetupCachedSurfaceAddrInfo(&ci, slice, 0, info.bpp, info.pitch, info.height, info.depth, 1, tm, false,
+                                                     (s->swizzle >> 8) & 1, (s->swizzle >> 9) & 3);
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++) {
+                const uint32_t off = tm == E_HWTILEMODE::TM_LINEAR_GENERAL || tm == E_HWTILEMODE::TM_LINEAR_ALIGNED
+                    ? LatteAddrLib::ComputeSurfaceAddrFromCoordLinear(x, y, slice, 0, info.bpp, info.pitch, info.height, info.depth)
+                    : !TM_IsMacroTiled(tm) ? LatteAddrLib::ComputeSurfaceAddrFromCoordMicroTiled(x, y, slice, info.bpp, info.pitch, info.height, tm, false)
+                    : LatteAddrLib::ComputeSurfaceAddrFromCoordMacroTiledCached(x, y, &ci);
+                memcpy(mem::ptr(buf + (info.pitch * y + x) * bytes), mem::ptr(base + off), bytes);
+            }
+        memcpy(key, k, sizeof k);
+        sum = h32;
+        LOG("[gx2] tiling aperture for surface %08X (%ux%u format %#x, level %u), called from %08X", base, w, h,
+            (uint32_t)s->format.value(), level, c->lr);
+    }
+    st32(arg(c, 4), buf);
+    st32(arg(c, 5), buf);
 }
 HLE(gx2, GX2FreeTilingAperture) {}
 
