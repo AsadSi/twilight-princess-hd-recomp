@@ -80,6 +80,12 @@ void service(Cpu* c) {
     st16(kTvSize + 4, (uint16_t)w);
     st16(kTvSize + 6, (uint16_t)h);
     guest_call(c, kSetTvSize, {});
+    // The TV minimap's top-left (dMeterMap's draw, 02A52C00: a function static at 10169504, set from 1009B16C on its
+    // first draw, guard 10169510) is a 16:9 layout position: it moves out with the left edge. The game drops the
+    // map once it ends left of 16:9's edge (x -100), so it moves at most 21:9's distance (134.5).
+    stf32(0x10169504, ldf32(0x1009B16C) - std::min((w - kWideW) / 2.0, 134.5));
+    stf32(0x10169508, ldf32(0x1009B170));
+    st32(0x10169510, 1);
     guest_call(c, kOnWide2D, {});  // dMeter2Info_onWide2D, as onWide() calls after setTvSize: the HUD lays out again
     g_applied = want;
     g_game = kBase * (float(w) / kWideW) * (float(kWideH) / h);
