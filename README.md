@@ -253,10 +253,11 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 
 - macOS on Apple Silicon only (Metal). The Vulkan renderer and the SDL3 host, kept for possible Windows
   and Linux builds, compile but have not run Twilight Princess HD yet (`docs/vulkan.md`).
-- Not yet checked: a real controller, playing far beyond the opening.
-- Frame interpolation blends the camera, models (with their texture and color animation), particles and
-  the 2D's movements and fades; screen effects and 2D color and texture animations move at 30 Hz, and
-  true 60 fps logic is not available.
+- Not yet checked: a real controller, playing whole dungeons and bosses (the disc's QA saves load and play
+  from every part of the story: `tools/audit/qasaves.sh`).
+- Frame interpolation blends the camera, models (with their texture and color animation), particles,
+  the 2D's movements and fades, and the screen fades; screen effects and 2D color and texture
+  animations move at 30 Hz, and true 60 fps logic is not available.
 - At 32:9 the TV minimap stays partway in from the left edge: the game's drawing of it does not show
   further out.
 - amiibo: the Cave of Shadows has been entered with Wolf Link but not played through.

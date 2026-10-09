@@ -1,0 +1,14 @@
+# One save as Quest Log 1, in a save folder without COMMON.dat (tools/audit/qasaves.sh): title -> Controller
+# Selection (GamePad) -> Quest Log 1; A opens it, A closes the quick-start note, A on Start loads it (one A more:
+# the first can come before the menu takes it; in play by about 66 s). Then a walk forward and Collection (D-pad
+# down), closed with B.
+20-20.3 PLUS
+25-25.3 PLUS
+30-30.3 A
+36-36.3 A
+40-40.3 A
+48-48.3 A
+54-54.3 A
+70-74 STICK 0 1
+77-77.2 DOWN
+83-83.2 B

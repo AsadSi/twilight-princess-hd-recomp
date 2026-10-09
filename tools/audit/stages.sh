@@ -24,18 +24,4 @@ while IFS=$'\t' read -r WARP PLACE; do
   LUMA=$([ -f "$OUT/${S}_b.png" ] && "$ROOT/build/venv/bin/python" -c "from PIL import Image, ImageStat; import sys; print(round(ImageStat.Stat(Image.open(sys.argv[1]).convert('L')).mean[0]))" "$OUT/${S}_b.png" || echo -)
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$S" "$WARP" "$ARRIVED" "$ALIVE" "${CRASH:--}" "$UNIMPL" "$LUMA" "$PLACE" | tee -a "$OUT/summary.tsv"
 done
-"$ROOT/build/venv/bin/python" - "$OUT" <<'EOF'
-import glob, os, sys
-from PIL import Image, ImageDraw
-d = sys.argv[1]
-files = sorted(glob.glob(os.path.join(d, "*_b.png")))
-if not files: sys.exit()
-w, h, cols = 320, 200, 5
-sheet = Image.new("RGB", (cols * w, ((len(files) + cols - 1) // cols) * h), "white")
-for i, f in enumerate(files):
-    im = Image.open(f).convert("RGB"); im.thumbnail((w, h - 16))
-    x, y = (i % cols) * w, (i // cols) * h
-    sheet.paste(im, (x, y + 16))
-    ImageDraw.Draw(sheet).text((x + 4, y + 2), os.path.basename(f)[:-6], fill="black")
-sheet.save(os.path.join(d, "sheet.png"))
-EOF
+"$ROOT/build/venv/bin/python" "$ROOT/tools/audit/sheet.py" "$OUT" '*_b.png'
