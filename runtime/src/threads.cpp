@@ -1313,14 +1313,28 @@ HLE(coreinit, OSSetAlarm) {
     arm_alarm(alarm, timebase::now() + delay, 0, cb);
     ret(c, 1);
 }
+// OSTime (OSGetTime) counts from 2000-01-01 00:00 local time: the host's wall clock when the process started,
+// then the guest timebase. OSGetSystemTime and the timebase count from boot.
+static const uint64_t g_os_epoch = [] {
+    time_t t = time(nullptr);
+    struct tm tmv;
+#ifdef _WIN32
+    localtime_s(&tmv, &t);
+    const int64_t local = _mkgmtime(&tmv);
+#else
+    localtime_r(&t, &tmv);
+    const int64_t local = timegm(&tmv);
+#endif
+    return (uint64_t)(local - 946684800) * timebase::kTicksPerSec - timebase::now();  // 946684800: 2000-01-01 as a Unix time
+}();
 HLE(coreinit, OSSetPeriodicAlarm) {
     uint32_t alarm = arg(c, 0), cb = c->r[9];
-    uint64_t start = timebase::to_host(arg64(c, 5)), period = arg64(c, 7);
+    const int64_t start = (int64_t)timebase::to_host(arg64(c, 5) - g_os_epoch), period = (int64_t)arg64(c, 7);  // start: an OSTime
     st32(alarm + 0x0C, cb);
-    uint64_t now = timebase::now();
-    uint64_t when = start;
+    const int64_t now = (int64_t)timebase::now();
+    int64_t when = start;
     if (when < now && period) when += ((now - start) / period + 1) * period;
-    arm_alarm(alarm, when, period, cb);
+    arm_alarm(alarm, (uint64_t)std::max<int64_t>(when, 0), (uint64_t)period, cb);
     ret(c, 1);
 }
 HLE(coreinit, OSCancelAlarm) {
@@ -1332,22 +1346,21 @@ HLE(coreinit, OSSetAlarmUserData) { st32(arg(c, 0) + 0x38, arg(c, 1)); }
 HLE(coreinit, OSGetAlarmUserData) { ret(c, ld32(arg(c, 0) + 0x38)); }
 
 // ---------------------------------------------------------------- time API
-HLE(coreinit, OSGetTime) { ret64(c, timebase::guest_now()); }
+HLE(coreinit, OSGetTime) { ret64(c, timebase::guest_now() + g_os_epoch); }
 HLE(coreinit, OSGetSystemTime) { ret64(c, timebase::guest_now()); }
 HLE(coreinit, OSGetTick) { ret(c, (uint32_t)timebase::guest_now()); }
 
 HLE(coreinit, OSTicksToCalendarTime) {
-    // OSCalendarTime: sec, min, hour, mday, mon, year, wday, yday, msec, usec (int32 each)
+    // OSCalendarTime: sec, min, hour, mday, mon, year, wday, yday, msec, usec (int32 each), from an OSTime
+    // (TP HD dates its saves and counts each day's amiibo uses this way)
     uint64_t ticks = arg64(c, 3);
     uint32_t out = arg(c, 2);
-    // guest epoch is 2000-01-01; report the host's wall clock instead of time since boot
-    (void)ticks;
-    time_t t = time(nullptr);
+    time_t t = (time_t)(946684800 + ticks / timebase::kTicksPerSec);
     struct tm tmv;
 #ifdef _WIN32
-    localtime_s(&tmv,&t);
+    gmtime_s(&tmv, &t);
 #else
-    localtime_r(&t, &tmv);
+    gmtime_r(&t, &tmv);
 #endif
     uint32_t v[10] = {(uint32_t)tmv.tm_sec, (uint32_t)tmv.tm_min, (uint32_t)tmv.tm_hour, (uint32_t)tmv.tm_mday,
                       (uint32_t)tmv.tm_mon, (uint32_t)(tmv.tm_year + 1900), (uint32_t)tmv.tm_wday,
