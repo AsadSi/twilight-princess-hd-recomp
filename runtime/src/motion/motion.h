@@ -24,8 +24,10 @@
 // changes and when the right stick keeps the game from using the gyro; WWHD_GYRO_LOG=1 adds the raw samples,
 // the bias, the gravity and the aim twice a second.
 //
-// Test aid: WWHD_TEST_GYRO=from-to:yaw:pitch,... turns the virtual GamePad at yaw / pitch degrees
-// per second during game-time seconds (as WWHD_TEST_MOUSE), with any source (also off); no sensitivity.
+// Test aids: WWHD_TEST_GYRO=from-to:yaw:pitch,... turns the virtual GamePad at yaw / pitch degrees
+// per second during game-time seconds, with any source (also off); no sensitivity.
+// WWHD_TEST_MOUSE=from-to:dx:dy,... moves the mouse by (dx, dy) points per GamePad read during game-time
+// seconds, as the hosts do (mouse_motion: the mouse source keeps it only while the game aims).
 #pragma once
 #include <cstdint>
 #include <string>
@@ -81,7 +83,7 @@ void mouse_motion(float dx, float dy);
 // the mouse source is active and the game aims now: mouse movement belongs to the gyro (the mouse
 // camera mod leaves it alone) and the hosts capture the pointer while this holds
 bool mouse_drives_gyro();
-// mods/camera.cpp: the game's aiming / first-person state, once per logic step
+// mods.cpp: the game's aiming / first-person state, once per logic step
 void set_aiming(bool aiming);
 bool aiming();
 

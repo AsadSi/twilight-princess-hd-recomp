@@ -144,22 +144,24 @@ void apply_dsu(const Settings& s) {
     }
 }
 
-// WWHD_TEST_GYRO=from-to:yaw:pitch,... (game-time seconds, degrees per second)
+// WWHD_TEST_GYRO=from-to:yaw:pitch,... (game-time seconds, degrees per second);
+// WWHD_TEST_MOUSE=from-to:dx:dy,... (game-time seconds, mouse points per GamePad read)
 struct TestTurn { double from, to; float yaw, pitch; };
+std::vector<TestTurn> parse_turns(const char* var) {
+    std::vector<TestTurn> out;
+    const char* e = getenv(var);
+    double a, b; float y, p; int n;
+    while (e && sscanf(e, "%lf-%lf:%f:%f%n", &a, &b, &y, &p, &n) == 4) {
+        out.push_back({a, b, y, p});
+        e += n;
+        if (*e != ',') break;
+        e++;
+    }
+    if (!out.empty()) log_msg("[gyro] %s: %zu turn(s)", var, out.size());
+    return out;
+}
 const std::vector<TestTurn>& test_turns() {
-    static const std::vector<TestTurn> v = [] {
-        std::vector<TestTurn> out;
-        const char* e = getenv("WWHD_TEST_GYRO");
-        double a, b; float y, p; int n;
-        while (e && sscanf(e, "%lf-%lf:%f:%f%n", &a, &b, &y, &p, &n) == 4) {
-            out.push_back({a, b, y, p});
-            e += n;
-            if (*e != ',') break;
-            e++;
-        }
-        if (!out.empty()) log_msg("[gyro] WWHD_TEST_GYRO: %zu turn(s)", out.size());
-        return out;
-    }();
+    static const std::vector<TestTurn> v = parse_turns("WWHD_TEST_GYRO");
     return v;
 }
 
@@ -362,6 +364,9 @@ void right_stick(float x, float y) {
 }
 
 VpadMotion vpad(bool repeat) {
+    static const std::vector<TestTurn> test_mouse = parse_turns("WWHD_TEST_MOUSE");
+    for (auto& m : test_mouse)  // as the hosts send it, before this read takes it
+        if (!repeat && mods::game_time() >= m.from && mods::game_time() < m.to) mouse_motion(m.yaw, m.pitch);
     std::lock_guard lk(g_mu);
     if (repeat) return g_last;
     const auto now = Clock::now();

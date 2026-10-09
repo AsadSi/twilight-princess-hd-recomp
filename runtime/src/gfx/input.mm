@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-namespace gfx { void request_capture(); bool menu_hotkey(uint16_t keyCode); bool controls_window_is_key(); }
+namespace gfx { void request_capture(); bool menu_hotkey(uint16_t keyCode); bool controls_window_is_key(); void* display_tv_window(); }
 
 namespace input {
 
@@ -237,6 +237,34 @@ static void update_motion_sensors() API_AVAILABLE(macos(11.0)) {
     motion::set_gyro_controllers(n);
 }
 
+// ---- the mouse as a gyro (motion/motion.h) ----
+// Mouse movement in the game window goes to the gyro source, which keeps it only while the game aims. While
+// it aims the pointer is captured (hidden, detached from the cursor), so that Steam Input's gyro-to-mouse or
+// the mouse never stops at the screen's edge; it is released when the aim ends or the window loses focus.
+static bool g_gyro_capture = false;  // main thread
+static NSWindow* tv_window() { return (__bridge NSWindow*)gfx::display_tv_window(); }
+static void update_gyro_capture() {  // main thread, from the input timer
+    NSWindow* tv = tv_window();
+    const bool want = tv && motion::mouse_drives_gyro() && !overlay::captures() && tv.isKeyWindow && NSApp.isActive &&
+                      !getenv("WWHD_NO_HOST_INPUT");
+    if (want == g_gyro_capture) return;
+    g_gyro_capture = want;
+    CGAssociateMouseAndMouseCursorPosition(!want);
+    if (want) [NSCursor hide];
+    else [NSCursor unhide];
+    LOG("[gyro] mouse %s", want ? "captured while the game aims" : "released");
+}
+static void install_mouse_gyro() {
+    if (getenv("WWHD_NO_HOST_INPUT")) return;
+    tv_window().acceptsMouseMovedEvents = YES;
+    NSEventMask mask = NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged;
+    [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent*(NSEvent* e) {
+        if (overlay::captures() || (e.window != tv_window() && !g_gyro_capture)) return e;
+        motion::mouse_motion((float)e.deltaX, (float)e.deltaY);  // deltaY > 0: down
+        return motion::mouse_drives_gyro() ? nil : e;
+    }];
+}
+
 void init() {
     input_map::load_startup();
     start_test_keys();
@@ -295,7 +323,9 @@ void init() {
             }
             motion::poll_recalibrate(v, keys);
         }
+        update_gyro_capture();
     }];
+    install_mouse_gyro();
 }
 
 // debug: WWHD_PRESS=1000-1010:8000,1500-1505:0008 holds VPAD buttons (hex) during TV frame ranges

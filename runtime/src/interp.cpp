@@ -20,6 +20,7 @@
 
 #include "aspect.h"
 #include "interp.h"
+#include "mods/mods.h"
 #include "mods/packages.h"
 #include "runtime.h"
 #include "savestate.h"
@@ -367,7 +368,8 @@ extern "C" void hook_02AC08B4(Cpu* c) {  // dScnPly_Draw
 }
 
 // main01's frame loop (02AF0EDC, top of each pass): the main thread's state is all in guest memory and
-// its registers, so save states are taken and restored here (savestate.cpp); test warps are requested here.
+// its registers, so save states are taken and restored here (savestate.cpp); test warps are requested here,
+// and the gyro learns whether the game aims (mods.cpp).
 // With interpolation on, each logic pass is followed by N hold passes.
 namespace warp { void service(Cpu* c); }  // warp.cpp
 extern "C" void site_02AF0EDC(Cpu* c) {
@@ -384,4 +386,5 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     ss::service(c);
     warp::service(c);
     aspect::service(c);
+    mods::update_aiming();
 }
