@@ -180,9 +180,9 @@ HLE(gx2, GX2SetVertexShader) {
         set_reg(mmPA_CL_VS_OUT_CNTL, tmp[mmPA_CL_VS_OUT_CNTL]);
         if (n) set_regs(mmSPI_VS_OUT_ID_0, &tmp[mmSPI_VS_OUT_ID_0], n);
     }
-    if (nsem) {
+    if (nsem) {  // all 32: the clear leaves the ones past the shader's own unused (bind_vertex_shader_regs)
         set_reg(mmSQ_VTX_SEMANTIC_CLEAR, 0xFFFFFFFF);
-        set_regs(mmSQ_VTX_SEMANTIC_0, &tmp[mmSQ_VTX_SEMANTIC_0], nsem);
+        set_regs(mmSQ_VTX_SEMANTIC_0, &tmp[mmSQ_VTX_SEMANTIC_0], 32);
     }
 }
 

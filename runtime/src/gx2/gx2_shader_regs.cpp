@@ -55,9 +55,9 @@ void bind_vertex_shader_regs(uint32* regs, uint32 vs) {
         for (uint32 i = 0; i < n; i++) regs[mmSPI_VS_OUT_ID_0 + i] = ld32(vs + VS_OUT_ID + 4 * i);
     }
     uint32 nsem = std::min<uint32>(ld32(vs + VS_SEMANTIC_COUNT), 32);
-    if (nsem > 0) {
+    if (nsem > 0) {  // the clear marks all 32 unused (0xFF), as the GPU does; the shader's own follow
         regs[mmSQ_VTX_SEMANTIC_CLEAR] = 0xFFFFFFFF;
-        for (uint32 i = 0; i < nsem; i++) regs[mmSQ_VTX_SEMANTIC_0 + i] = ld32(vs + VS_SEMANTIC + 4 * i);
+        for (uint32 i = 0; i < 32; i++) regs[mmSQ_VTX_SEMANTIC_0 + i] = i < nsem ? ld32(vs + VS_SEMANTIC + 4 * i) : 0xFF;
     }
 }
 
