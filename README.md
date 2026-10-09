@@ -171,7 +171,8 @@ full-screen menus such as Collection, the map and the save prompt. The GamePad p
 `WWHD_ASPECT=window|16:10|21:9|32:9`.
 
 **Internal resolution.** 1x (1920x1080, as on the Wii U), 1.33x (2560x1440), 1.5x (2880x1620) or
-2x (3840x2160).
+2x (3840x2160), widened to the aspect ratio (21:9 at 1x is 2520x1080). Measured at 60 fps on a MacBook Air
+(M4, fanless): 1x holds 60 at 16:9, 21:9 and 32:9; 1.5x falls to 35-55 as it warms up; 2x to about 30-38.
 
 **Bloom and HUD.** Bloom (the glow around bright areas, strongest in the Twilight) at its original
 strength, reduced to half, or off; and the HUD (hearts, rupees, buttons, map icon) shown or hidden, for
