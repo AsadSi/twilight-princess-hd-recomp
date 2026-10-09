@@ -252,7 +252,8 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 ## Known limitations
 
 - macOS on Apple Silicon only (Metal). The Vulkan renderer and the SDL3 host, kept for possible Windows
-  and Linux builds, compile but have not run Twilight Princess HD yet (`docs/vulkan.md`).
+  and Linux builds, run Twilight Princess HD on a Mac through MoltenVK (`docs/vulkan.md`); no Windows or
+  Linux build has been made.
 - Not yet checked: a real controller, playing whole dungeons and bosses (the disc's QA saves load and play
   from every part of the story: `tools/audit/qasaves.sh`).
 - Frame interpolation blends the camera, models (with their texture and color animation), particles,

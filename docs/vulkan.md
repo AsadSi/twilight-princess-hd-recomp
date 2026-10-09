@@ -4,10 +4,16 @@ The Vulkan renderer (by OpenAI Codex, originally the `vulcan` branch) translates
 Mac it runs on MoltenVK. The shader translator and texture addressing reuse the vendored Cemu
 components under MPL-2.0; Cemu's emulator runtime is not needed.
 
-It came with the Wind Waker HD fork and is kept for possible Windows and Linux builds. Twilight Princess HD
-has not run on it yet: since 2026-10-09 the Vulkan-only and both-renderer builds compile again, but no
-MoltenVK was installed to run them. The measurements below (Outset, Windfall and the other scenes, AO modes,
-true 60) were taken with Wind Waker HD before the fork.
+It came with the Wind Waker HD fork and is kept for possible Windows and Linux builds. Twilight Princess HD runs
+on it (2026-10-09, the Vulkan-only build with the SDL3 host on MoltenVK 1.4.2, Apple M4): `--renderer-smoke`
+passes; save state 1, a walk at 30 and at 60 fps (60.0 swaps/s, even motion between frames); twelve stages
+(Ordon, Link's house, Lake Hylia, Zora's Domain, Castle Town, Hyrule Field, the Forest Temple, Lakebed, Snowpeak
+Ruins, City in the Sky, the Palace of Twilight, the desert) load, draw as with Metal and keep running. Two things
+stopped it: TP HD's four-corner rect lists (drawn as quads, as on Metal) and a color logic operation (0xEE, OR) on
+a device without logic operations (MoltenVK: drawn as a copy, as the Metal renderer draws every logic operation).
+The SDL host keeps its own settings, not the Metal app's (`tphd` defaults): compare with the same `WWHD_*` look
+options (Snowpeak Ruins with distant fog off: the same brightness on both). The measurements below (Outset,
+Windfall and the other scenes, AO modes, true 60) were taken with Wind Waker HD before the fork.
 
 ## One app, two renderers (macOS)
 

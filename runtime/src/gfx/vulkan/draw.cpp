@@ -824,9 +824,12 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   bs.pAttachments = cb.data();
   uint32_t rop = (r[REGADDR::CB_COLOR_CONTROL] >> 16) & 255;
   bs.logicOp = VK_LOGIC_OP_COPY;
-  if (rop != 0xCC) {
-    if (!R.enabledFeatures.logicOp)
-      throw std::runtime_error("color logic operation unsupported by device");
+  if (rop != 0xCC && !R.enabledFeatures.logicOp) {
+    // no logic operations on this device (MoltenVK: Metal has none): drawn as a copy, as the Metal renderer does
+    static uint64_t logged[4] = {};
+    if (!(logged[rop >> 6] & 1ull << (rop & 63)))
+      logged[rop >> 6] |= 1ull << (rop & 63), LOG("[vulkan] color logic operation %#x drawn as a copy (no device support)", rop);
+  } else if (rop != 0xCC) {
     bs.logicOpEnable = VK_TRUE;
     switch (rop) {
     case 0x00:
@@ -1800,6 +1803,16 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
     return;
   if (r[REGADDR::PA_CL_CLIP_CNTL] & (1 << 22))
     return;
+  // rect lists: TP HD's own copy shaders (the GamePad minimap) pass four corners in quad order, drawn as a quad
+  // (as metal_draw.mm); a rect of three corners (the GPU makes the fourth) is skipped
+  if (prim == 0x11) {
+    if (count != 4) {
+      static bool logged = false;
+      if (!logged) logged = true, LOG("[vulkan] rect list of %u vertices: draws skipped", count);
+      return;
+    }
+    prim = 0x13;
+  }
   ((uint32_t *)r)[REGADDR::VGT_PRIMITIVE_TYPE] = prim;
   uint64_t fsKey = 0;
   auto *fs = vk::get_fetch_shader(r, &fsKey, R.frame);
