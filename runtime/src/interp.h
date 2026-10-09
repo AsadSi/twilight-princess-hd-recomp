@@ -6,12 +6,12 @@
 #include <vector>
 
 namespace interp {
-int mode();                 // 0 off (30 fps), 1 frame interpolation (at fps()), 2 true 60
+int mode();                 // 0 off (30 fps), 1 frame interpolation (at fps())
 void set_mode(int m);
 int fps();                  // frame interpolation's chosen frame rate: 60, 120 or 240
 void set_fps(int f);
 void toggle_fps(int f);     // frame interpolation at f on, or off if it is on at f (menus, the 6 key)
-const char* mode_name();    // "30 fps", "60 fps", "120 fps", "240 fps", "true 60"; "240 fps (120 shown)" when capped
+const char* mode_name();    // "30 fps", "60 fps", "120 fps", "240 fps": the rate drawn (capped to the display)
 int output_fps();           // the rate frame interpolation draws: fps() capped to the display
 int frames_per_step();      // frames drawn per 30 Hz logic step: 1, 2, 4 or 8
 

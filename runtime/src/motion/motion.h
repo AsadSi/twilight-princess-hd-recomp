@@ -98,8 +98,7 @@ void poll_recalibrate(const float* pad_values, const bool* keys);
 VpadMotion vpad(bool repeat);
 // a source (or WWHD_TEST_GYRO) turns the virtual GamePad
 bool drives_gamepad();
-// the right stick the game aims with (GamePad or Pro Controller), each read: the game ignores the gyro
-// while it is outside its 0.1 dead zone, which status() and the log point out (stick drift)
+// the right stick (GamePad or Pro Controller), each read, for the gyro log (TP HD uses the gyro with it pushed)
 void right_stick(float x, float y);
 // overlay status line: what the source does right now
 std::string status();

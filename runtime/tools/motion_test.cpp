@@ -70,7 +70,6 @@ using motion::mouse_drives_gyro;
 using motion::mouse_motion;
 using motion::poll_recalibrate;
 using motion::recalibrate;
-using motion::right_stick;
 using motion::set_aiming;
 using motion::set_settings;
 using motion::status;
@@ -451,16 +450,6 @@ static void test_settings_and_sources() {
     mouse_motion(100, 0);
     g.frame(vpad(false));
     assert(close_to(g.yaw, -game_units_one_frame(5), 0.01f));
-    set_aiming(false);
-    // the right stick keeps the game from using the gyro: the status says so while aiming
-    right_stick(0.5f, 0);
-    assert(status().find("right stick") == std::string::npos);  // not aiming
-    set_aiming(true);
-    right_stick(0.5f, 0);
-    fprintf(stderr, "  %s\n", status().c_str());
-    assert(status().find("right stick") != std::string::npos);
-    right_stick(0.05f, 0);
-    assert(status().find("right stick") == std::string::npos);
     set_aiming(false);
 
     // the controller source: samples from SDL; sensitivity 0.5 (the default)

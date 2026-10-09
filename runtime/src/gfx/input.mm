@@ -394,7 +394,7 @@ static std::vector<Stick> scripted_stick(const char* var = "WWHD_STICK") {
 //   WWHD_TEST_STICK=2-5:0:1,...   left stick (x, y) from 2 s to 5 s
 //   WWHD_TEST_RSTICK=2-5:1:0,...  right stick
 //   WWHD_TEST_PRESS=3-3.1:8000    buttons (hex)
-//   WWHD_TEST_MODE=2@0.5          60 fps mode at 0.5 s (0 off, 1 interpolation, 2 true 60)
+//   WWHD_TEST_MODE=2@0.5          60 fps mode at 0.5 s (0 off, 1 interpolation)
 //   WWHD_TEST_END=12              writes the file "test_done" at 12 s (the test script stops the game)
 namespace {
 struct TimedStick { double from, to; float x, y; };
@@ -455,7 +455,7 @@ static void apply_scenario(PadState& s) {
         LOG("[test] t=%.3f s: 60 fps mode %d", t, sc.mode);
         interp::set_mode(sc.mode);
     }
-    // WWHD_TEST_MODES=m@t,m@t,...: further mode switches (0 off, 1 interpolation, 2 true 60)
+    // WWHD_TEST_MODES=m@t,m@t,...: further mode switches (0 off, 1 interpolation)
     static std::vector<std::pair<double, int>> modes = [] {
         std::vector<std::pair<double, int>> v;
         for (const char* e = getenv("WWHD_TEST_MODES"); e && *e;) {

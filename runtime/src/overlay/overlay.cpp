@@ -627,7 +627,7 @@ void tab_graphics() {
         h.gpu = render::device();
         h.renderer = render::vulkan() ? "Vulkan" : "Metal";
         h.host = hostui::name();
-        h.fps = interp::mode() == 2 ? "true 60 fps" : interp::mode() == 1 ? "60 fps interpolation" : "30 fps";
+        h.fps = interp::mode_name();
         h.scale = hostui::res_scale();
 #ifdef WWHD_HAS_VULKAN
         if (render::vulkan()) {

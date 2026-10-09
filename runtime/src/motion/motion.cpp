@@ -54,10 +54,7 @@ Clock::time_point g_last_read{}, g_read_log_at{};
 double g_last_game_time = -1;           // WWHD_TEST_GYRO: game time of the previous read
 Aim g_read_aim;                         // aim given to the GamePad since the last log line
 float g_recalibrate_prev[2] = {};       // pad, key: held at the previous poll
-// the right stick the game aims with: the game ignores the gyro while it is pushed (stick drift)
-bool g_stick_out = false, g_stick_logged = false;
-float g_stick_x = 0, g_stick_y = 0;
-Clock::time_point g_stick_since{};
+float g_stick_x = 0, g_stick_y = 0;  // the right stick, for the log
 
 double secs(Clock::duration d) { return std::chrono::duration<double>(d).count(); }
 std::string device_name(uint64_t id) {
@@ -349,18 +346,8 @@ bool drives_gamepad() {
 
 void right_stick(float x, float y) {
     std::lock_guard lk(g_mu);
-    const auto now = Clock::now();
-    const bool out = std::sqrt(x * x + y * y) > 0.1f;  // the game's dead zone (CalcSubjectAngle)
-    if (out && !g_stick_out) g_stick_since = now;
-    if (!out) g_stick_logged = false;
-    g_stick_out = out;
     g_stick_x = x;
     g_stick_y = y;
-    if (out && g_aiming && g_settings.source != kOff && !g_stick_logged && secs(now - g_stick_since) > 2.0) {
-        g_stick_logged = true;
-        log_msg("[gyro] the right stick has rested at %.2f, %.2f for 2 s while aiming: the game ignores the gyro until "
-                "it is back within 0.1 of the centre (stick drift? raise the stick dead zone in Controls)", x, y);
-    }
 }
 
 VpadMotion vpad(bool repeat) {
@@ -413,26 +400,20 @@ VpadMotion vpad(bool repeat) {
 }
 
 std::string status() {
-    std::string stick;
-    {
-        std::lock_guard lk(g_mu);
-        if (g_aiming && g_stick_out && g_settings.source != kOff)
-            stick = " The right stick is pushed: the game ignores the gyro until it is released.";
-    }
     if (settings().source == kCemuhook) {  // (g_dsu_mu without g_mu: see apply_dsu)
         std::lock_guard dl(g_dsu_mu);
-        return (g_dsu ? "Cemuhook: " + g_dsu->status() + "." : "Cemuhook: off.") + stick;
+        return (g_dsu ? "Cemuhook: " + g_dsu->status() + "." : "Cemuhook: off.");
     }
     std::lock_guard lk(g_mu);
     switch (g_settings.source) {
     case kController: {
         auto it = g_devices.find(g_active);
         if (it != g_devices.end() && secs(Clock::now() - it->second.seen) < 1.0)
-            return (it->second.fusion.calibrated() ? "Receiving motion." : "Receiving motion; calibrating (rest the controller for a second).") + stick;
+            return (it->second.fusion.calibrated() ? "Receiving motion." : "Receiving motion; calibrating (rest the controller for a second).");
         return g_gyro_controllers ? "A controller with a gyro is connected, no motion yet."
                                   : "No connected controller has a gyro (or this host cannot read it).";
     }
-    case kMouse: return (g_aiming ? "The game aims: the mouse turns the GamePad." : "Mouse gyro waits for the game to aim.") + stick;
+    case kMouse: return (g_aiming ? "The game aims: the mouse turns the GamePad." : "Mouse gyro waits for the game to aim.");
     default: return "Gyro off: the GamePad lies still.";
     }
 }

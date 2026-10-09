@@ -113,7 +113,7 @@ HLE(vpad, VPADRead) {
         p.buttons = 0;
         p.lx = p.ly = p.rx = p.ry = 0;
     } else if (!repeat) {
-        motion::right_stick(p.rx, p.ry);  // the game ignores the gyro while it is pushed (gyro diagnostics)
+        motion::right_stick(p.rx, p.ry);  // for the gyro log
     }
     uint32_t hold = p.buttons;
     auto stick_dirs = [&](float x, float y, uint32_t up, uint32_t down, uint32_t left, uint32_t right) {

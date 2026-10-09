@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
         setenv("WWHD_VK_DRAW_BATCH", "2048", 0);
         // 60 fps (frame interpolation) is on unless chosen otherwise (settings.ini, read when the
         // renderer starts); platform/perf_hint.cpp pauses it where the phone cannot keep up
-        if (!getenv("WWHD_INTERP") && !getenv("WWHD_TRUE60")) interp::set_mode(1);
+        if (!getenv("WWHD_INTERP")) interp::set_mode(1);
         // env.txt there: one NAME=value per line (the WWHD_ options of the README); # comments
         if (FILE* f = fopen("env.txt", "r")) {
             char line[512];

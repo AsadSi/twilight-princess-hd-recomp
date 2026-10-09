@@ -39,7 +39,6 @@ static uint64_t g_records = 0;      // record passes so far (the last hold pass 
 
 int mode() { return g_on ? 1 : 0; }
 void set_mode(int m) {
-    if (m == 2) LOG("[interp] true 60 is not available for TP HD");
     if (g_on.exchange(m == 1) != (m == 1)) LOG("[interp] frame interpolation %s", m == 1 ? "on" : "off");
 }
 int fps() { return g_fps; }
