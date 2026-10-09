@@ -4,6 +4,11 @@ The Vulkan renderer (by OpenAI Codex, originally the `vulcan` branch) translates
 Mac it runs on MoltenVK. The shader translator and texture addressing reuse the vendored Cemu
 components under MPL-2.0; Cemu's emulator runtime is not needed.
 
+It came with the Wind Waker HD fork and is kept for possible Windows and Linux builds. Twilight Princess HD
+has not run on it yet: since 2026-10-09 the Vulkan-only and both-renderer builds compile again, but no
+MoltenVK was installed to run them. The measurements below (Outset, Windfall and the other scenes, AO modes,
+true 60) were taken with Wind Waker HD before the fork.
+
 ## One app, two renderers (macOS)
 
 The default macOS build (`WWHD_RENDERER=BOTH`) contains the Metal renderer and the Vulkan renderer.
@@ -15,7 +20,7 @@ forward to the renderer chosen once at start-up:
 1. `--renderer=metal|vulkan` (or `--renderer metal|vulkan`) on the command line,
 2. `WWHD_RENDERER_RUNTIME=metal|vulkan` (tests),
 3. the saved choice from **Graphics > Renderer** (`renderer` in
-   `~/Library/Application Support/wwhd/display.plist`), which takes effect at the next start; the
+   `~/Library/Application Support/TPHD/display.plist`), which takes effect at the next start; the
    menu offers "Restart Now" (the game relaunches itself with the same arguments),
 4. Metal.
 
@@ -25,9 +30,9 @@ weak imports, so the app still starts without them), no driver (MoltenVK), no de
 rendering. `WWHD_VK_FORCE_INIT_FAIL=1` forces this path for testing.
 
 Both renderers use the same AppKit host (`gfx/display.mm`, `menu.mm`, `input.mm`,
-`controls_ui.mm`, `mods/mouse.mm`): TV and GamePad windows, full screen, GamePad screen modes
+`controls_ui.mm`): TV and GamePad windows, full screen, GamePad screen modes
 (separate window, picture-in-picture, automatic), scaling filters, aspect ratio, the Controls window,
-the Gameplay mods including the mouse camera, save states, 60 fps / true 60. Vulkan presents into
+save states, frame interpolation. Vulkan presents into
 the windows' views through a `CAMetalLayer` and `VK_EXT_metal_surface`; `display_plan()` gives it the
 same layout as the Metal composition (picture rectangle, GamePad overlay with frame and opacity,
 filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with the renderer in use.
@@ -36,12 +41,11 @@ filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with 
 | --- | --- | --- |
 | TV / GamePad windows, full screen, display modes, PiP, automatic PiP | yes | yes |
 | Scaling smooth / sharp / integer, FXAA | yes | yes |
-| Internal resolution, AO modes, full-size AO depth, 16x AF | yes | yes |
+| Internal resolution, 16x AF | yes | yes |
 | Aspect ratio (16:10, 21:9, 32:9, match window) | yes | yes |
-| 60 fps interpolation, true 60 | yes | yes |
+| Frame interpolation (60, 120, 240 fps) | yes | yes |
 | Save states (menu, Shift+F1..F5 / F1..F5) | yes | yes (a state loads with either renderer) |
-| Controls window, keyboard, game controllers, mouse camera, mods | yes | yes |
-| Climb mod stamina wheel | yes | yes (ported shader; not yet seen in a test run) |
+| Controls window, keyboard, game controllers, mod packages | yes | yes |
 | Frame dumps `WWHD_DUMP_FRAMES`, `WWHD_DUMP_PRESENT` | yes | yes |
 | Capture frame (P) | pictures + draw log | pictures only (no draw log) |
 | Shader head start (`--warm-shaders`) | yes | no (Vulkan keeps its own SPIR-V / pipeline caches) |
@@ -127,8 +131,8 @@ slot retains its command/descriptor pools and upload arena until its fence compl
 so memory use is higher than the original single-slot implementation.
 Geometry shaders, transform feedback, multisampled guest surfaces and some format
 conversions are rejected explicitly. Vulkan now provides live Graphics controls, including a
-macOS menu; other Metal-specific menus remain unported. SDL mouse capture and camera
-input are supported. MoltenVK devices without sampler LOD bias use zero bias,
+macOS menu; other Metal-specific menus remain unported. The SDL host captures the mouse
+only for the mouse gyro source (`docs/gyro.md`). MoltenVK devices without sampler LOD bias use zero bias,
 matching the existing Metal backend; native Vulkan devices retain the bias. Shader warmup/cache behavior differs from Metal.
 
 Vulkan keeps a persistent device pipeline cache under the host configuration
@@ -386,20 +390,14 @@ controls remain disabled until the renderer reports support.
 
 | Control | Behavior |
 | --- | --- |
-| `R` | Cycle internal resolution through 1×, 1.5×, 2×, and 3×: 1280×720, 1920×1080, 2560×1440, and 3840×2160. The menu also selects each preset directly. |
-| `O` | Cycle AO mode: 0 original Wii U behavior, 1 centre-depth filtering fix, 2 centre fix plus corrected noise tiling. |
-| `M` | Toggle full-size AO depth. A private 1.5× replay of the game's depth-downsample pass supplies the AO pass without changing guest surface metadata. |
+| `R` | Cycle internal resolution through 1×, 1.33×, 1.5×, and 2×: 1920×1080, 2560×1440, 2880×1620, and 3840×2160. The menu also selects each preset directly. |
 | `N` | Toggle anisotropic filtering up to 16×, bounded by device support, for eligible mipmapped asset textures. |
 | `8` | Toggle FXAA in final screen presentation. This is post-process antialiasing; it does not enable multisampled guest surfaces. |
-| `6` | Toggle 60 FPS interpolation mode. |
-| `7` | Toggle true 60 FPS mode. Selecting either mode does not guarantee its target frame rate. |
+| `6` | Toggle 60 FPS interpolation mode. Selecting it does not guarantee its target frame rate. |
 | Graphics menu: Scaling | Select smooth, sharp, or integer scaling for presentation. |
 
 Startup overrides match Metal: `WWHD_RES_SCALE` selects the initial internal scale
-(1–4); `WWHD_AO_MODE` selects AO mode 0–2. If `WWHD_AO_MODE` is absent, presence of
-`WWHD_NO_AO_QUIRK` selects mode 0, otherwise mode 2 is the default. The explicit AO
-mode takes precedence over the legacy flag, whose value is ignored.
-`WWHD_AO_HIRES` defaults to on (off on Android, where the phone GPU is the limit in heavy views, issue #56); `0` disables it, `1` enables it. `WWHD_ANISO` defaults to off and a
+(1–4). `WWHD_ANISO` defaults to off and a
 nonzero value enables it. `WWHD_FXAA` defaults to off and its presence enables it,
 including a value of `0`, matching Metal's existing behavior.
 `WWHD_SCALE_FILTER=smooth|sharp|integer` selects the initial presentation filter;
@@ -595,15 +593,15 @@ invariance prevents multipass depth artifacts on Link. All 195 captured vertex
 shader variants passed SPIR-V compilation with invariant position outputs.
 Earlier validation runs reported unused fragment outputs during depth-only passes;
 the final gameplay validation run above reported no warnings.
-Broader gameplay and devices remain to be validated. On Linux (Ubuntu 24.04, Clang 18) the
+Broader gameplay and devices remain to be validated. Upstream's CI (before the fork; its workflows
+were not kept) showed: on Linux (Ubuntu 24.04, Clang 18) the
 executable builds without warnings and links against placeholder guest code
 (`tools/recomp/stubgen.py`), the unit tests pass and `--renderer-smoke` passes on Mesa lavapipe with
-the Khronos validation layer reporting nothing (`.github/workflows/linux.yml`); gameplay on Linux
+the Khronos validation layer reporting nothing; gameplay on Linux
 needs your own recompiled game and remains to be tested. On Windows (x86_64, Clang/MinGW: llvm-mingw
 or MSYS2 CLANG64) the executable builds and links, the unit
-tests pass, and `--renderer-smoke` passes under Wine with lavapipe (`.github/workflows/windows.yml`
-builds and runs the tests natively); a run on Windows hardware with a GPU and gameplay remain to be
-tested.
+tests pass, and `--renderer-smoke` passes under Wine with lavapipe (the tests also ran natively);
+a run on Windows hardware with a GPU and gameplay remain to be tested.
 
 For an isolated capture, set `WWHD_CAPTURE_PATH` to the PNG output path and
 `WWHD_CAPTURE` to the renderer frame number (default120). Keep these artifacts

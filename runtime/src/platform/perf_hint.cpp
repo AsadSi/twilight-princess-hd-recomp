@@ -138,7 +138,7 @@ void set_fps60_chosen(bool on) {
 // fast ones idled at 1 GHz; the render thread's CPU time limits the frame rate in the open world.
 // At least two cores: a Snapdragon 8 Gen 3 has one 3.3 GHz core, and with every game thread on it
 // the agl boot crash happened on every start (the render thread ran GX2CopySurface late; fixed in
-// GX2CopySurface, docs/decomp-notes.md "Fixed: intermittent boot crash"); the next clock steps are
+// GX2CopySurface, gx2/gx2_core.cpp); the next clock steps are
 // added until there are two or more.
 static cpu_set_t fastest_cores(int& count) {
     cpu_set_t set;

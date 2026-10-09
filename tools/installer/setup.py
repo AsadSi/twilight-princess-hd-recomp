@@ -8,8 +8,9 @@ disc dump:
      already extracted game folder;
   2. extracts the game files (tools/bin/wwhd-extract);
   3. translates the game's PowerPC code to C (tools/recomp/recomp.py);
-  4. compiles that code with a C compiler (Apple's Command Line Tools on macOS, a pinned llvm-mingw
-     on Windows, a pinned zig toolchain on Linux; downloaded and checked automatically);
+  4. compiles that code with a C compiler: Apple's Command Line Tools on macOS (Apple's installer is
+     offered when they are missing); a Windows or Linux release (Vulkan builds) downloads its pinned
+     llvm-mingw or zig toolchain and checks it against its SHA-256;
   5. links it with the prebuilt runtime (sdk/) into the game executable and starts it.
 
 Run it again to play, to repair the installation, or to update after downloading a new release.

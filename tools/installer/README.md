@@ -93,7 +93,7 @@ unmodified in `tools/python`: the release workflow downloads the pinned zip, `to
 and unpacks it, and `tools/release/guard.py` allows exactly those files there. Its programs and DLLs keep
 the Python Software Foundation's signature (the release workflow checks it); its license is in
 `third-party-licenses/Python.txt`. It lives in the release folder, not in the data folder, because it belongs
-to the release (like `tools/` and `sdk/`): the same place works for portable and per-user (`%LOCALAPPDATA%\WWHD`)
+to the release (like `tools/` and `sdk/`): the same place works for portable and per-user (`%LOCALAPPDATA%\TPHD`)
 installations and for `--data-dir`/`WWHD_DATA_DIR`, and a newer release brings its own.
 
 `Twilight Princess HD.exe` starts `tools\python\python.exe tools\installer\setup.py --gui-protocol` directly

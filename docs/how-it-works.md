@@ -1,6 +1,6 @@
 # How this port works, and how it differs from emulating with Cemu
 
-Cemu and this port run the same game binary (`cking.rpx`) on a Mac. Cemu emulates the Wii U well
+Cemu and this port run the same game binary (`Zelda.rpx`) on a Mac. Cemu emulates the Wii U well
 enough to run the original code as if it were on the console. This port translates the game's code
 into a native macOS program ahead of time and replaces everything around it (operating system,
 graphics, audio, input) with native implementations of the APIs the game calls.
@@ -39,8 +39,7 @@ function (`build/gen/code_*.c`):
   - `sync`/`lwsync`/`eieio` emit real memory barriers, because Apple Silicon reorders memory
     accesses between cores more aggressively than the Espresso.
 
-The result is ordinary native code. The game's main thread needs about 4 ms of CPU per frame on an
-M3 (the console budget is 33 ms), and there is no JIT warm-up or translation stutter.
+The result is ordinary native code, with no JIT warm-up or translation stutter.
 
 ## The operating system: native implementations of Cafe OS
 
@@ -88,7 +87,7 @@ packets, rebuilds GPU register state, and translates draws to a host graphics AP
    - tracks which memory the GPU has written;
    - renders into Metal textures, including texture-array targets for shadow cascades.
 3. Shaders (Latte microcode) are translated to Metal Shading Language with Cemu's decompiler. Every
-   translated shader and pipeline is recorded in `~/Library/Caches/wwhd/shaders.bin`; later launches
+   translated shader and pipeline is recorded in `~/Library/Caches/tphd/shaders.bin`; later launches
    replay it at startup, compiling in the background and on first use.
 4. Presentation models the display: 60 Hz vsync, the game's swap interval (30 fps), and an sRGB TV
    buffer. The TV and GamePad screens are separate windows.

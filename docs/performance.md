@@ -2,6 +2,10 @@
 
 Measurements and fixes from profiling the port on an Apple Silicon Mac, plus open leads.
 
+Everything measured here was measured with Wind Waker HD before the fork: Outset and Windfall are its
+places, the AO modes and true 60 its features. The fixes are in the shared runtime and renderers.
+Twilight Princess HD has not been profiled this way yet.
+
 ## Native Windows checkpoint (2026-10-05)
 
 Use `-DCMAKE_BUILD_TYPE=Release` with native LLVM/Ninja. The previous Windows
@@ -85,16 +89,15 @@ Run a scripted session, then sample it with macOS `sample` (1 ms stacks for ever
 
 ```sh
 # copy the save and shader cache so the test can't touch your real ones
-cp -R save /tmp/wwhd-save; cp ~/Library/Caches/wwhd/shaders.bin /tmp/shaders.bin
+cp -R save /tmp/wwhd-save; cp ~/Library/Caches/tphd/shaders.bin /tmp/shaders.bin
 WWHD_SHADER_CACHE=/tmp/shaders.bin \
-WWHD_PRESS=600-610:8000,900-910:8000,1200-1210:8000,1500-1510:8000 \
-WWHD_STATE_LOAD_AT=1800:2 WWHD_DUMP_FRAMES=2400 \
+WWHD_STATE_LOAD_AT=60:2 WWHD_DUMP_FRAMES=600 \
 ./build/cmake/wwhd --save /tmp/wwhd-save > run.log 2>&1 &
 sleep 45; sample $! 20 -file sample.txt; kill $!
 ```
 
-`WWHD_PRESS` presses A to get past the title screen, `WWHD_STATE_LOAD_AT=1800:2` loads save-state
-slot 2 at TV frame 1800, and `WWHD_DUMP_FRAMES=2400` writes `frame_2400.png` (in the working
+`WWHD_STATE_LOAD_AT=60:2` loads save-state slot 2 at TV frame 60 (as `tools/audit/run_route.sh` does with
+`LOAD=2`), and `WWHD_DUMP_FRAMES=600` writes `frame_600.png` (in the working
 directory) to check that the run still renders correctly. The "Sort by top of stack" section of
 `sample.txt` shows where the CPU time goes. `run.log` prints the shader and pipeline counts every
 few seconds.
@@ -112,7 +115,8 @@ tools/bench/run_bench.py --binary build/cmake/wwhd --state-dir my_states --scene
 ```
 
 `--state-dir` holds `slot<N>.bin` files made with the game's save-state keys (outset: slot 3,
-windfall: slot 2, or `--slot`). `--fps 30|60|120|240|true60`, `--display-hz n` (the refresh rate
+windfall: slot 2, or `--slot`; both scenes and their scripted walks are Wind Waker HD's, TP HD has none yet).
+`--fps 30|60|120|240`, `--display-hz n` (the refresh rate
 120/240 fps are capped to; 0: no cap, for hidden-window runs), `--uncapped` (throughput),
 `--renderer metal`.
 The state is loaded at TV frame 450 (A presses from frame 120 skip the intro), the input starts 200
