@@ -372,6 +372,46 @@ static void move_drc_to_screen(NSScreen* s) {
     set_setting(@"drcScreen", s.localizedName);
 }
 
+// The Dock icon: the game's own (meta/iconTex.tga of the game folder, an uncompressed 32-bit TGA, 128x128) on
+// macOS's icon grid (a rounded square 824/1024 of the canvas, corner radius 185/824 of its side, a soft shadow), as
+// an app bundle's would be. Without it the Dock shows a plain executable's icon.
+static void set_dock_icon() {
+    NSData* d = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:(config::game_dir + "/meta/iconTex.tga").c_str()]];
+    const uint8_t* p = (const uint8_t*)d.bytes;
+    if (d.length < 18 || p[1] != 0 || p[2] != 2 || p[16] != 32) return;  // no colour map, true colour, 32 bpp
+    const int w = p[12] | p[13] << 8, h = p[14] | p[15] << 8;
+    const size_t start = 18 + p[0];
+    if (!w || !h || w > 1024 || h > 1024 || d.length < start + size_t(w) * h * 4) return;
+    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:nullptr pixelsWide:w pixelsHigh:h bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+                  colorSpaceName:NSDeviceRGBColorSpace bitmapFormat:NSBitmapFormatAlphaNonpremultiplied bytesPerRow:w * 4
+                    bitsPerPixel:32];
+    for (int y = 0; y < h; y++) {  // BGRA rows, bottom first unless the descriptor says top first
+        const uint8_t* src = p + start + size_t((p[17] & 0x20) ? y : h - 1 - y) * w * 4;
+        uint8_t* dst = rep.bitmapData + size_t(y) * rep.bytesPerRow;
+        for (int x = 0; x < w; x++) dst[4 * x] = src[4 * x + 2], dst[4 * x + 1] = src[4 * x + 1], dst[4 * x + 2] = src[4 * x], dst[4 * x + 3] = src[4 * x + 3];
+    }
+    const CGFloat size = 512, side = size * 824 / 1024, radius = side * 185 / 824;
+    NSApp.applicationIconImage = [NSImage imageWithSize:NSMakeSize(size, size) flipped:NO drawingHandler:^BOOL(NSRect) {
+        const NSRect r = NSMakeRect((size - side) / 2, (size - side) / 2 + size * 0.01, side, side);
+        NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius];
+        [NSGraphicsContext saveGraphicsState];
+        NSShadow* shadow = [NSShadow new];
+        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.3];
+        shadow.shadowBlurRadius = size * 0.02;
+        shadow.shadowOffset = NSMakeSize(0, -size * 0.01);
+        [shadow set];
+        [[NSColor blackColor] setFill];
+        [shape fill];
+        [NSGraphicsContext restoreGraphicsState];
+        [shape addClip];
+        CGContextRef cg = NSGraphicsContext.currentContext.CGContext;
+        CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);  // smooth: the source is 128 pixels
+        CGContextDrawImage(cg, r, rep.CGImage);
+        return YES;
+    }];
+}
+
 static void create_windows() {
     static bool done = false;  // once, whichever renderer starts (a failed Vulkan start falls back to Metal)
     if (done) return;
@@ -386,6 +426,7 @@ static void create_windows() {
     // keyboard focus from the user's game
     bool test = getenv("WWHD_NO_HOST_INPUT") != nullptr;
     [NSApp setActivationPolicy:test ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
+    set_dock_icon();
     load_settings();
     load_options();
     NSWindow* tv = make_window(0, @"Twilight Princess HD: Recompiled",
