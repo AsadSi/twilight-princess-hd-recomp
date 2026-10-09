@@ -73,7 +73,8 @@ int main(int argc, char** argv) {
         std::ofstream(pack/"content"/"res"/"Object"/"fixture.arc")<<"synthetic replacement";
         fs::create_directories(pack/"content"/"res"/"Msgus");std::ofstream(pack/"content"/"res"/"Msgus"/"bmgres.arc")<<"RARCsynthetic translation";
         std::ofstream(pack/"manifest.json")<<R"({"format_version":1,"id":"content.test","name":"Test","version":"1.0.0","game_id":"tphd-usa","kind":"content","content_dir":"content"})";
-        std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"content.test":true}}}})";
+        // a profile saved before 2026-10-09 still has Wind Waker's built-in mod choices: ignored
+        std::ofstream(storage/"profiles.json")<<R"({"format_version":1,"active":"Default","profiles":{"Default":{"enabled":{"content.test":true},"builtins":{"quick-doors":true}}}})";
         env("WWHD_NO_HOST_INPUT","1");env("WWHD_MOD_MANAGER_DIR",storage.string().c_str());
         assert(mods::content::replacement("/vol/content/res/Object/fixture.arc").empty());initialize();
         auto file=mods::content::replacement("/vol/content/RES/object/FIXTURE.arc");assert(file==(pack/"content"/"res"/"Object"/"fixture.arc").string());
