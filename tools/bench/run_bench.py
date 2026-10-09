@@ -6,16 +6,15 @@ Every run uses a fresh COPY of the save, the given save-state folder (read only:
 loaded, never written), its own shader caches and settings files, no audio, no gamepad and no host
 input. One game process at a time; it is stopped with TERM, then KILL, and checked to be gone.
 
-Example (two variants, interleaved A B B A ..., 6 runs each, 60 fps interpolation, Vulkan):
+Example (two variants, interleaved A B B A ..., 6 runs each, 60 fps interpolation, Metal):
 
-  tools/bench/run_bench.py --binary build/wwhd --state-dir my_states --scene outset \\
-      --fps 60 --renderer vulkan --runs 6 --out bench/sync \\
-      --variant base:WWHD_VK_LAZY_DRAW_DONE=0,WWHD_VK_ASYNC_PRESENT=0 --variant new:
+  tools/bench/run_bench.py --binary build/cmake-tphd/wwhd --state-dir build/audit/states --scene ordon \\
+      --fps 60 --runs 6 --out build/bench/sharp --variant base: --variant sharp:WWHD_SHARPNESS=sharpest
 
 Scenes (input is timed in game seconds from TV frame --origin, so 30 and 60 fps runs see the same
-input): outset = walk and look around on Outset Island (state slot 3 by default), windfall = walk
-through Windfall town (slot 2), still = no input (any slot). The state file must be
-<state-dir>/slot<N>.bin, made with the game's own save-state keys.
+input): ordon = walk and look around near Link's house (state slot 1 by default: first control, as
+tools/audit's), river = turn the camera at the Ordon river (slot 3), still = no input (any slot). The
+state file must be <state-dir>/slot<N>.bin (WWHD_STATE_SAVE_AT, or the game's own save-state keys).
 """
 import argparse
 import csv
@@ -33,8 +32,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 SCENES = {
     # slot, left stick (from-to seconds : x : y), right stick
-    "outset": (3, "0-13:0:1,13-23:1:0.5,23-36:0:-1,36-46:-1:0,46-63:0:1", "20-30:1:0,53-60:-1:0"),
-    "windfall": (2, "0-10:0:1,10-20:1:0,20-33:0:-1,33-43:-1:0,43-56:0:1", "13-23:1:0,46-53:-1:0"),
+    "ordon": (1, "0-6:0:1,6-9:1:0,9-15:0:1,19-25:0:-1,25-31:-1:0,31-37:0:1", "15-19:1:0,40-50:-1:0"),
+    "river": (3, "", "0-12:1:0,24-36:-1:0"),
     "still": (1, "", ""),
 }
 
@@ -130,7 +129,7 @@ def parse_prof(lines):
                 cur["copied_" + name + "_mib"] = float(c)
         elif body.startswith("draw classes"):
             m = re.match(r"draw classes: " + NUM + r"% same registers, " + NUM + r"% only buffer pointers/ALU constants, " +
-                         NUM + r"% other \(" + NUM + " draws/frame\)", body)
+                         NUM + r"% other \(" + NUM + r" draws/frame\)", body)
             if m:
                 cur["draws_same_pct"], cur["draws_fast_pct"] = float(m.group(1)), float(m.group(2))
                 cur["draws_other_pct"], cur["draws_per_frame"] = float(m.group(3)), float(m.group(4))
@@ -181,14 +180,10 @@ def run_once(args, variant, env_extra, index, out_dir):
         env["WWHD_TEST_RSTICK"] = rstick
     if args.renderer == "vulkan":
         env["WWHD_VK_CPU_ONLY_STATS"] = "1"
-    if args.fps in ("60", "120", "240"):
-        env["WWHD_INTERP_AT_STEP"] = str(load_at + 60)
-        if args.fps != "60":  # the rate, without switching interpolation on before the step above
-            env["WWHD_INTERP"], env["WWHD_INTERP_FPS"] = "0", args.fps
+    if args.fps != "30":
+        env["WWHD_INTERP"], env["WWHD_INTERP_FPS"] = "1", args.fps
     if args.display_hz is not None:
         env["WWHD_DISPLAY_HZ"] = str(args.display_hz)
-    elif args.fps == "true60":
-        env["WWHD_TRUE60_AT_STEP"] = str(load_at + 60)
     if args.uncapped:
         env["WWHD_VK_UNCAPPED"] = "1"
     env.update(env_extra)
@@ -223,12 +218,11 @@ def run_once(args, variant, env_extra, index, out_dir):
     shutil.rmtree(os.path.join(run_dir, "save"), ignore_errors=True)
     with open(os.path.join(run_dir, "log"), errors="replace") as f:
         lines = f.read().splitlines()
-    loaded = next((i for i, l in enumerate(lines) if "Loaded slot" in l), None)
+    loaded = next((i for i, l in enumerate(lines) if "restored in" in l), None)
     if loaded is None and status == "ok":
         status = "no state load"
     windows = parse_prof(lines[loaded:] if loaded is not None else [])
     windows = windows[args.skip_windows:]
-    paced = [float(m.group(1)) for l in lines[loaded or 0:] for m in [re.search(r"\[interp\] paced: " + NUM + "% of in-between", l)] if m]
     steps = [(float(m.group(1)), float(m.group(2))) for l in lines[loaded or 0:]
              for m in [re.search(r"\[interp\] " + NUM + r" logic steps/s \([^,]*, " + NUM + " frames per step", l)] if m]
     pacing = [float(m.group(1)) for l in lines[loaded or 0:] for m in [re.search(r"\[vulkan pacing\].*p95 " + NUM, l)] if m]
@@ -237,8 +231,6 @@ def run_once(args, variant, env_extra, index, out_dir):
               "summary": summarize(windows) if windows else {}}
     if pacing:
         result["summary"]["vulkan_pacing_p95_ms"] = statistics.fmean(pacing[args.skip_windows:] or pacing)
-    if paced:  # paced interpolation: share of in-between frames drawn, per 300 steps
-        result["summary"]["paced_drawn_pct"] = statistics.fmean(paced[1:] or paced)
     if steps:  # frame interpolation's own count: logic steps/s and frames per step, per 300 steps
         result["summary"]["interp_frames_per_step"] = statistics.fmean(f for _, f in (steps[1:] or steps))
     with open(os.path.join(run_dir, "result.json"), "w") as f:
@@ -252,23 +244,22 @@ def main():
     p.add_argument("--game", default=os.path.join(REPO, "game"), help="extracted game folder (default: <repo>/game)")
     p.add_argument("--save", default=os.path.join(REPO, "save"), help="save folder, copied for every run (default: <repo>/save)")
     p.add_argument("--state-dir", required=True, help="folder with slot<N>.bin save states (read only)")
-    p.add_argument("--scene", choices=sorted(SCENES), default="outset")
+    p.add_argument("--scene", choices=sorted(SCENES), default="ordon")
     p.add_argument("--slot", type=int, default=0, help="state slot (default: the scene's)")
-    p.add_argument("--fps", choices=["30", "60", "120", "240", "true60"], default="30",
-                   help="60, 120, 240 = frame interpolation (120/240: paced unless WWHD_INTERP_PACED=0)")
+    p.add_argument("--fps", choices=["30", "60", "120", "240"], default="30", help="60, 120, 240 = frame interpolation")
     p.add_argument("--display-hz", type=int, help="WWHD_DISPLAY_HZ: the display refresh rate frame interpolation is "
                    "capped to (0: no cap; default: the detected one, e.g. 120 on a ProMotion Mac)")
-    p.add_argument("--renderer", choices=["vulkan", "metal"], default="vulkan")
+    p.add_argument("--renderer", choices=["metal", "vulkan"], default="metal")
     p.add_argument("--visible", action="store_true",
                    help="show the game windows (presentation, swapchain and vsync pacing are only exercised then)")
     p.add_argument("--uncapped", action="store_true", help="WWHD_VK_UNCAPPED=1: throughput, not gameplay pacing")
     p.add_argument("--seconds", type=float, default=60, help="scenario length in game seconds after --origin")
-    # the state load restores the whole game state, so it only needs the boot to have finished; A
-    # presses from frame 120 skip the intro and title (validated 2026-10-07 at loads 360 and 600)
-    p.add_argument("--load-frame", type=int, default=450, help="TV frame of the state load")
-    p.add_argument("--origin", type=int, default=650, help="TV frame where the scripted input starts")
+    # the state load restores the whole game state; it takes only when the boot's threads wait where the saved
+    # ones did, so early (TV frame 60, as tools/audit/run_route.sh) and retried (below) when it doesn't
+    p.add_argument("--load-frame", type=int, default=60, help="TV frame of the state load")
+    p.add_argument("--origin", type=int, default=150, help="TV frame where the scripted input starts")
     p.add_argument("--press-from", type=int, default=120,
-                   help="first TV frame of the A presses through the intro and title (-1: load frame - 300)")
+                   help="first TV frame of A presses before the load (none by default; -1: load frame - 300)")
     p.add_argument("--press-every", type=int, default=30, help="frames between A presses")
     p.add_argument("--skip-windows", type=int, default=2, help="120-frame reports after the load to ignore (warm-up)")
     p.add_argument("--variant", action="append", default=[], metavar="NAME:K=V,K=V",
@@ -331,7 +322,7 @@ def main():
                 row += [("%.4g" % s[x]) if s else "" for x in ("median", "min", "max", "n")] if s else ["", "", "", ""]
             w.writerow(row)
     for k in ("frame_ms", "swaps_per_s", "logic_steps_per_s", "render_cpu_ms", "render_idle_ms", "wait_gpu_ms",
-              "game_wait_DrawDone_ms", "paced_drawn_pct", "interp_frames_per_step", "upload_mib", "draws_per_frame"):
+              "game_wait_DrawDone_ms", "interp_frames_per_step", "upload_mib", "draws_per_frame"):
         if any(k in t for t in table.values()):
             print("%-24s %s" % (k, "  ".join("%s %.2f [%.2f..%.2f]" % (n, table[n][k]["median"], table[n][k]["min"], table[n][k]["max"])
                                             for n, _ in variants if k in table[n])))

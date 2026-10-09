@@ -109,18 +109,19 @@ and vsync pacing need) from a save state with scripted input, one game at a time
 of the save and its own caches and settings files. A/B variants run interleaved:
 
 ```sh
-tools/bench/run_bench.py --binary build/cmake/wwhd --state-dir my_states --scene outset \
-    --fps 60 --renderer vulkan --runs 6 --out build/bench/sync \
-    --variant old:WWHD_VK_LAZY_DRAW_DONE=0,WWHD_VK_ASYNC_PRESENT=0 --variant new:
+tools/bench/run_bench.py --binary build/cmake-tphd/wwhd --state-dir build/audit/states --scene ordon \
+    --fps 60 --runs 6 --out build/bench/sharp --variant base: --variant sharp:WWHD_SHARPNESS=sharpest
 ```
 
-`--state-dir` holds `slot<N>.bin` files made with the game's save-state keys (outset: slot 3,
-windfall: slot 2, or `--slot`; both scenes and their scripted walks are Wind Waker HD's, TP HD has none yet).
+`--state-dir` holds `slot<N>.bin` save states (ordon: slot 1, Link's house at first control, a walk and a look
+around; river: slot 3, the camera turning at the Ordon river; still: any slot, no input; or `--slot`), as
+`tools/audit` takes them (`WWHD_STATE_SAVE_AT`). Checked 2026-10-09: ordon at 60 fps, hidden windows, 59.9
+swaps/s and 30.0 logic steps/s.
 `--fps 30|60|120|240`, `--display-hz n` (the refresh rate
 120/240 fps are capped to; 0: no cap, for hidden-window runs), `--uncapped` (throughput),
-`--renderer metal`.
-The state is loaded at TV frame 450 (A presses from frame 120 skip the intro), the input starts 200
-frames later and is timed in game seconds, so 30 and 60 fps runs see the same input. Each run's
+`--renderer vulkan` (Metal by default).
+The state is loaded at TV frame 60 (a run whose state does not load is retried), the input starts at frame
+150 and is timed in game seconds, so 30 and 60 fps runs see the same input. Each run's
 `[prof]` reports (render-thread profiler, `docs/vulkan.md`) after two warm-up windows are averaged;
 `summary.json` / `summary.csv` hold the per-variant median, min, max and spread of frame time,
 swaps/s, logic steps/s, render-thread CPU and per-phase ms, GPU waits, game-thread waits, uploads by
