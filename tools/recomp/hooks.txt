@@ -11,6 +11,8 @@
 # frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
 028E13CC  # camera_draw
 02B5CF50  # J3DModel::viewCalc
+02B5C544  # J3DModel::calcMaterial
+02B58040  # J3DMaterialAnm::calc
 02B17008  # JPAEmitterManager::draw
 02AC08B4  # dScnPly_Draw
 02AF0A98  # main01: pad read
@@ -25,6 +27,7 @@
 0290DD38  # fpcM_Management, after execute
 02ACD0A8  # fapGm_After
 02BEF838  # cCt_Counter
+02B520C4  # J3DFrameCtrl::update (in some actors' draw)
 02902B4C  # dComIfG_Ccsp()->Move()
 028C2AB0  # dComIfG_Bgsp().ClrMoveFlag()
 02ACC800  # vibration Run

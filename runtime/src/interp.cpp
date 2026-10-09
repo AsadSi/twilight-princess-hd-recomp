@@ -9,9 +9,11 @@
 //   hold pass k:    no logic; draws at t = (k+1)/(N+1); the last (k = N) draws S+1 exactly and records it as
 //                   the next step's "before"
 // Blended: the camera (camera_draw 028E13CC: the view's eye, center, up, fovy, bank) and every J3D model
-// (J3DModel::viewCalc 02B5CF50: its world and envelope matrices), particles and the 2D panes' own matrices and
-// alpha (below). The rest (screen effects, a 2D screen's root, texture and color animation) moves at 30 Hz.
+// (J3DModel::viewCalc 02B5CF50: its world and envelope matrices), models' material animation (texture scrolls and
+// patterns, material and TEV colors), particles and the 2D panes' own matrices and alpha (below). The rest (screen
+// effects, a 2D screen's root, 2D texture and color animation) moves at 30 Hz.
 // The addresses come from the decomp's structure (docs/brief.md, 60 fps groundwork).
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -179,10 +181,13 @@ std::unordered_map<uint32_t, CamPrev> g_cams;
 struct ModelPrev {
     uint64_t pass = 0;  // the record pass that recorded it
     uint32_t anm = 0, wev = 0, n = 0, w = 0;
-    std::vector<uint32_t> m;  // the guest words (big-endian floats) of the world, then the envelope matrices
+    std::vector<uint32_t> m;      // the guest words (big-endian floats) of the world, then the envelope matrices
+    std::vector<uint32_t> exact;  // the step's own, while the blended ones wait for the painter
+    uint64_t held = ~0ull;        // the pass that left it blended
 };
 std::unordered_map<uint32_t, ModelPrev> g_models;
-std::vector<uint32_t> g_cur;
+std::vector<uint32_t> g_held;  // models left blended
+uint64_t g_passes = 0;
 
 void read_words(uint32_t at, uint32_t count, uint32_t* out) { memcpy(out, mem::ptr(at), count * 4); }
 float bf(uint32_t w) {
@@ -220,6 +225,13 @@ struct PanePrev {
     uint8_t alpha = 0;
 };
 std::unordered_map<uint32_t, PanePrev> g_panes;
+// a material animation's frame in one model, keyed by model << 32 | animation
+struct AnmPrev {
+    uint64_t pass = 0;
+    float frame = 0;
+};
+std::unordered_map<uint64_t, AnmPrev> g_anms;
+uint32_t g_calc_model = 0;  // the model whose materials J3DModel::calcMaterial is calculating
 }  // namespace
 
 }  // namespace interp
@@ -273,22 +285,89 @@ extern "C" void hook_02B5CF50(Cpu* c) {
         if (w) read_words(wev, w * 12, p.m.data() + n * 12);
         return;
     }
-    // blended: only from the step's "before" (the last record pass, counted once it ended), with the same matrices
-    if (p.pass + 1 != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w) return f_02B5CF50_orig(c);
-    g_cur.resize((n + w) * 12);
-    read_words(anm, n * 12, g_cur.data());
-    if (w) read_words(wev, w * 12, g_cur.data() + n * 12);
+    // blended: only from the step's "before" (the last record pass, counted once it ended), with the same matrices;
+    // a model drawn again in the pass has its blend already
+    if (p.pass + 1 != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w || p.held == g_passes)
+        return f_02B5CF50_orig(c);
+    p.exact.resize((n + w) * 12);
+    read_words(anm, n * 12, p.exact.data());
+    if (w) read_words(wev, w * 12, p.exact.data() + n * 12);
     const float t = pass_t();
-    bool blended = blend_into(anm, p.m.data(), g_cur.data(), n, t);
-    if (blended && w && !blend_into(wev, p.m.data() + n * 12, g_cur.data() + n * 12, w, t)) blended = false;
+    bool blended = blend_into(anm, p.m.data(), p.exact.data(), n, t);
+    if (blended && w && !blend_into(wev, p.m.data() + n * 12, p.exact.data() + n * 12, w, t)) blended = false;
     if (!blended) {  // a teleport: draw the step exactly
-        memcpy(mem::ptr(anm), g_cur.data(), n * 48);
-        if (w) memcpy(mem::ptr(wev), g_cur.data() + n * 12, w * 48);
+        memcpy(mem::ptr(anm), p.exact.data(), n * 48);
+        if (w) memcpy(mem::ptr(wev), p.exact.data() + n * 12, w * 48);
         return f_02B5CF50_orig(c);
     }
     f_02B5CF50_orig(c);
-    memcpy(mem::ptr(anm), g_cur.data(), n * 48);
-    if (w) memcpy(mem::ptr(wev), g_cur.data() + n * 12, w * 48);
+    p.held = g_passes;
+    g_held.push_back(model);
+}
+
+// Skinned models are drawn from their world and envelope matrices by the painter at the start of the next pass, so
+// the blended ones stay until then; the step's own come back right after it, before the pass's logic and draws
+// (fpcDt_Handler, the first handler after the painter).
+static void restore_models() {
+    using namespace interp;
+    for (const uint32_t model : g_held) {
+        const ModelPrev& p = g_models[model];
+        memcpy(mem::ptr(p.anm), p.exact.data(), p.n * 48);
+        if (p.w) memcpy(mem::ptr(p.wev), p.exact.data() + p.n * 12, p.w * 48);
+    }
+    g_held.clear();
+    if (g_models.size() > 4096) g_models.clear();  // models are freed with their actors: drop old records
+}
+
+// J3DModel::calcMaterial(J3DModel*), in the draw: it calls each animated material's J3DMaterialAnm::calc (below)
+extern "C" void f_02B5C544_orig(Cpu* c);
+extern "C" void hook_02B5C544(Cpu* c) {
+    interp::g_calc_model = c->r[3];
+    f_02B5C544_orig(c);
+    interp::g_calc_model = 0;
+}
+
+// J3DMaterialAnm::calc(material anm, material): texture scrolls (SRT), texture patterns, material and TEV colors at
+// their animations' frames, which the actors set in their draw from frame counters that execute advances. The
+// entries ({index u16, on u16, animation}): material colors 2 at +0x00 (8 apart), texture matrices 8 at +0x10,
+// texture numbers 8 at +0x50 (12 apart), TEV colors 4 at +0xB0, TEV konst colors 4 at +0xD0. An animation
+// (J3DAnmBase): frame count s16 +0x02, frame f32 +0x04. Blended like models, per model (actors share animations):
+// a frame that went forward by up to 4 (wrapping at the frame count) draws between; stopped, reversed or jumped
+// draws as it is.
+extern "C" void f_02B58040_orig(Cpu* c);
+extern "C" void hook_02B58040(Cpu* c) {
+    using namespace interp;
+    if (!g_on || !g_calc_model) return f_02B58040_orig(c);
+    const uint32_t ma = c->r[3];
+    uint32_t anms[26], n = 0, saved[26];
+    auto add = [&](uint32_t e) {
+        if (!ld16(e + 2)) return;
+        const uint32_t a = ld32(e + 4);
+        if (a && std::find(anms, anms + n, a) == anms + n) anms[n++] = a;
+    };
+    for (uint32_t i = 0; i < 2; i++) add(ma + 8 * i);
+    for (uint32_t i = 0; i < 8; i++) add(ma + 0x10 + 8 * i), add(ma + 0x50 + 12 * i);
+    for (uint32_t i = 0; i < 8; i++) add(ma + 0xB0 + 8 * i);
+    const float t = pass_t();
+    for (uint32_t i = 0; i < n; i++) {
+        const uint32_t a = anms[i];
+        saved[i] = ld32(a + 4);
+        AnmPrev& p = g_anms[uint64_t(g_calc_model) << 32 | a];
+        const float cur = u32_as_f32(saved[i]), count = (int16_t)ld16(a + 2);
+        if (record_pass()) {
+            p = {g_records, cur};
+            continue;
+        }
+        if (p.pass + 1 != g_records) continue;
+        float d = cur - p.frame;
+        if (d < 0) d += count;
+        if (d <= 0 || d > 4) continue;
+        float f = p.frame + d * t;
+        if (f >= count) f -= count;
+        stf32(a + 4, f);
+    }
+    f_02B58040_orig(c);
+    for (uint32_t i = 0; i < n; i++) st32(anms[i] + 4, saved[i]);
 }
 
 // JPAEmitterManager::draw(manager, draw info, group), from the painter at the start of a pass. Particles move only
@@ -363,9 +442,10 @@ void interp::blend_pane(uint32_t pane, std::vector<std::pair<uint32_t, uint32_t>
 
 // ---------------------------------------------------------------- the pass structure
 // Hold passes skip the step's logic: in main01's loop, the pad read, audio and HD systems; in fpcM_Management,
-// the delete, priority and create handlers (which report success), execute, the post callback (fapGm_After) and
-// cCt_Counter; in the play scene's draw (dScnPly_Draw 02AC08B4), collision and BG moves, vibration, daSus,
-// particle calc and the scene change request. Its inline frame counter (1028EBC8) is put back.
+// the delete, priority and create handlers (which report success), execute, the post callback (fapGm_After),
+// cCt_Counter and animation frame counters (J3DFrameCtrl::update, which some draws call); in the play scene's draw
+// (dScnPly_Draw 02AC08B4), collision and BG moves, vibration, daSus, particle calc and the scene change request.
+// Its inline frame counter (1028EBC8) is put back.
 #define HOLD_SKIP(a)                                                                          \
     extern "C" void f_##a##_orig(Cpu* c);                                                       \
     extern "C" void hook_##a(Cpu* c) {                                                          \
@@ -382,13 +462,13 @@ HOLD_SKIP(02AD9F9C)     // audio
 HOLD_SKIP(02003ED8)
 HOLD_SKIP(02AF09B8)
 HOLD_SKIP(02AFA7A0)     // HD systems (object at 1012B65C)
-HOLD_SKIP(02AD6EB0)     // fpcDt_Handler
 HOLD_SKIP_OK(02AD9664)  // fpcPi_Handler
 HOLD_SKIP_OK(02AD6C78)  // fpcCt_Handler
 HOLD_SKIP(02AD752C)     // fpcEx_Handler
 HOLD_SKIP(0290DD38)
 HOLD_SKIP(02ACD0A8)     // fapGm_After
 HOLD_SKIP(02BEF838)     // cCt_Counter
+HOLD_SKIP(02B520C4)     // J3DFrameCtrl::update: some actors advance their animations in their draw (the attention arrow)
 HOLD_SKIP(02902B4C)     // dComIfG_Ccsp()->Move()
 HOLD_SKIP(028C2AB0)     // dComIfG_Bgsp().ClrMoveFlag()
 HOLD_SKIP(02ACC800)     // vibration Run
@@ -397,6 +477,12 @@ HOLD_SKIP(028C2C00)     // dComIfG_Bgsp().Move()
 HOLD_SKIP(02A9D6E4)     // particle calc 3D
 HOLD_SKIP(02A9D41C)     // particle calc 2D
 HOLD_SKIP_OK(02AD5B3C)  // fopScnM_ChangeReq
+
+extern "C" void f_02AD6EB0_orig(Cpu* c);
+extern "C" void hook_02AD6EB0(Cpu* c) {  // fpcDt_Handler
+    restore_models();
+    if (!g_hold) f_02AD6EB0_orig(c);
+}
 
 extern "C" void f_02AC08B4_orig(Cpu* c);
 extern "C" void hook_02AC08B4(Cpu* c) {  // dScnPly_Draw
@@ -414,6 +500,7 @@ namespace warp { void service(Cpu* c); }  // warp.cpp
 extern "C" void site_02AF0EDC(Cpu* c) {
     using namespace interp;
     if (g_hold && g_phase == g_n) g_records++;  // the record pass just ended
+    g_passes++;
     // the next pass of the step (after the logic pass: hold pass 1; after hold pass N: the next logic pass); a
     // change of rate starts over with a logic pass
     const int n = g_on ? frames_per_step() - 1 : 0;
@@ -421,8 +508,8 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     g_n = n;
     g_hold = g_phase > 0;
     if (g_hold) return;
-    if (g_models.size() > 4096) g_models.clear();  // models are freed with their actors: drop old records
     if (g_panes.size() > 16384) g_panes.clear();
+    if (g_anms.size() > 16384) g_anms.clear();
     ss::service(c);
     warp::service(c);
     amiibo::service();
