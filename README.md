@@ -160,13 +160,15 @@ Display, Save States) has most of the same options.
 
 **Frame rate.** 30 fps as on the Wii U, or 60, 120 or 240 fps by frame interpolation: the game logic
 keeps its 30 steps a second, and 1, 3 or 7 frames in between are drawn with the camera, every 3D
-model and the particles blended. The HUD and other 2D still move at 30 Hz. The rate is capped to the
+model, the particles and the 2D (the HUD's and menus' movements and fades) blended. The rate is capped to the
 display's refresh rate, which the Graphics tab shows. `WWHD_INTERP=1` and
 `WWHD_INTERP_FPS=60|120|240` set it for one start.
 
 **Aspect ratio.** 16:9 (original), match the window, 16:10, 21:9 or 32:9, through the game's own wide
 screen layout: wider screens show more to the sides, text keeps its shape and the HUD keeps its 16:9
-distance from the edges. The GamePad picture is unchanged. `WWHD_ASPECT=window|16:10|21:9|32:9`.
+distance from the edges. Menus, messages and the title are drawn at 16:9 in the middle, with black beside
+full-screen menus such as Collection, the map and the save prompt. The GamePad picture is unchanged.
+`WWHD_ASPECT=window|16:10|21:9|32:9`.
 
 **Internal resolution.** 1x (1920x1080, as on the Wii U), 1.33x (2560x1440), 1.5x (2880x1620) or
 2x (3840x2160).
@@ -229,11 +231,10 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 - macOS on Apple Silicon only (Metal). The Vulkan renderer and the SDL3 host, kept for possible Windows
   and Linux builds, compile but have not run Twilight Princess HD yet (`docs/vulkan.md`).
 - Not yet checked: a real controller, playing far beyond the opening.
-- Frame interpolation blends the camera, models and particles; the HUD moves at 30 Hz, and true 60 fps
-  logic is not available.
-- At wider aspect ratios, menus such as Collection are stretched to the full width: their text is
-  right, their frames and slots come out wider.
-- Not working yet: mouse as a gyro, and Off-TV Play sound (the TV mix plays).
+- Frame interpolation blends the camera, models, particles and the 2D's movements and fades; screen
+  effects and 2D color and texture animations move at 30 Hz, and true 60 fps logic is not available.
+- At 32:9 the TV minimap stays partway in from the left edge: the game's drawing of it does not show
+  further out.
 - Not carried over from Cemu's TP HD graphic packs: distant fog and negative LOD bias.
 - amiibo: the Cave of Shadows has been entered with Wolf Link but not played through.
 - Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
