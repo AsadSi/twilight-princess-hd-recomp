@@ -49,8 +49,6 @@ void copy_to_scan(uint32_t colorBuffer, uint32_t target);  // target: 1 = TV, 4 
 void write_back_linear_targets();  // GX2DrawDone: linear render targets the CPU reads, to guest memory
 void swap();                     // present the TV scan buffer
 void set_frame_aspect(float a);  // aspect ratio of the TV picture from the next frame on (aspect.cpp)
-// render thread: a target of this guest size is made wider/taller this frame (kx, ky != 1)
-bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky);
 uint64_t frames_completed();     // swaps whose GPU work has finished
 void with_autorelease_pool(void (*fn)());  // render thread: drain Objective-C temporaries per batch
 void set_tv_format(uint32_t gx2Format, bool tv);  // GX2SetTVBuffer / GX2SetDRCBuffer

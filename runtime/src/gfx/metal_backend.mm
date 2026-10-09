@@ -36,7 +36,6 @@ const Backend& metal_backend() {
         b.peek_z = gfx::peek_z;
         b.swap = gfx::swap;
         b.set_frame_aspect = gfx::set_frame_aspect;
-        b.target_aspect_factors = gfx::target_aspect_factors;
         b.frames_completed = gfx::frames_completed;
         b.with_autorelease_pool = gfx::with_autorelease_pool;
         b.set_tv_format = gfx::set_tv_format;

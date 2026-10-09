@@ -16,7 +16,6 @@ void copy_surface(uint32_t src, uint32_t srcMip, uint32_t srcSlice, uint32_t dst
 void copy_to_scan(uint32_t colorBuffer, uint32_t target);  // target: 1 = TV, 4 = DRC (GamePad)
 void swap();
 void set_frame_aspect(float a);  // aspect ratio of the TV picture from the next frame on (aspect.cpp)
-bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky);
 uint64_t frames_completed();
 void with_autorelease_pool(void (*fn)());
 void set_tv_format(uint32_t gx2Format, bool tv);

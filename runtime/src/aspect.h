@@ -15,13 +15,8 @@ float requested();                 // what the setting asks for now
 // main thread, GX2SwapScanBuffers: latch the aspect for the next game frame, update the game's
 // projections; returns the aspect the render thread should switch to at this swap
 float on_swap();
-float game();
-uint64_t game_frame();                // swaps so far                      // aspect the game draws with this frame
-// HD layouts: the game thread marks uploads of layout projection matrices and the drawing of layout
-// roots; the render thread, which knows the target, narrows the projection for TV-shaped targets
-// and reports where each root went
-bool tagged_projection();                          // gx2: the vertex uniform upload in progress is one
-void layout_root_target(uint32_t root, bool tv);   // render thread (OP_LAYOUT_ROOT)
+float game();                      // aspect the game draws with this frame
+uint64_t game_frame();             // swaps so far
 void ss_reset();  // save state loaded: the game's screen size is set again
 void service(Cpu* c);  // main01's frame loop: applies a changed aspect to the game (setTvSize)
 }  // namespace aspect

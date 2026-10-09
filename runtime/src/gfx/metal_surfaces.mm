@@ -117,15 +117,6 @@ static float target_scale(const Surface* s) {
     if (shadow && s->isDepth && s->slices > 1) return shadow;
     return res_scale();
 }
-bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) {
-    Surface s;
-    s.width = w;
-    s.height = h;
-    bool on = screen_shaped(&s) && (g_aspect_kx != 1.0f || g_aspect_ky != 1.0f);
-    kx = on ? g_aspect_kx : 1.0f;
-    ky = on ? g_aspect_ky : 1.0f;
-    return on;
-}
 // extra horizontal / vertical factor for the aspect ratio
 static void target_aspect(const Surface* s, float& kx, float& ky) {
     uint32_t width,height;

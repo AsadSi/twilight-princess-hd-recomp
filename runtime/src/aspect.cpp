@@ -68,8 +68,6 @@ float on_swap() {
 }
 float game() { return g_game; }
 uint64_t game_frame() { return g_swaps.load(std::memory_order_relaxed); }
-bool tagged_projection() { return false; }
-void layout_root_target(uint32_t, bool) {}
 void ss_reset() { g_applied = 0; }
 
 // main01's frame loop (interp.cpp, logic passes): a changed aspect gives the game a wider or taller wide screen

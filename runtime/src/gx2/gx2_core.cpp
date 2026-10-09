@@ -389,7 +389,7 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
     rprof::Op kind;
     switch (op) {
     case OP_CALL: execute_op(op, p, n); return;
-    case OP_SET_REGS: case OP_SET_PROJ_REGS: kind = rprof::kOpRegs; break;
+    case OP_SET_REGS: kind = rprof::kOpRegs; break;
     case OP_DRAW: case OP_DRAW_INDEXED: kind = rprof::kOpDraw; rprof::classify_draw(); break;
     case OP_CLEAR_COLOR: case OP_CLEAR_DEPTH: case OP_CLEAR_BUFFERS: kind = rprof::kOpClear; break;
     case OP_COPY_SURFACE: case OP_PEEK_Z: kind = rprof::kOpCopy; break;
@@ -465,23 +465,6 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
         if (n) render::set_frame_aspect(gx2::bitsf(p[0]));  // aspect ratio from the next frame on (aspect.cpp)
         render::swap();
         break;
-    case OP_SET_PROJ_REGS: {
-        uint32 v[16];
-        memcpy(v, p + 1, sizeof v);
-        float kx, ky;
-        if (n == 17 && render::target_aspect_factors(g_regs[mmCB_COLOR0_TILE] & 0xFFFF, g_regs[mmCB_COLOR0_FRAG], kx, ky))
-            for (int i = 0; i < 4; i++) {  // rows x and y: the 16:9 layout space centred in the wider picture
-                v[i] = fbits(bitsf(v[i]) / kx);
-                v[4 + i] = fbits(bitsf(v[4 + i]) / ky);
-            }
-        apply_regs(p[0], v, std::min<uint32>(n - 1, 16));
-        break;
-    }
-    case OP_LAYOUT_ROOT: {
-        float kx, ky;
-        aspect::layout_root_target(p[0], render::target_aspect_factors(g_regs[mmCB_COLOR0_TILE] & 0xFFFF, g_regs[mmCB_COLOR0_FRAG], kx, ky));
-        break;
-    }
     case OP_SETUP_CONTEXT:
         g_contexts[p[0]].assign(kNumRegs, 0);
         g_shadow = g_contexts[p[0]].data();

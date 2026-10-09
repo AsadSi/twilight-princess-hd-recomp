@@ -37,7 +37,6 @@ struct Backend {
     void (*peek_z)(const uint32_t* p, uint32_t n);  // depth image, then x, y, key per point (peekz.cpp); may be null
     void (*swap)();
     void (*set_frame_aspect)(float a);
-    bool (*target_aspect_factors)(uint32_t w, uint32_t h, float& kx, float& ky);
     uint64_t (*frames_completed)();
     void (*with_autorelease_pool)(void (*fn)());
     void (*set_tv_format)(uint32_t gx2Format, bool tv);
@@ -110,7 +109,6 @@ inline void copy_to_scan(uint32_t cb, uint32_t target) { g_backend->copy_to_scan
 inline void peek_z(const uint32_t* p, uint32_t n) { if (g_backend->peek_z) g_backend->peek_z(p, n); }
 inline void swap() { g_backend->swap(); }
 inline void set_frame_aspect(float a) { g_backend->set_frame_aspect(a); }
-inline bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) { return g_backend->target_aspect_factors(w, h, kx, ky); }
 inline uint64_t frames_completed() { return g_backend->frames_completed(); }
 inline void with_autorelease_pool(void (*fn)()) { g_backend->with_autorelease_pool(fn); }
 inline void set_tv_format(uint32_t f, bool tv) { g_backend->set_tv_format(f, tv); }

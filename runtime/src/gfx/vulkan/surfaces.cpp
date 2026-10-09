@@ -138,12 +138,6 @@ static bool screen_shaped(uint32_t width, uint32_t height, bool compressed, uint
     float r = (float)width * 9.0f / ((float)height * 16.0f);
     return r > 0.97f && r < 1.03f;
 }
-bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) {
-    bool on = screen_shaped(w, h, false, 1, 1) && (g_aspect_kx != 1.0f || g_aspect_ky != 1.0f);
-    kx = on ? g_aspect_kx : 1.0f;
-    ky = on ? g_aspect_ky : 1.0f;
-    return on;
-}
 static void target_aspect(const Surface* s, float& kx, float& ky) {
     uint32_t width,height;
     if(!s->fmt.compressed&&s->mips==1&&mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height)){
