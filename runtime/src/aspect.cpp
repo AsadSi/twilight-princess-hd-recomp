@@ -242,7 +242,7 @@ extern "C" void hook_02A95A78(Cpu* c) {  // CPaneMgr::getGlobalVtx(Vec* out, CPa
 }
 
 // The field map (dMenu_Fmap2DBack_c::draw, 029DF284) draws its region art with J2DPicture::draw(x, y, w, h)
-// (02B3DB9C) at the full stretch: on the TV it is narrowed to 16:9's around the middle, as the menu is (the full
+// (02B38B94) at the full stretch: on the TV it is narrowed to 16:9's around the middle, as the menu is (the full
 // screen's backgrounds stay as they are).
 extern "C" void f_029DF284_orig(Cpu* c);
 extern "C" void hook_029DF284(Cpu* c) {
@@ -252,12 +252,12 @@ extern "C" void hook_029DF284(Cpu* c) {
     g_map -= tv;
 }
 
-extern "C" void f_02B3DB9C_orig(Cpu* c);
-extern "C" void hook_02B3DB9C(Cpu* c) {
+extern "C" void f_02B38B94_orig(Cpu* c);
+extern "C" void hook_02B38B94(Cpu* c) {
     const double w = ld16(aspect::kTvSize + 4), k = aspect::kWideW / w;
     if (g_map && k < 0.999 && c->f[3].ps0 < w - 1) {
         c->f[1].ps0 = c->f[1].ps1 = 304 + (c->f[1].ps0 - 304) * k;
         c->f[3].ps0 = c->f[3].ps1 = c->f[3].ps0 * k;
     }
-    f_02B3DB9C_orig(c);
+    f_02B38B94_orig(c);
 }
