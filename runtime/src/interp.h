@@ -2,6 +2,8 @@
 // renderers use.
 #pragma once
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace interp {
 int mode();                 // 0 off (30 fps), 1 frame interpolation (at fps()), 2 true 60
@@ -26,4 +28,8 @@ float paced_drawn_share();  // share of in-between frames drawn lately (paced an
 void set_display_hz(int hz);
 int display_hz();           // (WWHD_DISPLAY_HZ overrides the detected rate)
 void set_present_vsync(bool on);
+
+// J2DPane::draw (aspect.cpp): on hold passes, a pane's own matrix and alpha between the last two steps; the
+// (address, word) pairs it changed go in `saved`, to be put back after the draw
+void blend_pane(uint32_t pane, std::vector<std::pair<uint32_t, uint32_t>>& saved);
 }  // namespace interp

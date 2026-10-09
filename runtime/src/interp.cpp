@@ -9,7 +9,8 @@
 //   hold pass k:    no logic; draws at t = (k+1)/(N+1); the last (k = N) draws S+1 exactly and records it as
 //                   the next step's "before"
 // Blended: the camera (camera_draw 028E13CC: the view's eye, center, up, fovy, bank) and every J3D model
-// (J3DModel::viewCalc 02B5CF50: its world and envelope matrices). Particles, 2D and the rest move at 30 Hz.
+// (J3DModel::viewCalc 02B5CF50: its world and envelope matrices), particles and the 2D panes' own matrices and
+// alpha (below). The rest (screen effects, a 2D screen's root, texture and color animation) moves at 30 Hz.
 // The addresses come from the decomp's structure (docs/brief.md, 60 fps groundwork).
 #include <atomic>
 #include <cmath>
@@ -214,6 +215,12 @@ struct PtclPrev {
     uint32_t p[3] = {};
 };
 std::unordered_map<uint32_t, PtclPrev> g_ptcls;
+struct PanePrev {
+    uint64_t pass = 0;
+    uint32_t m[12] = {};
+    uint8_t alpha = 0;
+};
+std::unordered_map<uint32_t, PanePrev> g_panes;
 }  // namespace
 
 }  // namespace interp
@@ -323,6 +330,38 @@ extern "C" void hook_02B17008(Cpu* c) {
     for (auto& [pt, cur] : put_back) memcpy(mem::ptr(pt), cur.p, 12);
 }
 
+// J2DPane::draw (aspect.cpp's hook), from the painter like particles: 2D animation runs in execute, after the
+// painter, so a pane's own matrix (+0x48) and alpha (+0xAA) are the step before on a logic pass, which records them,
+// and the new step on the hold passes after it, which draw between the two. A pane that moved far (another pane at
+// the same address, a jump) draws as it is.
+void interp::blend_pane(uint32_t pane, std::vector<std::pair<uint32_t, uint32_t>>& saved) {
+    if (!g_on) return;
+    if (!g_hold) {
+        PanePrev& p = g_panes[pane];
+        p.pass = g_records;
+        read_words(pane + 0x48, 12, p.m);
+        p.alpha = ld8(pane + 0xAA);
+        return;
+    }
+    const auto it = g_panes.find(pane);
+    if (it == g_panes.end() || it->second.pass != g_records) return;
+    const PanePrev& p = it->second;
+    const float t = float(g_phase) / float(g_n + 1);
+    uint32_t cur[12];
+    read_words(pane + 0x48, 12, cur);
+    if (std::fabs(bf(cur[3]) - bf(p.m[3])) + std::fabs(bf(cur[7]) - bf(p.m[7])) > 200) return;
+    for (int i = 0; i < 12; i++)
+        if (cur[i] != p.m[i]) {
+            const uint32_t a = pane + 0x48 + 4 * i;
+            saved.push_back({a, ld32(a)});
+            stf32(a, lerp(bf(p.m[i]), bf(cur[i]), t));
+        }
+    if (const uint8_t alpha = ld8(pane + 0xAA); alpha != p.alpha) {
+        saved.push_back({pane + 0xA8, ld32(pane + 0xA8)});
+        st8(pane + 0xAA, (uint8_t)std::lround(lerp(p.alpha, alpha, t)));
+    }
+}
+
 // ---------------------------------------------------------------- the pass structure
 // Hold passes skip the step's logic: in main01's loop, the pad read, audio and HD systems; in fpcM_Management,
 // the delete, priority and create handlers (which report success), execute, the post callback (fapGm_After) and
@@ -384,6 +423,7 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     g_hold = g_phase > 0;
     if (g_hold) return;
     if (g_models.size() > 4096) g_models.clear();  // models are freed with their actors: drop old records
+    if (g_panes.size() > 16384) g_panes.clear();
     ss::service(c);
     warp::service(c);
     amiibo::service();

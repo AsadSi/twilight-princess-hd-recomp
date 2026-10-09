@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "interp.h"
 #include "runtime.h"
 
 namespace aspect {
@@ -151,22 +152,15 @@ bool dpad_group(uint32_t p) { return p && ld64(p + 8) == 0x6A756A695F6EULL; }  /
 }  // namespace
 
 extern "C" void f_02B34334_orig(Cpu* c);
-extern "C" void hook_02B34334(Cpu* c) {
-    const uint32_t pane = c->r[3], ctx = c->r[4], parent = parent_of(pane);
+namespace {
+using Saved = std::vector<std::pair<uint32_t, uint32_t>>;  // (address, word) to put back after a draw, last first
+// a pane (not a root) drawn for the TV's shape, with what it changed in `saved`
+void draw_wide(Cpu* c, uint32_t pane, uint32_t ctx, uint32_t parent, Saved& saved) {
     if (ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // not a J2DOrthoGraph
-    if (!parent) {                                                   // a screen's root
-        const int outer = g_screen;
-        g_screen = screen_of(c->r[1]);
-        if (g_screen != kGamePad) g_tv_screens[pane] = g_screen;
-        f_02B34334_orig(c);
-        g_screen = outer;
-        return;
-    }
     const double x0 = ldf32(ctx + 0xBC), w = ldf32(ctx + 0xC4) - x0, k = aspect::kWideW / w, mid = x0 + w / 2;
     if (k > 0.999 || g_screen == kGamePad) return f_02B34334_orig(c);
     const uint32_t kind = ld32(pane + 4) >> 8;
     const bool text = kind == 0x544258;  // 'TBX'
-    std::vector<std::pair<uint32_t, uint32_t>> saved;  // (address, word) to put back after the draw
     auto set = [&](uint32_t a, double v) { saved.push_back({a, ld32(a)}); stf32(a, v); };
     auto squeeze = [&](uint32_t mtx, double f) {  // a matrix's x about the screen's middle
         for (int i = 0; i < 3; i++) set(mtx + 4 * i, ldf32(mtx + 4 * i) * f);
@@ -199,7 +193,6 @@ extern "C" void hook_02B34334(Cpu* c) {
         g_full += full;
         f_02B34334_orig(c);
         g_full -= full;
-        for (auto it = saved.rbegin(); it != saved.rend(); ++it) st32(it->first, it->second);
         return;
     }
     const bool label = dpad_group(parent) && ld32(pane + 20) != kN43;  // the D-pad's labels ("Minimap", ...)
@@ -226,7 +219,24 @@ extern "C" void hook_02B34334(Cpu* c) {
                 }
     }
     f_02B34334_orig(c);
-    for (auto& [a, v] : saved) st32(a, v);
+}
+}  // namespace
+
+extern "C" void hook_02B34334(Cpu* c) {
+    const uint32_t pane = c->r[3], ctx = c->r[4], parent = parent_of(pane);
+    if (!parent) {  // a screen's root
+        if (ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // not a J2DOrthoGraph
+        const int outer = g_screen;
+        g_screen = screen_of(c->r[1]);
+        if (g_screen != kGamePad) g_tv_screens[pane] = g_screen;
+        f_02B34334_orig(c);
+        g_screen = outer;
+        return;
+    }
+    Saved saved;
+    interp::blend_pane(pane, saved);  // between the last two steps on hold passes (interp.cpp)
+    draw_wide(c, pane, ctx, parent, saved);
+    for (auto it = saved.rbegin(); it != saved.rend(); ++it) st32(it->first, it->second);
 }
 
 extern "C" void f_02A95A78_orig(Cpu* c);
