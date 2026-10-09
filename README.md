@@ -159,8 +159,8 @@ Display, Save States) has most of the same options.
 ## Features
 
 **Frame rate.** 30 fps as on the Wii U, or 60, 120 or 240 fps by frame interpolation: the game logic
-keeps its 30 steps a second, and 1, 3 or 7 frames in between are drawn with the camera and every 3D
-model blended. Particles, 2D and other effects still move at 30 Hz. The rate is capped to the
+keeps its 30 steps a second, and 1, 3 or 7 frames in between are drawn with the camera, every 3D
+model and the particles blended. The HUD and other 2D still move at 30 Hz. The rate is capped to the
 display's refresh rate, which the Graphics tab shows. `WWHD_INTERP=1` and
 `WWHD_INTERP_FPS=60|120|240` set it for one start.
 
@@ -170,6 +170,10 @@ distance from the edges. The GamePad picture is unchanged. `WWHD_ASPECT=window|1
 
 **Internal resolution.** 1x (1920x1080, as on the Wii U), 1.33x (2560x1440), 1.5x (2880x1620) or
 2x (3840x2160).
+
+**Bloom and HUD.** Bloom (the glow around bright areas, strongest in the Twilight) at its original
+strength, reduced to half, or off; and the HUD (hearts, rupees, buttons, map icon) shown or hidden, for
+screenshots. Menus and messages always show. `WWHD_BLOOM=reduced|off`, `WWHD_HUD=0`.
 
 Graphics choices are remembered between starts (`defaults delete tphd` resets them); an environment
 variable overrides the saved value for that start only.
@@ -201,8 +205,8 @@ TP HD (USA), with profiles. Content mods replace files of the game's `content/` 
 been tried with it.
 
 **Testing aids.** `WWHD_WARP=<frame>:<stage>,<point>,<room>,<layer>` warps to any place of the
-developer map select (`tools/warplist.py` lists the 1,987 places; Ordon Village on day 1 is
-`F_SP103,1,0,6`). `WWHD_STATE_SAVE_AT=<frame>:<slot>` takes a save state at a frame. Scripted routes
+developer map select, and more warps can follow, separated by `;` (`tools/warplist.py` lists the
+1,987 places; Ordon Village on day 1 is `F_SP103,1,0,6`). `WWHD_STATE_SAVE_AT=<frame>:<slot>` takes a save state at a frame. Scripted routes
 with screenshots: `tools/audit/run_route.sh`.
 
 Settings, controls, mod packages and save states are kept in `~/Library/Application Support/TPHD`,
@@ -212,16 +216,17 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 ## Known limitations
 
 - macOS on Apple Silicon only. The Vulkan renderer files are still Wind Waker HD's and do not build.
-- Not yet checked: listening through the sound, a real controller, playing beyond the opening.
-- Frame interpolation blends the camera and models only; true 60 fps logic is not available.
+- Not yet checked: a real controller, playing far beyond the opening.
+- Frame interpolation blends the camera, models and particles; the HUD moves at 30 Hz, and true 60 fps
+  logic is not available.
 - At wider aspect ratios, menus such as Collection are stretched to the full width: their text is
   right, their frames and slots come out wider.
 - Not working yet: mouse as a gyro, and Off-TV Play sound (the TV mix plays).
 - The setup has no save import; copy a save by hand (see Saves).
 - Not carried over from Cemu's TP HD graphic packs: distant fog and negative LOD bias.
 - amiibo is answered as "no amiibo".
-- One known crash: warped into the Temple of Time's Darknut room (D_MN06B, room 51) the GamePad
-  dungeon map reads out of bounds, probably because of the warp.
+- Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
+  reached through the temple, as in play, it works.
 
 ## Credits
 
