@@ -12,13 +12,13 @@
 # Env: SAVE (save folder under build/audit/saves, default "route"), FRESH=1 starts that save folder empty,
 # LOAD=<slot> loads save state <slot> from build/audit/states at frame 60 and starts the route's clock a game second later
 # (take one with WWHD_STATE_SAVE_AT=<frame>:<slot>).
-# Other WWHD_* variables pass through, e.g. WWHD_WARP=150:<stage>,<point>,<room>,<layer> (tools/warplist.py).
+# APP=<wwhd> runs another build. Other WWHD_* variables pass through, e.g. WWHD_WARP=150:<stage>,<point>,<room>,<layer> (tools/warplist.py).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ROUTE=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); TOTAL=$2; shift 2
 NAME=$(basename "$ROUTE" .txt); OUT=$ROOT/build/audit/$NAME; rm -rf "$OUT"; mkdir -p "$OUT"
 SAVEDIR=$ROOT/build/audit/saves/${SAVE:-route}; [ "${FRESH:-0}" = 1 ] && rm -rf "$SAVEDIR"; mkdir -p "$SAVEDIR"
-APP=$ROOT/build/cmake-tphd/wwhd
+APP=${APP:-$ROOT/build/cmake-tphd/wwhd}  # another build (an agent's worktree) runs through this checkout's lock
 LOCK=$ROOT/build/audit/.run.lock
 until mkdir "$LOCK" 2>/dev/null; do sleep 2; done; trap 'rmdir "$LOCK"' EXIT
 
