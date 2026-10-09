@@ -6,8 +6,7 @@
 02BDAB7C  # GXSetFog's state write: distant fog (look.cpp)
 02B34334  # J2DPane::draw: the HUD to the edges and menus at 16:9 on wider screens (aspect.cpp)
 02A95A78  # CPaneMgr::getGlobalVtx: a centered menu pane's place (aspect.cpp)
-029DF284  # dMenu_Fmap2DBack_c::draw: the field map on the TV (aspect.cpp)
-02B38B94  # J2DPicture::draw(x, y, w, h): the field map's art at 16:9 (aspect.cpp)
+02B3420C  # J2DPane's cull test for pictures drawn at a place: the screen's edges (aspect.cpp)
 # frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
 028E13CC  # camera_draw
 02B5CF50  # J3DModel::viewCalc

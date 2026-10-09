@@ -85,9 +85,9 @@ void service(Cpu* c) {
     st16(kTvSize + 6, (uint16_t)h);
     guest_call(c, kSetTvSize, {});
     // The TV minimap's top-left (dMeterMap's draw, 02A52C00: a function static at 10169504, set from 1009B16C on its
-    // first draw, guard 10169510) is a 16:9 layout position: it moves out with the left edge. The game drops the
-    // map once it ends left of 16:9's edge (x -100), so it moves at most 21:9's distance (134.5).
-    stf32(0x10169504, ldf32(0x1009B16C) - std::min((w - kWideW) / 2.0, 134.5));
+    // first draw, guard 10169510) is a 16:9 layout position: it moves out with the left edge (J2DPane's cull test
+    // below lets it).
+    stf32(0x10169504, ldf32(0x1009B16C) - (w - kWideW) / 2.0);
     stf32(0x10169508, ldf32(0x1009B170));
     st32(0x10169510, 1);
     guest_call(c, kOnWide2D, {});  // dMeter2Info_onWide2D, as onWide() calls after setTvSize: the HUD lays out again
@@ -113,14 +113,14 @@ void service(Cpu* c) {
 //   16:9) keep the full stretch and stay off screen, and so do a screen's top layers that reach well past both
 //   edges (fills made to cover any screen). A full-screen menu (a top layer from an edge past the middle) has the presenter
 //   paint the TV picture black beside it (full_menu). Where the game asks for a menu pane's place on screen
-//   (CPaneMgr::getGlobalVtx, 02A95A78: the field map's clip rectangle and icons) it gets the centered place.
+//   (CPaneMgr::getGlobalVtx, 02A95A78: the field map's clip rectangle and icons) it gets the centered place; the
+//   field map's art, drawn through the 2D port (whose ortho spans the screen), is at 16:9's proportions by itself.
 // The GamePad's screens are left alone.
 namespace {
 constexpr uint32_t kN43 = 0x6E5F3433;  // 'n_43': HD undoes the stretch for this pane
 enum Screen { kMenu, kHud, kGamePad };
 int g_screen = kMenu;  // the screen being drawn, from its root's caller
 int g_full = 0;        // > 0: inside a pane drawn at the full stretch (a menu's backdrop)
-int g_map = 0;         // > 0: the TV's field map is drawing
 std::unordered_map<uint32_t, int> g_tv_screens;  // root pane -> how it was last drawn on the TV
 
 int screen_of(uint32_t sp) {  // the callers' return addresses, up the stack's back chain
@@ -251,23 +251,17 @@ extern "C" void hook_02A95A78(Cpu* c) {  // CPaneMgr::getGlobalVtx(Vec* out, CPa
         stf32(out, 304 + (ldf32(out) - 304) * k);
 }
 
-// The field map (dMenu_Fmap2DBack_c::draw, 029DF284) draws its region art with J2DPicture::draw(x, y, w, h)
-// (02B38B94) at the full stretch: on the TV it is narrowed to 16:9's around the middle, as the menu is (the full
-// screen's backgrounds stay as they are).
-extern "C" void f_029DF284_orig(Cpu* c);
-extern "C" void hook_029DF284(Cpu* c) {
-    const int tv = screen_of(c->r[1]) != kGamePad;
-    g_map += tv;
-    f_029DF284_orig(c);
-    g_map -= tv;
+// J2DPane's cull test for a picture drawn at a place (02B3420C, from J2DPicture::draw(x, y, w, h); the TV minimap):
+// HD drops one that ends left of x -100 or starts right of 708, 16:9's screen in the layout's units (100AAA5C,
+// 100AAA60, which other code shares). Wider screens reach further: the test gets the screen's edges.
+extern "C" void f_02B3420C_orig(Cpu* c);
+extern "C" void hook_02B3420C(Cpu* c) {
+    const double half = ld16(aspect::kTvSize + 4) / 2.0;
+    const uint32_t lo = ld32(0x100AAA5C), hi = ld32(0x100AAA60);
+    stf32(0x100AAA5C, 304 - half);
+    stf32(0x100AAA60, 304 + half);
+    f_02B3420C_orig(c);
+    st32(0x100AAA5C, lo);
+    st32(0x100AAA60, hi);
 }
 
-extern "C" void f_02B38B94_orig(Cpu* c);
-extern "C" void hook_02B38B94(Cpu* c) {
-    const double w = ld16(aspect::kTvSize + 4), k = aspect::kWideW / w;
-    if (g_map && k < 0.999 && c->f[3].ps0 < w - 1) {
-        c->f[1].ps0 = c->f[1].ps1 = 304 + (c->f[1].ps0 - 304) * k;
-        c->f[3].ps0 = c->f[3].ps1 = c->f[3].ps0 * k;
-    }
-    f_02B38B94_orig(c);
-}

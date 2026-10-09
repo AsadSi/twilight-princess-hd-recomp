@@ -259,8 +259,7 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
 - Frame interpolation blends the camera, models (with their texture and color animation), particles,
   the 2D's movements and fades, and the screen fades; screen effects and 2D color and texture
   animations move at 30 Hz, and true 60 fps logic is not available.
-- At 32:9 the TV minimap stays partway in from the left edge: the game's drawing of it does not show
-  further out.
+- At wider screens the field map's cursor starts beside Link's marker in the province view.
 - amiibo: the Cave of Shadows has been entered with Wolf Link but not played through.
 - Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
   reached through the temple, as in play, it works.
