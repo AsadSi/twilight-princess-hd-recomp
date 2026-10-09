@@ -1296,7 +1296,6 @@ void invalidate(uint32_t flags,uint32_t addr,uint32_t size) {
     }
 }
 void ss_reset_surfaces() {
-    reset_ao_private_cache();
     for(auto& [addr,s]:R.surfaces){s->guestLayout.reset();s->dirty=true;s->lastCheckedFrame=~0ull;}
 }
 } // namespace gfxvk

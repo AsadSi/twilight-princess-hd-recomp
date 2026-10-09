@@ -180,7 +180,6 @@ void forget_texture_views();
 void service_captures();
 void request_tv_dump(const std::string&, int);
 void create_surface_image(Surface*,bool forRendering,VkExtent3D explicitExtent = {});
-void reset_ao_private_cache();
 void destroy_surface_image(Surface*);
 VkImageView layer_view(Surface*,uint32_t slice);
 VkImageView sampled_texture_view(Surface*,const uint32_t* texWords);

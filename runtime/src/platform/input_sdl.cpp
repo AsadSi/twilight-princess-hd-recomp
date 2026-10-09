@@ -23,7 +23,6 @@
 #include <vector>
 namespace render { uint64_t frame_count(); }
 namespace gfxvk { bool graphics_hotkey(char key, bool activate); }
-namespace mods { void filter_pad(input::PadState&); }
 namespace input {
 static std::mutex g_mu;
 static bool g_keys[256]={},g_script_keys[256]={};
@@ -387,10 +386,8 @@ void handle_event(const SDL_Event& event){
     !(event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_ALT|SDL_KMOD_GUI))){
   char action=0;
   switch(event.key.scancode){
-   case SDL_SCANCODE_R: action='R';break; case SDL_SCANCODE_O: action='O';break;
-   case SDL_SCANCODE_M: action='M';break; case SDL_SCANCODE_N: action='N';break;
-   case SDL_SCANCODE_8: action='8';break; case SDL_SCANCODE_6: action='6';break;
-   case SDL_SCANCODE_7: action='7';break; default:break;
+   case SDL_SCANCODE_R: action='R';break; case SDL_SCANCODE_N: action='N';break;
+   case SDL_SCANCODE_8: action='8';break; case SDL_SCANCODE_6: action='6';break; default:break;
   }
   const bool activate=event.type==SDL_EVENT_KEY_DOWN&&!event.key.repeat;
   if(action && gfxvk::graphics_hotkey(action,activate)){if(activate)hostui::graphics_changed();return;}
@@ -603,7 +600,6 @@ PadState read() {
         LOG("[input] frame %llu buttons %04X", (unsigned long long)render::frame_count(), s.buttons);
         last_buttons = s.buttons;
     }
-    mods::filter_pad(s);  // gameplay mods: mouse camera, wheel -> R3
     if (overlay::blocks_input()) s = PadState{};  // the settings overlay has the input
     return s;
 }

@@ -71,18 +71,12 @@ const Backend& vulkan_backend() {
         b.shutdown = gx2::checkpoint_vulkan_caches;
         b.res_scale = gfxvk::requested_res_scale;
         b.set_res_scale = gfxvk::set_res_scale;
-        b.ao_mode = gfxvk::ao_mode;
-        b.set_ao_mode = gfxvk::set_ao_mode;
-        b.ao_hires = gfxvk::ao_hires_enabled;
-        b.set_ao_hires = gfxvk::set_ao_hires;
         b.aniso = gfxvk::aniso_enabled;
         b.set_aniso = gfxvk::set_aniso;
         b.fxaa = gfxvk::fxaa_enabled;
         b.set_fxaa = gfxvk::set_fxaa;
         b.feature_available = [](int f) {
             switch (f) {
-            case kFeatureAO: return gfxvk::graphics_feature_available(gfxvk::GraphicsFeature::AO);
-            case kFeatureAOHires: return gfxvk::graphics_feature_available(gfxvk::GraphicsFeature::AOHires);
             case kFeatureAniso: return gfxvk::graphics_feature_available(gfxvk::GraphicsFeature::Anisotropy);
             case kFeatureFXAA: return gfxvk::graphics_feature_available(gfxvk::GraphicsFeature::FXAA);
             case kFeatureScaleFilter: return gfxvk::graphics_feature_available(gfxvk::GraphicsFeature::ScaleFilter);

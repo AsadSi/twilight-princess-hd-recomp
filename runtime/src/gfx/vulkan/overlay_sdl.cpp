@@ -159,15 +159,13 @@ void graphics_changed() {
     char res[16];
     snprintf(res, sizeof res, "%g", gfxvk::requested_res_scale());
     put("resScale", {"WWHD_RES_SCALE"}, res);
-    put("aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"}, std::to_string(gfxvk::ao_mode()));
-    put("aoHires", {"WWHD_AO_HIRES"}, gfxvk::ao_hires_enabled() ? "1" : "0");
     put("aniso", {"WWHD_ANISO"}, gfxvk::aniso_enabled() ? "1" : "0");
     put("fxaa", {"WWHD_FXAA"}, gfxvk::fxaa_enabled() ? "1" : "0");
 #ifdef __ANDROID__
     // the player's choice: the phone pauses interpolation by itself (platform/perf_hint.cpp)
-    put("fps60", {"WWHD_INTERP", "WWHD_TRUE60", "WWHD_INTERP_FPS"}, interp::mode() == 2 ? "2" : perf_hint::fps60_chosen() ? "1" : "0");
+    put("fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"}, perf_hint::fps60_chosen() ? "1" : "0");
 #else
-    put("fps60", {"WWHD_INTERP", "WWHD_TRUE60", "WWHD_INTERP_FPS"}, std::to_string(interp::mode()));
+    put("fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"}, std::to_string(interp::mode()));
 #endif
     // (fps60 is the mode, from before 120/240 fps; interpFps the interpolation's frame rate)
     put("interpFps", {"WWHD_INTERP_FPS"}, std::to_string(interp::fps()));
@@ -188,12 +186,10 @@ void load_saved_options() {
     auto saved = [&](const char* key, std::initializer_list<const char*> env) { return !env_set(env) && v.count(key); };
     auto num = [&](const char* key) { return atof(v[key].c_str()); };
     if (saved("resScale", {"WWHD_RES_SCALE"})) gfxvk::set_res_scale((float)num("resScale"));
-    if (saved("aoMode", {"WWHD_AO_MODE", "WWHD_NO_AO_QUIRK"})) gfxvk::set_ao_mode((int)num("aoMode"));
-    if (saved("aoHires", {"WWHD_AO_HIRES"})) gfxvk::set_ao_hires(num("aoHires") != 0);
     if (saved("aniso", {"WWHD_ANISO"})) gfxvk::set_aniso(num("aniso") != 0);
     if (saved("fxaa", {"WWHD_FXAA"})) gfxvk::set_fxaa(num("fxaa") != 0);
     if (saved("interpFps", {"WWHD_INTERP_FPS"})) interp::set_fps((int)num("interpFps"));
-    if (saved("fps60", {"WWHD_INTERP", "WWHD_TRUE60", "WWHD_INTERP_FPS"})) interp::set_mode((int)num("fps60"));
+    if (saved("fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"})) interp::set_mode((int)num("fps60"));
     if (saved("fps60Paced", {"WWHD_INTERP_PACED"})) interp::set_paced_interpolation_at(60, num("fps60Paced") != 0);
     if (saved("fpsHighPaced", {"WWHD_INTERP_PACED"})) interp::set_paced_interpolation_at(120, num("fpsHighPaced") != 0);
     if (saved("scaleFilter", {"WWHD_SCALE_FILTER"})) gfxvk::set_scale_filter((int)num("scaleFilter"));

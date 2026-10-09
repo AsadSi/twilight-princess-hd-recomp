@@ -18,8 +18,6 @@ void set_present_plan(const gfx::PresentPlan* plan);
 std::vector<ComposeQuad> screen_quads(Screen& screen,VkExtent2D target,int& filter);
 // the composition of a window into an offscreen image, read back as display-encoded RGBA8
 std::vector<uint8_t> compose_offscreen(Screen& screen,uint32_t width,uint32_t height,bool srgb);
-// the climb mod's stamina wheel, drawn into the TV scan image (as mods/climb_hud.mm)
-void draw_mod_overlay(Surface& scan);
 // automatic GamePad overlay (display.mm): 32x18 signatures of the pictures (slot 0 GamePad, 1 TV)
 bool record_signature(int slot,Surface& source,bool sourceLinear);
 std::vector<float> read_signature(int slot);

@@ -3,7 +3,6 @@
 #include "backend.h"
 #include "shaders.h"
 #include "settings.h"
-#include "mods/climb.h"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -75,30 +74,6 @@ layout(location=0) out vec4 result;
 layout(push_constant) uniform Params { vec4 color; } params;
 void main() { result=params.color; }
 )glsl";
-// stamina wheel of the "climb any wall" mod (as mods/climb_hud.mm), premultiplied
-const char* hudSource = R"glsl(#version 450
-layout(location=0) in vec2 uv;
-layout(location=0) out vec4 result;
-layout(push_constant) uniform Params { float stamina; float alpha; float exhausted; float pad; } u;
-void main() {
- vec2 p=vec2(uv.x*2.0-1.0,1.0-uv.y*2.0);
- float r=length(p);
- float aa=max(fwidth(r),1e-4);
- float ring=smoothstep(0.58-aa,0.58+aa,r)*(1.0-smoothstep(0.92-aa,0.92+aa,r));
- float outline=smoothstep(0.50-aa,0.50+aa,r)*(1.0-smoothstep(1.0-2.0*aa,1.0,r));
- float ang=atan(p.x,p.y);
- float frac=(ang<0.0?ang+6.28318530718:ang)/6.28318530718;
- float filled=1.0-smoothstep(u.stamina-0.004,u.stamina+0.004,frac);
- vec3 green=vec3(0.30,0.90,0.35),yellow=vec3(1.0,0.80,0.15),red=vec3(0.95,0.20,0.15);
- vec3 full=u.exhausted>0.5?red:(u.stamina<0.3?mix(red,yellow,u.stamina/0.3):green);
- vec3 empty=u.exhausted>0.5?vec3(0.55,0.08,0.06):vec3(0.10,0.10,0.10);
- vec3 col=mix(empty,full,filled);
- float fa=ring*mix(0.45,0.95,filled);
- float oa=outline*0.45;
- float a=fa+oa*(1.0-fa);
- result=vec4(col*fa,a)*u.alpha;
-}
-)glsl";
 struct PresentRect { float x,y,width,height,scale; };
 struct PresentParams { int32_t aa,conv; float sharp,foot; float alpha=1,pad[3]{}; };
 static_assert(sizeof(PresentParams)==32);
@@ -112,8 +87,8 @@ PresentParams present_params(bool aa,int filter,float scale,bool sourceLinear,bo
  return {aa?1:0,sourceLinear==targetLinear?0:targetLinear?1:2,
   filter==0||scale<=1?1:filter==1?scale:1e4f,scale<1?1/scale:1};
 }
-// pipeline kinds: the scaled picture (opaque / with opacity), a filled rectangle, the mod HUD
-enum Kind : uint32_t { kImage, kImageBlend, kSolid, kHud };
+// pipeline kinds: the scaled picture (opaque / with opacity), a filled rectangle
+enum Kind : uint32_t { kImage, kImageBlend, kSolid };
 struct ScreenResources { bool drawable=false,captureTransfer=false; std::vector<VkImageView> views; };
 struct PresentCapture {
  std::string path;
@@ -186,7 +161,7 @@ VkPipeline pipeline(VkFormat format,Kind kind=kImage) {
  if(auto it=resources.pipelines.find(key);it!=resources.pipelines.end())return it->second;
  VkShaderModule vs=VK_NULL_HANDLE,fs=VK_NULL_HANDLE;VkPipeline result=VK_NULL_HANDLE;
  try {
-  vs=module(vertexSource,true);fs=module(kind==kSolid?solidSource:kind==kHud?hudSource:fragmentSource,false);
+  vs=module(vertexSource,true);fs=module(kind==kSolid?solidSource:fragmentSource,false);
   VkPipelineShaderStageCreateInfo stages[2]{};
   for(int i=0;i<2;++i){stages[i].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;stages[i].stage=i?VK_SHADER_STAGE_FRAGMENT_BIT:VK_SHADER_STAGE_VERTEX_BIT;stages[i].module=i?fs:vs;stages[i].pName="main";}
   VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -200,11 +175,6 @@ VkPipeline pipeline(VkFormat format,Kind kind=kImage) {
    blend.blendEnable=VK_TRUE;blend.colorBlendOp=blend.alphaBlendOp=VK_BLEND_OP_ADD;
    blend.srcColorBlendFactor=blend.srcAlphaBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
    blend.dstColorBlendFactor=blend.dstAlphaBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-  } else if(kind==kHud) {
-   // premultiplied colour; the image keeps its alpha
-   blend.blendEnable=VK_TRUE;blend.colorBlendOp=blend.alphaBlendOp=VK_BLEND_OP_ADD;
-   blend.srcColorBlendFactor=VK_BLEND_FACTOR_ONE;blend.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-   blend.srcAlphaBlendFactor=VK_BLEND_FACTOR_ZERO;blend.dstAlphaBlendFactor=VK_BLEND_FACTOR_ONE;
   }
   VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};bs.attachmentCount=1;bs.pAttachments=&blend;
   VkDynamicState states[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};VkPipelineDynamicStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};ds.dynamicStateCount=2;ds.pDynamicStates=states;
@@ -406,29 +376,6 @@ std::vector<uint8_t> compose_offscreen(Screen& screen,uint32_t width,uint32_t he
  }catch(...){destroy_surface_image(&target);throw;}
  destroy_surface_image(&target);
  return rgba;
-}
-
-// ---------------------------------------------------------------- the climb mod's stamina wheel
-void draw_mod_overlay(Surface& scan) {
- if(!mods::climb_enabled()||!scan.image||!scan.view||!(scan.usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return;
- const mods::ClimbHud hud=mods::climb_hud();
- if(hud.alpha<=0.0f)return;
- transition_image(&scan,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                  VK_ACCESS_COLOR_ATTACHMENT_READ_BIT|VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
- auto cmd=command_buffer();
- VkRenderingAttachmentInfo attachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};attachment.imageView=scan.view;attachment.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
- attachment.loadOp=VK_ATTACHMENT_LOAD_OP_LOAD;attachment.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
- const VkExtent2D extent{scan.extent.width,scan.extent.height};
- VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};rendering.renderArea.extent=extent;rendering.layerCount=1;rendering.colorAttachmentCount=1;rendering.pColorAttachments=&attachment;
- vkCmdBeginRendering(cmd,&rendering);R.rendering=true;R.passTracked=false;
- // upper right of the screen centre, where the follow camera keeps Link (climb_hud.mm)
- const float w=float(extent.width),h=float(extent.height),cx=0.60f*w,cy=0.38f*h,rad=0.05f*h;
- VkViewport viewport{cx-rad,cy-rad,2*rad,2*rad,0,1};VkRect2D scissor{{0,0},extent};
- vkCmdSetViewport(cmd,0,1,&viewport);vkCmdSetScissor(cmd,0,1,&scissor);
- vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline(scan.fmt.pixel,kHud));
- PresentParams params{};const float u[4]={hud.stamina,hud.alpha,hud.exhausted?1.0f:0.0f,0};memcpy(&params,u,16);
- vkCmdPushConstants(cmd,resources.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(params),&params);vkCmdDraw(cmd,3,1,0,0);
- vkCmdEndRendering(cmd);R.rendering=false;R.passTracked=false;
 }
 
 // ---------------------------------------------------------------- automatic overlay signatures

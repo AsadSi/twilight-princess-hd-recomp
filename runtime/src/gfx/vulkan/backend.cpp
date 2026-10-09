@@ -13,11 +13,11 @@
 #include "gfx/display_modes.h"
 #include "gx2/gx2.h"
 #include "input.h"
-#include "mods/mods.h"
 #include "overlay/hostui.h"
 #include "overlay/overlay.h"
 #ifdef WWHD_SDL_HOST
 #include "platform/input_sdl.h"
+#include "platform/mouse_sdl.h"
 #include <SDL3/SDL_vulkan.h>
 #endif
 #include "platform/display_rate.h"
@@ -1268,8 +1268,6 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     create_surface_image(d, false);
   }
   resample(src, s.scan.get(), 1);
-  if (target & 1)
-    draw_mod_overlay(*s.scan);  // HUD of gameplay mods (stamina wheel), as the Metal renderer
   mark_gpu_written(s.scan.get());
 }
 // debug: WWHD_DUMP_FRAMES=100,300 writes the TV image of those frames to frame_<n>.png (and
@@ -2009,8 +2007,6 @@ static void init_device(std::vector<const char *> extensions,
       make_swapchain(*s);
     }
   vk::select_renderer();
-  set_graphics_feature_available(GraphicsFeature::AO);
-  set_graphics_feature_available(GraphicsFeature::AOHires);
   set_graphics_feature_available(GraphicsFeature::Anisotropy,
                                  R.enabledFeatures.samplerAnisotropy);
   if (const char* path = getenv("WWHD_CAPTURE_PATH")) {
@@ -2025,7 +2021,7 @@ static bool hidden_windows() {
   return hidden;
 }
 // The game's own icon on the windows (title bar, taskbar): meta/iconTex.tga of the game folder, an
-// uncompressed 32-bit TGA (128x128 in Wind Waker HD). Nothing happens without it.
+// uncompressed 32-bit TGA (128x128). Nothing happens without it.
 static void set_window_icons() {
   FILE *f = std::fopen((config::game_dir + "/meta/iconTex.tga").c_str(), "rb");
   if (!f)
