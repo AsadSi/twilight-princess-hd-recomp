@@ -3,6 +3,7 @@
 029196A0  # dPeekZ_c::peekData: depth peeks answered from GPU readbacks (peekz.cpp)
 02AEA3E4  # bloom_c::draw: bloom strength (look.cpp)
 02A31164  # dMeter2Draw_c::draw: the HUD shown or hidden (look.cpp)
+02BDAB7C  # GXSetFog's state write: distant fog (look.cpp)
 02B34334  # J2DPane::draw: the HUD to the edges and menus at 16:9 on wider screens (aspect.cpp)
 02A95A78  # CPaneMgr::getGlobalVtx: a centered menu pane's place (aspect.cpp)
 029DF284  # dMenu_Fmap2DBack_c::draw: the field map on the TV (aspect.cpp)

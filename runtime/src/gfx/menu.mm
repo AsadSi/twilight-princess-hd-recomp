@@ -98,6 +98,8 @@ static void load_prefs() {
     if (saved(@"aspect", {"WWHD_ASPECT"})) aspect::set_mode([pref(@"aspect") intValue]);
     if (saved(@"bloom", {"WWHD_BLOOM"})) look::set_bloom([pref(@"bloom") intValue]);
     if (saved(@"hud", {"WWHD_HUD"})) look::set_hud([pref(@"hud") boolValue]);
+    if (saved(@"fog", {"WWHD_FOG"})) look::set_fog([pref(@"fog") intValue]);
+    if (saved(@"sharpness", {"WWHD_SHARPNESS"})) look::set_sharpness([pref(@"sharpness") intValue]);
     if (saved(@"fps60", {"WWHD_INTERP", "WWHD_INTERP_FPS"})) interp::set_mode([pref(@"fps60") intValue]);
 #ifdef WWHD_HAS_VULKAN
     if (saved(@"vkPresentMode", {"WWHD_VK_PRESENT_MODE"})) gfxvk::set_present_mode([pref(@"vkPresentMode") intValue]);
@@ -113,6 +115,8 @@ static void save_prefs() {
     if (!env_set({"WWHD_ASPECT"})) set_pref(@"aspect", @(aspect::mode()));
     if (!env_set({"WWHD_BLOOM"})) set_pref(@"bloom", @(look::bloom()));
     if (!env_set({"WWHD_HUD"})) set_pref(@"hud", @(look::hud()));
+    if (!env_set({"WWHD_FOG"})) set_pref(@"fog", @(look::fog()));
+    if (!env_set({"WWHD_SHARPNESS"})) set_pref(@"sharpness", @(look::sharpness()));
 #ifdef WWHD_HAS_VULKAN
     if (!env_set({"WWHD_VK_PRESENT_MODE"})) set_pref(@"vkPresentMode", @(gfxvk::present_mode()));
 #endif
@@ -245,6 +249,8 @@ static WWStateMenu* g_state_menu;
 - (void)setAspect:(NSMenuItem*)item { aspect::set_mode((int)item.tag); update_title(); }
 - (void)setBloom:(NSMenuItem*)item { look::set_bloom((int)item.tag); update_title(); }
 - (void)toggleHud:(NSMenuItem*)item { look::set_hud(!look::hud()); update_title(); }
+- (void)setFog:(NSMenuItem*)item { look::set_fog((int)item.tag); update_title(); }
+- (void)setSharpness:(NSMenuItem*)item { look::set_sharpness((int)item.tag); update_title(); }
 - (void)tapAmiibo:(NSMenuItem*)item { amiibo::tap((int)item.tag); }
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
     if (item.action == @selector(setRes:))
@@ -252,6 +258,11 @@ static WWStateMenu* g_state_menu;
     if (item.action == @selector(setAspect:)) item.state = item.tag == aspect::mode() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setBloom:)) item.state = item.tag == look::bloom() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(toggleHud:)) item.state = look::hud() ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(setFog:)) item.state = item.tag == look::fog() ? NSControlStateValueOn : NSControlStateValueOff;
+    if (item.action == @selector(setSharpness:)) {
+        item.state = item.tag == look::sharpness() ? NSControlStateValueOn : NSControlStateValueOff;
+        return render::feature_available(render::kFeatureLodBias);
+    }
     if (item.action == @selector(tapAmiibo:)) item.state = item.tag == amiibo::on_reader() ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(setRenderer:)) {
         render::Api a = (render::Api)item.tag;
@@ -342,6 +353,12 @@ void install_menu(NSWindow* tv) {
     for (int b = 0; b < look::kBloomModes; b++)
         add(g, [@"    " stringByAppendingString:@(look::bloom_name(b))], @selector(setBloom:), @"", b);
     add(g, @"Show the HUD", @selector(toggleHud:), @"").toolTip = @"Hearts, rupees and the buttons; menus and messages always show";
+    [g addItemWithTitle:@"Distant fog" action:nil keyEquivalent:@""].enabled = NO;
+    for (int f = 0; f < look::kBloomModes; f++)
+        add(g, [@"    " stringByAppendingString:@(look::bloom_name(f))], @selector(setFog:), @"", f);
+    [g addItemWithTitle:@"Texture sharpness" action:nil keyEquivalent:@""].enabled = NO;
+    for (int s = 0; s < look::kSharpnessModes; s++)
+        add(g, [@"    " stringByAppendingString:@(look::sharpness_name(s))], @selector(setSharpness:), @"", s);
     [g addItem:[NSMenuItem separatorItem]];
     add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");
     add(g, @"Edge smoothing, FXAA (8)", @selector(toggleFxaa:), @"8");

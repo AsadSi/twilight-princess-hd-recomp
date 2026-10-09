@@ -149,7 +149,7 @@ Display, Save States) has most of the same options.
 
 - **Saves**: the five save state slots.
 - **Graphics**: frame rate, internal resolution, aspect ratio, 16x anisotropic filtering, FXAA,
-  a performance overlay.
+  texture sharpness, bloom, the HUD, distant fog, a performance overlay.
 - **Display**: full screen, picture scaling (smooth, sharp, integer) and the GamePad screen.
 - **Mods**: mod packages and profiles.
 - **Controls**: GamePad or Pro Controller, remapping on a drawing of the controller or as a list,
@@ -176,6 +176,13 @@ full-screen menus such as Collection, the map and the save prompt. The GamePad p
 **Bloom and HUD.** Bloom (the glow around bright areas, strongest in the Twilight) at its original
 strength, reduced to half, or off; and the HUD (hearts, rupees, buttons, map icon) shown or hidden, for
 screenshots. Menus and messages always show. `WWHD_BLOOM=reduced|off`, `WWHD_HUD=0`.
+
+**Distant fog.** The haze that turns far land toward the sky's color, at its original strength, halved,
+or off (as Cemu's TP HD "Distant Fog" pack, which changes the same value). `WWHD_FOG=reduced|off`.
+
+**Texture sharpness.** Original, Sharper or Sharpest: textures seen at a distance or at an angle use
+finer detail (a level-of-detail bias of -0.5 or -1, the play settings of Cemu's TP HD pack). Sharpest
+can shimmer in motion. Metal only. `WWHD_SHARPNESS=sharper|sharpest`.
 
 Graphics choices are remembered between starts (`defaults delete tphd` resets them); an environment
 variable overrides the saved value for that start only.
@@ -235,7 +242,6 @@ the shader cache in `~/Library/Caches/tphd` (both in `data/user` in a packaged f
   effects and 2D color and texture animations move at 30 Hz, and true 60 fps logic is not available.
 - At 32:9 the TV minimap stays partway in from the left edge: the game's drawing of it does not show
   further out.
-- Not carried over from Cemu's TP HD graphic packs: distant fog and negative LOD bias.
 - amiibo: the Cave of Shadows has been entered with Wolf Link but not played through.
 - Warping straight into the Temple of Time's Darknut room (D_MN06B) crashes the GamePad dungeon map;
   reached through the temple, as in play, it works.

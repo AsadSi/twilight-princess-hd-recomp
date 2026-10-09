@@ -578,6 +578,14 @@ void tab_graphics() {
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
 
+    heading("Texture sharpness");
+    for (int s = 0; s < look::kSharpnessModes; s++) {
+        if (s) ImGui::SameLine();
+        if (radio(look::sharpness_name(s), look::sharpness() == s, render::feature_available(render::kFeatureLodBias)))
+            post_changed([s] { look::set_sharpness(s); });
+    }
+    help("Finer texture detail at a distance and at an angle (Metal). Sharpest can shimmer in motion.");
+
     heading("Bloom");
     for (int b = 0; b < look::kBloomModes; b++) {
         if (b) ImGui::SameLine();
@@ -586,6 +594,13 @@ void tab_graphics() {
     help("The glow around bright areas, strongest in the Twilight. Reduced halves it.");
     if (check("Show the HUD", look::hud(), &v)) post_changed([v] { look::set_hud(v); });
     help("Hearts, rupees, the buttons and the map icon. Menus and messages always show.");
+
+    heading("Distant fog");
+    for (int f = 0; f < look::kBloomModes; f++) {
+        if (f) ImGui::SameLine();
+        if (radio(look::bloom_name(f), look::fog() == f)) post_changed([f] { look::set_fog(f); });
+    }
+    help("The haze over far land, which takes on the sky's color. Reduced halves it.");
 #ifdef WWHD_HAS_VULKAN
     heading("Presentation (Vulkan)");
     {

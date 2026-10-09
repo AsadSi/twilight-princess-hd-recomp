@@ -5,6 +5,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 // MSL the decompiler emits (as used by Cemu's Metal renderer).
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "gfx/area_sample.h"
+#include "look.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/ISA/LatteReg.h"
@@ -232,6 +233,7 @@ struct Shader {
     std::atomic<int> state{CS_PENDING};
     int attempts = 0;                         // Metal compiles started (render thread)
     uint64_t retryFrame = 0;                  // a failed compile is retried from this frame on (0: not scheduled)
+    bool lodBias = false;                     // reads the texture units' LOD bias (add_lod_bias)
 };
 
 // A Metal compile or pipeline build can fail for reasons that have nothing to do with the source:
@@ -338,6 +340,40 @@ static std::string snap_texcoords(const char* src) {
     return out;
 }
 
+// Texture sharpness (look::lod_bias): Metal samplers have no LOD bias, so a pixel shader's samples of 2D textures
+// with the LOD left to the GPU get bias(wwhd_lod[unit]), from a buffer bind_stage fills for each draw: the option's
+// bias for mipmapped assets, 0 for everything else (the game's render targets). A change needs no recompile. The
+// sampler's own bias (SQ_TEX_SAMPLER_WORD1 LOD_BIAS) is not applied, as in Cemu's Metal renderer.
+constexpr int kLodBiasBuffer = 30;  // above a pixel shader's own buffers (support and uniform buffers, from 0)
+static bool add_lod_bias(std::string& s) {
+    static const char kMain[] = "fragment FragmentOut main0(", kCall[] = ".sample(samplr";
+    const size_t entry = s.find(kMain);
+    if (entry == std::string::npos) return false;
+    std::vector<std::pair<size_t, int>> ins;  // (where ", bias(...)" goes, unit)
+    for (size_t p = s.find(kCall, entry); p != std::string::npos; p = s.find(kCall, p + 1)) {
+        size_t d = p;
+        while (d > 0 && isdigit((unsigned char)s[d - 1])) d--;
+        if (d == p || d < 3 || s.compare(d - 3, 3, "tex")) continue;
+        const int t = atoi(s.c_str() + d);
+        if (t >= 18 || s.find("texture2d<float> tex" + std::to_string(t) + " [[", entry) == std::string::npos) continue;
+        // arguments: sampler, coordinates, then an offset or nothing (anything else is an explicit LOD or gradient)
+        size_t e = p + 7, second = 0;
+        int depth = 0, commas = 0;
+        for (; e < s.size(); e++) {
+            if (s[e] == '(') depth++;
+            else if (s[e] == ')' && --depth == 0) break;
+            else if (s[e] == ',' && depth == 1 && ++commas == 2) second = e;
+        }
+        if (e >= s.size() || commas > 2 || (commas == 2 && s.compare(second + 1, 5, "int2("))) continue;
+        ins.push_back({commas == 2 ? second : e, t});
+    }
+    if (ins.empty()) return false;
+    std::sort(ins.begin(), ins.end());
+    for (auto it = ins.rbegin(); it != ins.rend(); ++it) s.insert(it->first, ", bias(wwhd_lod[" + std::to_string(it->second) + "])");
+    s.insert(entry + strlen(kMain), "constant float* wwhd_lod [[buffer(" + std::to_string(kLodBiasBuffer) + ")]], ");
+    return true;
+}
+
 static void compile_msl(Shader* sh, const char* rawSrc, uint64_t key) {
     const int attempt = ++sh->attempts;
     const bool injectFailure = attempt <= g_test_fail_compiles;
@@ -352,6 +388,7 @@ static void compile_msl(Shader* sh, const char* rawSrc, uint64_t key) {
     }
     opt.languageVersion = MTLLanguageVersion3_0;
     std::string snapped = snap_texcoords(rawSrc);
+    sh->lodBias = add_lod_bias(snapped);
     const char* src = snapped.c_str();
     NSString* source = [NSString stringWithUTF8String:src];
     // test aid: WWHD_MSL_NONCE=<text> changes every source so the system Metal cache misses (fresh install).
@@ -970,6 +1007,8 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
     auto& rm = dec->resourceMapping;
     uint32_t texBase = vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
     uint32_t samplerBase = vertex ? SAMPLER_BASE_INDEX_VERTEX : SAMPLER_BASE_INDEX_PIXEL;
+    float lodBias[18] = {};
+    const float bias = sh->lodBias ? look::lod_bias() : 0.0f;
 
     // textures and samplers
     for (sint32 i = 0; i < rm.getTextureCount(); i++) {
@@ -990,7 +1029,9 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
              regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + (samplerIdx + samplerBase) * 3 + 2]);
         if (!tex) tex = null_texture(type);
         const uint32_t* sw = &regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + (samplerIdx + samplerBase) * 3];
-        id<MTLSamplerState> smp = get_sampler(sw, s && !s->gpuWritten && s->mips > 1);
+        const bool asset = s && !s->gpuWritten && s->mips > 1;
+        if (asset && unit < 18) lodBias[unit] = bias;
+        id<MTLSamplerState> smp = get_sampler(sw, asset);
         if (vertex) {
             [enc setVertexTexture:tex atIndex:binding];
             [enc setVertexSamplerState:smp atIndex:binding];
@@ -999,6 +1040,7 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             [enc setFragmentSamplerState:smp atIndex:binding];
         }
     }
+    if (sh->lodBias) [enc setFragmentBytes:lodBias length:sizeof lodBias atIndex:kLodBiasBuffer];
 
     // support buffer (uniform registers, remapped uniforms, helper values)
     if (rm.uniformVarsBufferBindingPoint >= 0) {

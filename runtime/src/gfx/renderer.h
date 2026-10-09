@@ -64,7 +64,7 @@ struct Backend {
     std::string (*device)();
 };
 enum Feature : int { kFeatureAniso, kFeatureFXAA, kFeatureScaleFilter, kFeatureCapture,
-                     kFeatureShaderHeadStart };
+                     kFeatureShaderHeadStart, kFeatureLodBias };
 
 extern const Backend* g_backend;
 #ifdef WWHD_HAS_METAL
