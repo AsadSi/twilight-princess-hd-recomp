@@ -52,10 +52,18 @@ done
 pkill -TERM -x wwhd 2>/dev/null && sleep 2
 BEFORE=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')
 cd "$OUT"
-WWHD_STATE_DIR=$ROOT/build/audit/states WWHD_STATE_LOAD_AT=${LOAD:+60:$LOAD} \
-WWHD_TEST_ORIGIN=$ORIGIN WWHD_TEST_PRESS=$PRESS WWHD_TEST_STICK=$STICK WWHD_TEST_RSTICK=$RSTICK WWHD_DUMP_FRAMES=$DUMPS \
-  "$APP" --game "$ROOT/game" --save "$SAVEDIR" > log.txt 2>&1 &
-PID=$!; disown $PID; START=$(date +%s)
+# a state loads only if this boot's threads wait where the saved ones did, which depends on timing: boot again
+for TRY in 1 2 3 4 5; do
+  WWHD_STATE_DIR=$ROOT/build/audit/states WWHD_STATE_LOAD_AT=${LOAD:+60:$LOAD} \
+  WWHD_TEST_ORIGIN=$ORIGIN WWHD_TEST_PRESS=$PRESS WWHD_TEST_STICK=$STICK WWHD_TEST_RSTICK=$RSTICK WWHD_DUMP_FRAMES=$DUMPS \
+    "$APP" --game "$ROOT/game" --save "$SAVEDIR" > log.txt 2>&1 &
+  PID=$!; disown $PID; START=$(date +%s)
+  [ -z "${LOAD:-}" ] && break
+  until grep -qE 'restored in|cannot load|not loaded' log.txt || ! kill -0 $PID 2>/dev/null; do sleep 0.2; done
+  grep -q 'restored in' log.txt && break
+  echo "state $LOAD did not load (try $TRY): $(grep -oE '(cannot load|not loaded).*' log.txt | head -1)"
+  kill -9 $PID 2>/dev/null; sleep 1
+done
 elapsed_lt() { perl -MTime::HiRes=time -e "exit !(time - $START < $1)"; }
 CLIPS=()
 for SHOT in "${CLIPS_AT[@]+"${CLIPS_AT[@]}"}"; do
@@ -70,13 +78,13 @@ kill -0 $PID 2>/dev/null && echo "ALIVE at ${TOTAL}s" || echo "DIED"
 (( ${#CLIPS[@]} )) && wait "${CLIPS[@]}"
 kill -TERM $PID 2>/dev/null; for _ in 1 2 3 4 5 6; do kill -0 $PID 2>/dev/null || break; sleep 0.5; done
 kill -9 $PID 2>/dev/null
-# frame dumps -> tNN.png at 480 wide (the GamePad copies are dropped unless KEEP_DRC=1: dNN.png)
+# frame dumps -> tNN.png at 480 wide (SHOT_W=<pixels>) (the GamePad copies are dropped unless KEEP_DRC=1: dNN.png)
 for SHOT in "$@"; do [[ $SHOT == v* || "${KEEP_DRC:-0}" != 1 ]] && continue; F=frame_$(perl -e "print int($SHOT * $FPS + $ORIGIN)")_drc.png; [ -f "$F" ] && sips -Z 480 "$F" --out "d$SHOT.png" >/dev/null; done
 rm -f frame_*_drc.png
 for SHOT in "$@"; do
   [[ $SHOT == v* ]] && continue
   F=frame_$(perl -e "print int($SHOT * $FPS + $ORIGIN)").png
-  [ -f "$F" ] && sips -Z 480 "$F" --out "t$SHOT.png" >/dev/null && rm "$F" || echo "no frame for ${SHOT}s"
+  [ -f "$F" ] && sips -Z ${SHOT_W:-480} "$F" --out "t$SHOT.png" >/dev/null && rm "$F" || echo "no frame for ${SHOT}s"
 done
 AFTER=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')
 (( AFTER > BEFORE )) && echo "NEW CRASH REPORT: $(ls -t ~/Library/Logs/DiagnosticReports/wwhd* | head -1)"
