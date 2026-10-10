@@ -130,15 +130,20 @@ float dist(const float* a, const float* b) {
     return std::sqrt(d);
 }
 // Halfway between two steps. Cuts (doors, re-centring, cutscene shots) are not blended: a step far larger than
-// the camera's recent motion, or larger than an absolute limit, or a turn of more than 45 degrees. Orbits keep
+// the camera's recent motion, or larger than an absolute limit, or a turn of more than 45 degrees, or the eye's
+// distance from the center changing by over a tenth in a step, far more than in the step before (the camera's
+// collision pulling it in; Link running at the camera closes 30 units of 250 every step, and blends). Orbits keep
 // the eye on the arc: its direction from the center and its distance blend separately.
-struct CamPrev { Cam s{}; bool valid = false, cut = false; float last_step = 0; };
+struct CamPrev { Cam s{}; bool valid = false, cut = false; float last_step = 0, last_pull = 0; };
 float lerp(float a, float b, float t) { return a + (b - a) * t; }
 // the step's cut decision (logic pass); its hold passes reuse it
 void decide_cut(CamPrev& p, const Cam& a, const Cam& b) {
     const float step = std::max(dist(a.eye, b.eye), dist(a.center, b.center)), prev = p.last_step;
+    const float la = dist(a.eye, a.center), lb = dist(b.eye, b.center), pull = std::fabs(la - lb), prev_pull = p.last_pull;
     p.last_step = step;
-    p.cut = step > 800 || std::fabs(a.fovy - b.fovy) > 20 || (step > 60 && step > 4 * prev + 20);
+    p.last_pull = pull;
+    p.cut = step > 800 || std::fabs(a.fovy - b.fovy) > 20 || (step > 60 && step > 4 * prev + 20) ||
+            (pull > 0.1f * std::max(la, lb) && pull > 3 * prev_pull + 10);
 }
 bool blend_cam(const CamPrev& p, const Cam& a, const Cam& b, float t, Cam& m) {
     if (p.cut) return false;
@@ -157,8 +162,7 @@ bool blend_cam(const CamPrev& p, const Cam& a, const Cam& b, float t, Cam& m) {
     } else {
         float cosang = 0, dir[3], ld = 0;
         for (int i = 0; i < 3; i++) cosang += da[i] / la * db[i] / lb;
-        // more than 45 degrees, or the camera's collision pulling it in: a cut
-        if (cosang < 0.7071f || std::fabs(la - lb) > 0.1f * std::max(la, lb)) return false;
+        if (cosang < 0.7071f) return false;  // more than 45 degrees: a cut
         for (int i = 0; i < 3; i++) dir[i] = (1 - t) * da[i] / la + t * db[i] / lb, ld += dir[i] * dir[i];
         ld = std::sqrt(ld);
         for (int i = 0; i < 3; i++) m.eye[i] = m.center[i] + dir[i] / ld * lerp(la, lb, t);
