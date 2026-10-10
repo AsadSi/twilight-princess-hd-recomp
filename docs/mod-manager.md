@@ -60,7 +60,11 @@ switches them off. They take effect on the next logic step, with no restart (`ru
 - Tunic colours: Link's tunic and cap in red, blue, purple, yellow, black or white, from the next start (the clothes'
   texture pack is recoloured once into the mod manager's `Cache` folder; a content mod that replaces it wins).
 - Big head: Link's head (face, hair and cap) twice or three times its size; not the wolf's.
+- Mouse camera: hold the right mouse button on the game window and move the mouse to turn the camera.
 - Moon jump: Link rises while the left stick is held in (L3).
+- Faster rolls and climbing: Link rolls, and climbs ladders and vine walls, half again as fast (a roll covers the same
+  ground).
+- Great spin: the spin attack is always the great spin, at any health and before it is learned.
 - Boss rush: every dungeon boss in story order. Start the boss rush (under its name) warps to Diababa; leaving a
   boss's room after the fight goes on to the next, and a game over to the same one; it ends with Ganondorf's throne
   room. Play it on a file that has the items.
