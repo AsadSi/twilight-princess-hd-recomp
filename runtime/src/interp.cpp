@@ -28,6 +28,7 @@
 #include "mods/builtin.h"
 #include "mods/mods.h"
 #include "mods/packages.h"
+#include "mods/photo.h"
 #include "runtime.h"
 #include "savestate.h"
 
@@ -281,6 +282,18 @@ static void draw_camera(Cpu* c) {
 }
 extern "C" void hook_028E13CC(Cpu* c) {  // the built-in mod "no-bars" draws with no trim, the cutscene bars' height
     const uint32_t v = c->r[3] + interp::kTrim, trim = ld32(v);
+    if (mods::photo::active()) {  // photo mode (mods/photo.cpp): its own eye and center, no bars; the game's put back
+        const uint32_t cam = c->r[3];
+        uint32_t view[6];  // eye and center
+        memcpy(view, mem::ptr(cam + interp::kEye), sizeof view);
+        mods::photo::aim(cam);
+        st32(cam + 0xD4, ld32(0x1012B374));
+        st32(v, 0);
+        f_028E13CC_orig(c);
+        memcpy(mem::ptr(cam + interp::kEye), view, sizeof view);
+        st32(v, trim);
+        return;
+    }
     if (!mods::builtin::on("no-bars")) return draw_camera(c);
     st32(v, 0);
     draw_camera(c);

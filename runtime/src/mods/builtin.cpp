@@ -8,6 +8,7 @@
 #include "builtin.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <mutex>
 
@@ -16,8 +17,11 @@
 #include "../platform/keycodes.h"
 #include "mod_json.h"
 #include "packages.h"
+#include "photo.h"
 #include "posture.h"
 #include "runtime.h"
+
+namespace interp { uint64_t logic_steps(); }
 
 namespace mods::builtin {
 namespace {
@@ -36,13 +40,21 @@ const std::vector<Mod> kCatalogue = {
      {{"time", "Time", {"Stopped", "Morning (7:00)", "Noon", "Evening (18:30)", "Night (23:00)"}}}},
     {"size", "Link's size", "Link (and the wolf) drawn smaller or bigger; the world still sees him at his usual size.",
      {{"size", "Size", {"Tiny", "Small", "Big", "Giant"}}}},
+    {"timer", "Timer", "A timer at the top of the screen, counting the game's time since the mod was switched on "
+     "(switch it off and on to reset it).", {}},
     {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
     {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
     {"warp", "Warp menu",
      "Lists the game's places here (the developers' map select) to warp to. Warping skips the story's order and "
      "can leave a file stuck: save first.",
      {}},
+    {"hero-mode", "Hero Mode on this file", "The file in play follows Hero Mode's rules (double damage; the world mirrored "
+     "from the next area unless Unmirrored Hero Mode is on). Saving while it's on keeps the file in Hero Mode.", {}},
+    {"epona", "Endless spurs", "Epona's spurs (the carrots) never run out.", {}},
     {"unmirror", "Unmirrored Hero Mode", "Hero Mode keeps the world as in Normal Mode instead of mirroring it.", {}},
+    {"photo-mode", "Photo mode", "While it's on the game holds still with no HUD, and the camera moves around what it "
+     "looked at: the right stick (arrow keys) turns it, the left stick up and down (W, S) brings it closer or further.",
+     {}},
     {"no-bars", "No cutscene bars", "Cutscenes fill the screen, without the black bars above and below.", {}},
     {"boss-health", "Boss health bar", "A boss's (or mini-boss's) health shows at the top once Link has hurt it.", {}},
     {"posture", "Posture combat",
@@ -56,6 +68,7 @@ const std::vector<Mod> kCatalogue = {
 constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0;
 
 std::mutex g_mutex;
+std::atomic<double> g_timer{-1};
 json::Value g_state;  // the active profile's built-in state (packages.h)
 uint64_t g_revision = ~0ull;
 
@@ -75,6 +88,7 @@ bool save_state(const std::string& mod, const json::Value& v, std::string& error
 }  // namespace
 
 const std::vector<Mod>& catalogue() { return kCatalogue; }
+double timer() { return g_timer.load(std::memory_order_relaxed); }
 
 bool on(const std::string& mod) {
     std::lock_guard guard(g_mutex);
@@ -120,6 +134,11 @@ void step() {
         g_state = std::move(s);
     }
     posture::step();
+    photo::step();
+    static uint64_t timer_start = 0;  // logic step + 1 when the timer was switched on
+    if (!on("timer")) timer_start = 0;
+    else if (!timer_start) timer_start = interp::logic_steps() + 1;
+    g_timer = timer_start ? (double)(interp::logic_steps() + 1 - timer_start) / 30 : -1;
     bool keys[256];  // turbo: gx2's pacing off while T is held
     input::held_keys(keys);
     gx2::set_turbo(on("turbo") && keys[kVK_ANSI_T]);
@@ -179,6 +198,21 @@ void step() {
         sized = on("size");
         for (int i = 0; i < 3; i++) stf32(model + 0x14 + 4 * i, sized ? kSize[choice("size", "size")] : 1);
     }
+
+    // Hero Mode on this file: the save's Hero Mode flag (+0x1D7), which the damage (02905130) reads as it goes and a
+    // scene's start reads for mirroring; set while the mod is on, the file's own value put back when it is turned off
+    static int hero = -1;  // the file's own flag, while the mod holds it
+    if (on("hero-mode")) {
+        if (hero < 0) hero = ld8(kSave + 0x1D7);
+        st8(kSave + 0x1D7, 1);
+    } else if (hero >= 0) {
+        st8(kSave + 0x1D7, (uint8_t)hero);
+        hero = -1;
+    }
+
+    // endless spurs: Epona (dComIfGp_getHorseActor, the player pointer after Link's; daHorse_c, process 0xEF in HD)
+    // has her spurs refilled to 6 (m_lashCnt, +0x1704 in HD), as the game does when they recover
+    if (const uint32_t horse = ld32(kPlayer + 4); on("epona") && horse && ld16(horse + 8) == 0xEF) st16(horse + 0x1704, 6);
 
     // the time of day, status B's float at +0x34 in degrees (15 an hour from midnight), which the environment reads,
     // advances and writes back each step (dScnKy_env_light_c::setDaytime)

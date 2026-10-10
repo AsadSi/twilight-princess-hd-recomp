@@ -19,4 +19,5 @@ int choice(const std::string& mod, const std::string& option);  // index into th
 bool set_on(const std::string& mod, bool on, std::string& error);
 bool set_choice(const std::string& mod, const std::string& option, int index, std::string& error);
 void step();  // main01's frame loop, once per logic step (interp.cpp)
+double timer();  // the Timer mod's seconds, or -1 while it is off (any thread)
 }  // namespace mods::builtin

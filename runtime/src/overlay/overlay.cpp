@@ -35,6 +35,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../input_map.h"
 #include "../mods/builtin.h"
 #include "../mods/packages.h"
+#include "../mods/photo.h"
 #include "../mods/posture.h"
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
@@ -1587,9 +1588,11 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
     const std::string toast = open ? std::string() : ss::last_message();
     const mods::posture::Hud bars = mods::posture::hud();
-    const bool posture = !open && (bars.link_alpha > 0 || bars.foe_alpha > 0 || bars.deflect > 0 || bars.boss_alpha > 0);
+    const bool quiet = open || mods::photo::active();  // the menu, or photo mode: no bars or timer over the game
+    const bool posture = !quiet && (bars.link_alpha > 0 || bars.foe_alpha > 0 || bars.deflect > 0 || bars.boss_alpha > 0);
+    const double timer = quiet ? -1 : mods::builtin::timer();
     U.linearized = false;
-    if (!open && !perf && toast.empty() && !posture) {
+    if (!open && !perf && toast.empty() && !posture && timer < 0) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -1632,6 +1635,17 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     feed_gamepad(io, open && U.cap_action < 0);
     ImGui::NewFrame();
     if (posture) posture_bars(bars, io.DisplaySize);
+    if (timer >= 0) {  // the Timer mod: top middle, h:mm:ss.cc
+        const int cs = (int)(timer * 100);
+        char s[32];
+        snprintf(s, sizeof s, "%d:%02d:%02d.%02d", cs / 360000, cs / 6000 % 60, cs / 100 % 60, cs % 100);
+        const float size = ImGui::GetFontSize() * 1.3f;
+        const ImVec2 w = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0, s);
+        const ImVec2 at(io.DisplaySize.x / 2 - w.x / 2, io.DisplaySize.y * 0.02f);
+        ImDrawList* d = ImGui::GetBackgroundDrawList();
+        d->AddText(ImGui::GetFont(), size, {at.x + 1, at.y + 1}, IM_COL32(0, 0, 0, 200), s);
+        d->AddText(ImGui::GetFont(), size, at, IM_COL32(255, 250, 235, 255), s);
+    }
     if (open) settings_window();
     if (perf) perf_window(open);
     if (!toast.empty()) {

@@ -2,7 +2,8 @@
 // Bloom: mDoGph_gInf_c's bloom object (10182D24; the decomp's bloom_c: enable +0x08, bright-pass ratio +0x0C,
 // which the environment sets every frame) is drawn by bloom_c::draw (02AEA3E4); Reduced halves the ratio, Off
 // draws without it (the mono color pass, +0x07, still runs). The HUD is the meter's draw (dMeter2Draw_c::draw,
-// 02A31164: hearts, rupees, the buttons, the map icon); hidden, it is not drawn, and menus and messages are.
+// 02A31164: hearts, rupees, the buttons, the map icon); hidden (or in photo mode), it is not drawn, and menus and
+// messages are.
 // Distant fog: HD fogs in its vertex shaders, fog = opacity * clamp(GX fog z / reach, 0, 1) toward the fog color.
 // GXSetFog (02BDAD3C) passes the GX parameters to 02BDAB7C, which reads opacity (1012C898, 0.925) and reach
 // (1012C89C, 0.9), cuts each to twentieths and packs them into the fog constants as opacity + 21 * reach. Reduced
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "mods/photo.h"
 #include "runtime.h"
 
 namespace look {
@@ -83,7 +85,7 @@ extern "C" void hook_02AEA3E4(Cpu* c) {  // bloom_c::draw(bloom_c*)
 
 extern "C" void f_02A31164_orig(Cpu* c);
 extern "C" void hook_02A31164(Cpu* c) {  // dMeter2Draw_c::draw
-    if (look::hud()) f_02A31164_orig(c);
+    if (look::hud() && !mods::photo::active()) f_02A31164_orig(c);
 }
 
 extern "C" void f_02BDAB7C_orig(Cpu* c);

@@ -43,13 +43,21 @@ switches them off. They take effect on the next logic step, with no restart (`ru
 - Fast text: each page of a message shows at once, as after pressing A.
 - Time of day: stops the clock, or holds it at 7:00, noon, 18:30 or 23:00, where time passes at all (not in twilight).
 - Link's size: Link and the wolf drawn tiny, small, big or giant (only the picture; the world still sees his size).
+- Timer: a timer at the top of the screen counting the game's time since the mod was switched on (switch it off and
+  on to reset it).
 - Turbo key: while T is held the game runs unpaced, as fast as the Mac renders it (Uncapped's pacing, without the
   hold passes of frame interpolation).
 - Moon jump: Link rises while the left stick is held in (L3).
 - Warp menu: lists the developers' map select places (by area; stage, room, entrance and story layer) under its
   name, with a Warp button. Warping ignores the story's order and can leave a file stuck.
+- Hero Mode on this file: the file in play follows Hero Mode's rules (the save's Hero Mode flag set while it's on and
+  put back when it's turned off; saving while it's on keeps the file in Hero Mode).
+- Endless spurs: Epona's spurs never run out.
 - Unmirrored Hero Mode: Hero Mode keeps Normal Mode's world (as Cemu's Disable Mirroring pack does), with its double
   damage.
+- Photo mode: while it's on the game holds still with no HUD or bars, and the camera turns around what it looked at
+  (right stick, arrow keys) and comes closer or goes further (left stick up and down, W and S). It is off at each
+  launch.
 - No cutscene bars: cutscenes fill the screen.
 - Boss health bar: a boss's or mini-boss's health, at the top once Link has hurt it.
 - Posture combat: Sekiro's posture on top of TP's sword fighting (`runtime/src/mods/posture.cpp`). Every blow Link
