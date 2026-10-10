@@ -33,6 +33,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
+#include "../mods/builtin.h"
 #include "../mods/packages.h"
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
@@ -888,10 +889,37 @@ void package_controls() {
     native_confirm_dialog(confirm, error);
 }
 
+// Built-in mods (mods/builtin.h): a switch each, and their options, kept in the active profile
+void builtin_controls() {
+    static std::string error;
+    heading("Built-in mods");
+    for (const auto& mod : mods::builtin::catalogue()) {
+        ImGui::PushID(mod.id.c_str());
+        bool on = mods::builtin::on(mod.id);
+        if (ImGui::Checkbox("##builtin_on", &on)) mods::builtin::set_on(mod.id, on, error);
+        ImGui::SameLine();
+        if (ImGui::TreeNode("details", "%s", mod.name.c_str())) {
+            ImGui::TextWrapped("%s", mod.description.c_str());
+            for (const auto& option : mod.options) {
+                const int current = mods::builtin::choice(mod.id, option.id);
+                if (ImGui::BeginCombo(option.name.c_str(), option.choices[current].c_str())) {
+                    for (int i = 0; i < (int)option.choices.size(); i++)
+                        if (ImGui::Selectable(option.choices[i].c_str(), i == current)) mods::builtin::set_choice(mod.id, option.id, i, error);
+                    ImGui::EndCombo();
+                }
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    if (!error.empty()) ImGui::TextWrapped("%s", error.c_str());
+}
+
 void tab_mods() {
     heading("Mod manager");
-    note("Mod packages and profiles. Twilight Princess HD has no built-in mods yet.");
+    note("Built-in mods and mod packages, saved in the active profile.");
     if (ImGui::Button("Disable all mods")) hostui::post([] { mods::packages::disable_all(); });
+    builtin_controls();
     package_controls();
 }
 

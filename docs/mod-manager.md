@@ -32,6 +32,17 @@ guide the design; any future reuse requires a separate license review.
 Open the in-game settings overlay (F1, Fn+F1 on many Macs, Cmd+, or Settings in
 the menu) and select **Mods**.
 
+The Built-in mods section lists the mods that come with the game, each with a switch and, under its name, its
+options. They are kept in the active profile (`profiles.json`, `builtin`), so profiles switch them too, and Disable all
+switches them off. They take effect on the next logic step, with no restart (`runtime/src/mods/builtin.cpp`):
+
+- Infinite ammo and oil: what the game takes from arrows, bombs, slingshot seeds or lantern oil is given back (each one
+  can be left out).
+- Damage multiplier: Link takes x2, x4, x0.5 or no damage, or dies from one hit.
+- Rupee multiplier: rupees picked up or given count x2, x3, x5 or x10, up to what the wallet holds.
+
+They change the live save data after each step (what changed, not fixed values), so the game's own rules still apply.
+
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages
 start disabled; nothing from a package is loaded until you enable it. Enabling

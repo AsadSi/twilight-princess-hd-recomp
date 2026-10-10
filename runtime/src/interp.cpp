@@ -24,6 +24,7 @@
 #include "amiibo.h"
 #include "aspect.h"
 #include "interp.h"
+#include "mods/builtin.h"
 #include "mods/mods.h"
 #include "mods/packages.h"
 #include "runtime.h"
@@ -601,4 +602,5 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     amiibo::service();
     aspect::service(c);
     mods::update_aiming();
+    mods::builtin::step();
 }

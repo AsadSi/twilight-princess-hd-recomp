@@ -35,6 +35,11 @@ std::vector<std::pair<std::string,std::string>> unconfirmed_native(const std::st
 bool confirm_native(const std::string& id,std::string& error);
 bool configure(const std::string& id,const std::string& option,const json::Value& value,std::string& error);
 void disable_all();
+// The active profile's built-in mods (mods/builtin.cpp): {mod id: {"on": bool, option id: choice}}; set_builtin saves
+// one mod's state; revision() changes with every save (a profile switch too).
+json::Value builtin_state();
+bool set_builtin(const std::string& id,const json::Value& state,std::string& error);
+uint64_t revision();
 std::vector<std::string> profiles();
 std::string current_profile();
 bool create_profile(const std::string& name,std::string& error);
