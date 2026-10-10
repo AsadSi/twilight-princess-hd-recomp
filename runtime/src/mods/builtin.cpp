@@ -22,6 +22,7 @@
 #include "photo.h"
 #include "posture.h"
 #include "runtime.h"
+#include "../savestate.h"
 
 namespace interp {
 uint64_t logic_steps();
@@ -49,6 +50,8 @@ const std::vector<Mod> kCatalogue = {
      "the game starts.", {{"colour", "Colour", {"Red", "Blue", "Purple", "Yellow", "Black", "White"}}}},
     {"big-head", "Big head", "Link's head drawn bigger, as in Ocarina of Time's Big Head Mode (not the wolf's).",
      {{"size", "Size", {"Twice the size", "Three times"}}}},
+    {"autosave", "Autosave", "The Quest Log in play is saved a few seconds into each new area, as the Save menu would "
+     "save it.", {}},
     {"timer", "Timer", "A timer at the top of the screen, counting the game's time since the mod was switched on "
      "(switch it off and on to reset it).", {}},
     {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
@@ -116,6 +119,20 @@ bool door(Cpu* c, uint32_t id) {
     const uint32_t actor = guest_call(c, 0x02ACE114, {0x02AD990C, slot});
     const int name = actor ? ld16(actor + 8) : 0;
     return name == 0xE9 || (name >= 0x227 && name <= 0x22C) || name == 0x22E;
+}
+// the Quest Log in play saved as the Save menu saves it (dMenu_save_c::dataWrite 02A08494, dataSave 02A06360): the
+// stage's memory put back (dSv_info_c::putSave 02AA856C, with the stage info's save table: the stage data's (+0x52C0)
+// virtual at +0x174, then (+9 >> 1) & 0x1F), dSv_info_c::memory_to_card (02AA8ECC) into a buffer, its checksum (02AF3048)
+// and the save storage manager's (10187E80) write request (02AF25B8) for the slot, dSv_info_c::mDataNum (10146700)
+void autosave(Cpu* c) {
+    static const uint32_t buf = mem::host_alloc(0xE00, 32);
+    const uint32_t data = kSave + 0x52C0, info = guest_call(c, ld32(ld32(data + 4) + 0x174), {data});
+    if (!info) return;
+    guest_call(c, 0x02AA856C, {kSave, (uint32_t)(ld8(info + 9) >> 1) & 0x1F});
+    guest_call(c, 0x02AA8ECC, {kSave, buf});
+    guest_call(c, 0x02AF3048, {buf});
+    guest_call(c, 0x02AF25B8, {0x10187E80, ld8(0x10146700), buf, 0xE00});
+    ss::notify("Saved to Quest Log " + std::to_string(ld8(0x10146700) + 1));
 }
 }  // namespace
 
@@ -186,6 +203,14 @@ void step(Cpu* c) {
     fast |= on("quick-doors") && ((now && ld16(now + 0x305C) == 0xB0) || (fader && ld32(fader) != 1) || ld8(0x1012B3BE) ||
                                   ld8(0x1011DAFC) || (event && (door(c, ld32(kEvent + 0xC4)) || door(c, ld32(kEvent + 0xC8)))));
     gx2::set_turbo(fast);
+    // autosave: once a new area (the stage name at 1014A5E8; not the title, F_SP102) has been in play for 3 s with no
+    // event and the screen clear
+    static char stage[8] = {};
+    static int quiet = -1;  // steps the area has been quiet, -1 once saved
+    if (memcmp(stage, mem::ptr(0x1014A5E8), 8)) memcpy(stage, mem::ptr(0x1014A5E8), 8), quiet = 0;
+    if (on("autosave") && quiet >= 0 && now && !event && fader && ld32(fader) == 1 && strncmp(stage, "F_SP102", 8) &&
+        ++quiet >= 90)
+        quiet = -1, autosave(c);
     // quick transform: G taps the GamePad screen's transform button (top right, Link and the wolf) for a few steps
     static int tap = 0;  // steps left of the tap
     static bool g_key = false;

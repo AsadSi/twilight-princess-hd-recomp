@@ -80,6 +80,7 @@ void request_load(int slot);
 std::string bug_report_text();          // where the save files are, for a bug report
 std::string states_dir();               // where slots live (created on first use)
 std::string last_message();             // short status for the title bar ("" when stale)
+void notify(const std::string& text);    // a short status shown on screen for a few seconds (last_message)
 
 // ---- game thread: call at the frame boundary (top of the per-frame function) ----
 void service(Cpu* c);
