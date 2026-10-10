@@ -258,7 +258,7 @@ endif()
 # External native package fixture and isolated lifecycle/integration tests.
 add_library(mod_fixture MODULE runtime/tools/mod_fixture.cpp)
 target_include_directories(mod_fixture PRIVATE runtime/include)
-add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/packages.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp)
+add_executable(mod_package_test runtime/tools/mod_package_test.cpp runtime/src/mods/packages.cpp runtime/src/mods/mod_archive.cpp runtime/src/mods/content.cpp runtime/src/mods/cemu_pack.cpp runtime/src/mods/tunic.cpp)
 target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})

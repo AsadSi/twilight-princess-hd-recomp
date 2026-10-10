@@ -45,6 +45,8 @@ const std::vector<Mod> kCatalogue = {
      {{"time", "Time", {"Stopped", "Morning (7:00)", "Noon", "Evening (18:30)", "Night (23:00)"}}}},
     {"size", "Link's size", "Link (and the wolf) drawn smaller or bigger; the world still sees him at his usual size.",
      {{"size", "Size", {"Tiny", "Small", "Big", "Giant"}}}},
+    {"tunic", "Tunic colours", "Link's green clothes (the tunic and cap) in another colour. Takes effect the next time "
+     "the game starts.", {{"colour", "Colour", {"Red", "Blue", "Purple", "Yellow", "Black", "White"}}}},
     {"big-head", "Big head", "Link's head drawn bigger, as in Ocarina of Time's Big Head Mode (not the wolf's).",
      {{"size", "Size", {"Twice the size", "Three times"}}}},
     {"timer", "Timer", "A timer at the top of the screen, counting the game's time since the mod was switched on "

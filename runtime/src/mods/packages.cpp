@@ -2,6 +2,7 @@
 #include "mod_archive.h"
 #include "content.h"
 #include "cemu_pack.h"
+#include "tunic.h"
 #include "../platform/host.h"
 #include "wwhd_mod.h"
 #include <algorithm>
@@ -225,7 +226,11 @@ void initialize(){
                 record.active=true;record.status=std::to_string(record.manifest.graphics->textures.size())+" texture rules, "+std::to_string(record.manifest.graphics->shaders.size())+" shader candidates";
             }}
             cemu::activate(graphics);
-            content::activate(std::move(files));
+            // tunic colours (tunic.h): the clothes' pack recoloured, unless a content mod replaces it
+            if(const auto& t=profile().get("builtin").get("tunic");t.get("on").type==Value::Bool&&t.get("on").boolean){
+                const auto& look=t.get("colour");auto pack=tunic::pack(content::installed_game(),root/"Cache",look.type==Value::Number?(int)look.number:0);
+                if(!pack.empty())files.emplace("res/object/kmdl.pack.gz",pack);}
+            content::activate(std::move(files),root/"Cache");
         } catch(const std::exception& e) {last_problem=e.what();}
         dirty=true;
     }catch(const std::exception& e){last_problem=e.what();ready=false;records.clear();fprintf(stderr,"[mod-manager] %s\n",e.what());}
