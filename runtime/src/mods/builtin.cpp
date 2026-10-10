@@ -88,7 +88,8 @@ const std::vector<Mod> kCatalogue = {
     {"boss-health", "Boss health bar", "A boss's (or mini-boss's) health shows at the top once Link has hurt it.", {}},
     {"posture", "Posture combat",
      "Sekiro's posture on TP's sword fighting. Blocking with the shield fills Link's posture and a full bar breaks his "
-     "guard; a blow that lands just as Link shield bashes (R while locked on) is a parry, which fills the attacker's "
+     "guard; a blow that lands just as Link shield bashes (ZR while locked on, C on the keyboard) is a parry, which "
+     "fills the attacker's "
      "posture instead. Blows, parries and shield bashes fill an enemy's posture; once it breaks, the next blow is a "
      "deathblow. Posture drains when the fighting pauses.",
      {{"window", "Parry window", {"Normal (0.3 s)", "Generous (0.5 s)", "Strict (0.15 s)"}}}},

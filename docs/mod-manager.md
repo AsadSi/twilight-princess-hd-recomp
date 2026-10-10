@@ -83,7 +83,7 @@ switches them off. They take effect on the next logic step, with no restart (`ru
 - Posture combat: Sekiro's posture on top of TP's sword fighting (`runtime/src/mods/posture.cpp`). Every blow Link
   takes on his shield fills his posture bar (above the bottom edge), guard-breaking blows too; a full bar is the
   game's guard break. A blow on the shield within the parry window (0.3 s, or 0.5 s or 0.15 s) of starting a shield
-  bash (lock on; the HUD shows which button is Shield Attack) is a parry: Link barely loses posture and steps back
+  bash (ZR while locked on, C on the keyboard) is a parry: Link barely loses posture and steps back
   less, and the attacker takes posture instead.
   Link's blows, shield bashes and blows an enemy blocks fill the enemy's bar (near the top, for the enemy fought
   last); a full bar staggers it and marks it red for 5 s, and the next blow that hurts it is a deathblow (a boss
