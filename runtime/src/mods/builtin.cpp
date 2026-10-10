@@ -15,6 +15,7 @@
 #include "../gx2/gx2.h"
 #include "../input.h"
 #include "../platform/keycodes.h"
+#include "boss_rush.h"
 #include "mod_json.h"
 #include "packages.h"
 #include "photo.h"
@@ -44,6 +45,10 @@ const std::vector<Mod> kCatalogue = {
      "(switch it off and on to reset it).", {}},
     {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
     {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
+    {"boss-rush", "Boss rush",
+     "Every dungeon boss in story order: Start warps to the first, and leaving a boss's room after the fight goes on to "
+     "the next (a game over, to the same one). Play it on a file that has the items for them.",
+     {}},
     {"warp", "Warp menu",
      "Lists the game's places here (the developers' map select) to warp to. Warping skips the story's order and "
      "can leave a file stuck: save first.",
@@ -135,6 +140,7 @@ void step() {
     }
     posture::step();
     photo::step();
+    boss_rush::step();
     static uint64_t timer_start = 0;  // logic step + 1 when the timer was switched on
     if (!on("timer")) timer_start = 0;
     else if (!timer_start) timer_start = interp::logic_steps() + 1;

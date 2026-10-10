@@ -48,6 +48,9 @@ switches them off. They take effect on the next logic step, with no restart (`ru
 - Turbo key: while T is held the game runs unpaced, as fast as the Mac renders it (Uncapped's pacing, without the
   hold passes of frame interpolation).
 - Moon jump: Link rises while the left stick is held in (L3).
+- Boss rush: every dungeon boss in story order. Start the boss rush (under its name) warps to Diababa; leaving a
+  boss's room after the fight goes on to the next, and a game over to the same one; it ends with Ganondorf's throne
+  room. Play it on a file that has the items.
 - Warp menu: lists the developers' map select places (by area; stage, room, entrance and story layer) under its
   name, with a Warp button. Warping ignores the story's order and can leave a file stuck.
 - Hero Mode on this file: the file in play follows Hero Mode's rules (the save's Hero Mode flag set while it's on and

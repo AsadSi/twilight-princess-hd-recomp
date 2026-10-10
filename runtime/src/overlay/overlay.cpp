@@ -33,6 +33,7 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
+#include "../mods/boss_rush.h"
 #include "../mods/builtin.h"
 #include "../mods/packages.h"
 #include "../mods/photo.h"
@@ -924,6 +925,17 @@ void warp_controls() {
     ImGui::EndDisabled();
 }
 
+// The Boss rush mod: its start, and where it is
+void boss_rush_controls() {
+    ImGui::BeginDisabled(!ld32(0x1014B5B0));  // no Link: not playing a file
+    if (ImGui::Button("Start the boss rush")) mods::boss_rush::start();
+    ImGui::EndDisabled();
+    if (const std::string s = mods::boss_rush::status(); !s.empty()) {
+        ImGui::SameLine();
+        ImGui::TextUnformatted(s.c_str());
+    }
+}
+
 // Built-in mods (mods/builtin.h): a switch each, and their options, kept in the active profile
 void builtin_controls() {
     static std::string error;
@@ -933,7 +945,8 @@ void builtin_controls() {
         bool on = mods::builtin::on(mod.id);
         const bool turned_on = ImGui::Checkbox("##builtin_on", &on) && mods::builtin::set_on(mod.id, on, error) && on;
         ImGui::SameLine();
-        if (mod.id == "warp" && on) ImGui::SetNextItemOpen(true, turned_on ? ImGuiCond_Always : ImGuiCond_Once);  // its list
+        if ((mod.id == "warp" || mod.id == "boss-rush") && on)  // their controls
+            ImGui::SetNextItemOpen(true, turned_on ? ImGuiCond_Always : ImGuiCond_Once);
         if (ImGui::TreeNode("details", "%s", mod.name.c_str())) {
             ImGui::TextWrapped("%s", mod.description.c_str());
             for (const auto& option : mod.options) {
@@ -945,6 +958,7 @@ void builtin_controls() {
                 }
             }
             if (mod.id == "warp" && on) warp_controls();
+            if (mod.id == "boss-rush" && on) boss_rush_controls();
             ImGui::TreePop();
         }
         ImGui::PopID();
