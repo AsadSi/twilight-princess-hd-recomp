@@ -262,6 +262,19 @@ extern "C" void hook_02A95A78(Cpu* c) {  // CPaneMgr::getGlobalVtx(Vec* out, CPa
         stf32(out, 304 + (ldf32(out) - 304) * k);
 }
 
+// The HUD's item counts (the arrows beside the bow, ...): dMeter2Draw_c::draw draws each digit with J2DPicture::draw(x,
+// y, w, h) (02B38B94, from 02A31300..02A314B4) at its item's place as 16:9 had it (the item's pane manager keeps it),
+// while the item itself keeps its 16:9 distance from the screen's edge (draw_wide): the digits go with it.
+extern "C" void f_02B38B94_orig(Cpu* c);
+extern "C" void hook_02B38B94(Cpu* c) {
+    const double extra = (ld16(aspect::kTvSize + 4) - aspect::kWideW) / 2.0;
+    if (c->lr >= 0x02A31300 && c->lr < 0x02A314B4 && extra > 0.5) {
+        const double x16 = 304 + (c->f[1].ps0 - 304) * 608 / aspect::kWideW;  // in the layout's units
+        c->f[1].ps0 += x16 > 438.67 ? extra : x16 < 169.33 ? -extra : 0;  // the right or left third, as draw_wide's anchor
+    }
+    f_02B38B94_orig(c);
+}
+
 // J2DPane's cull test for a picture drawn at a place (02B3420C, from J2DPicture::draw(x, y, w, h); the TV minimap):
 // HD drops one that ends left of x -100 or starts right of 708, 16:9's screen in the layout's units (100AAA5C,
 // 100AAA60, which other code shares). Wider screens reach further: the test gets the screen's edges.

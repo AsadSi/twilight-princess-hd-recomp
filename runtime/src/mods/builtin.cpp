@@ -88,10 +88,10 @@ const std::vector<Mod> kCatalogue = {
     {"boss-health", "Boss health bar", "A boss's (or mini-boss's) health shows at the top once Link has hurt it.", {}},
     {"posture", "Posture combat",
      "Sekiro's posture on TP's sword fighting. Blocking with the shield fills Link's posture and a full bar breaks his "
-     "guard; a block just after the shield goes up (lock on right before the hit) is a deflect, which fills the "
-     "attacker's posture instead. Blows, deflects and shield bashes fill an enemy's posture; once it breaks, the next "
-     "blow is a deathblow. Posture drains when the fighting pauses.",
-     {{"window", "Deflect window", {"Normal (0.2 s)", "Generous (0.33 s)", "Strict (0.1 s)"}}}},
+     "guard; a blow that lands just as Link shield bashes (R while locked on) is a parry, which fills the attacker's "
+     "posture instead. Blows, parries and shield bashes fill an enemy's posture; once it breaks, the next blow is a "
+     "deathblow. Posture drains when the fighting pauses.",
+     {{"window", "Parry window", {"Normal (0.3 s)", "Generous (0.5 s)", "Strict (0.15 s)"}}}},
 };
 
 constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0, kEvent = 0x1014A6B0;  // kEvent: dEvt_control_c

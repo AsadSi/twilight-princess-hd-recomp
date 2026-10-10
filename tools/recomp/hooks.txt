@@ -7,6 +7,7 @@
 02B34334  # J2DPane::draw: the HUD to the edges and menus at 16:9 on wider screens (aspect.cpp)
 02A95A78  # CPaneMgr::getGlobalVtx: a centered menu pane's place (aspect.cpp)
 02B3420C  # J2DPane's cull test for pictures drawn at a place: the screen's edges (aspect.cpp)
+02B38B94  # J2DPicture::draw(x, y, w, h): the HUD's item counts beside their items on a wide TV (aspect.cpp)
 # frame interpolation (interp.cpp): camera, models, the play scene's draw, and what hold passes skip
 028E13CC  # camera_draw
 02B5CF50  # J3DModel::viewCalc

@@ -4,9 +4,9 @@
 // blow on the shield with procGuardSlipInit (0206B164; r4 the blow's size, r5 Link's collider), or for a
 // guard-breaking blow (a Darknut's swing) with procGuardBreakInit (0206AA24, from checkDamageAction at 0206CFFC with
 // the size in r25 and the collider in r29); with the mod both slide Link back unless the bar is full. HD's own break on
-// every fourth block (the count at +0x3045) is off. A blow within the deflect window of raising the shield (the guard
-// flag, 0x08000000 in mNoResetFlg2 at +0x57C, which setShieldGuard keeps while Link is locked on and can guard), or
-// of pressing ZL again while it is up, is a deflect: Link barely loses posture and steps back less (mNormalSpeed
+// every fourth block (the count at +0x3045) is off. A blow on the shield within the parry window of a shield bash's
+// start (Link's mProcID +0x305C becoming PROC_GUARD_ATTACK, 0x1E) is a parry: Link barely loses posture and steps back
+// less (mNormalSpeed
 // +0x3458), a metal clang rings (mZ2Link +0x2CDC, startCollisionSE 02C146F8, the Z2SE_HIT_METAL_WEAPON setGuardSe
 // 0206A948 plays for a bomb), the scene stops for a moment (dScnPly_c's next pause timer, 10129B6B), and the
 // attacker (the hitting collider's actor, 028FF5B8 on the collider's tg part at +0x9C) takes posture.
@@ -21,7 +21,6 @@
 #include <mutex>
 #include <unordered_map>
 
-#include "../input.h"
 #include "builtin.h"
 #include "runtime.h"
 
@@ -42,8 +41,8 @@ struct Foe {
 std::unordered_map<uint32_t, Foe> g_foes;  // by actor, for the Link in play
 uint32_t g_link = 0, g_foe = 0;            // g_foe: the enemy fought last
 float g_posture = 0;
-uint64_t g_last = 0, g_guard_since = 0, g_deflect = 0;
-bool g_guarding = false;
+uint64_t g_last = 0, g_bash_since = 0, g_deflect = 0;
+bool g_guarding = false, g_bashing = false;
 uint32_t g_boss = 0, g_boss_link = 0;  // the Boss health bar mod: the boss hurt last, while that Link is in play
 int g_boss_max = 1;                    // its health when first hurt
 std::mutex g_hud_mutex;
@@ -80,14 +79,13 @@ void step() {
     if (link != g_link || !builtin::on("posture")) {  // a stage entered or a file loaded: start over
         g_link = builtin::on("posture") ? link : 0;
         g_foes.clear();
-        g_foe = 0, g_posture = 0, g_guarding = false, g_deflect = 0;
+        g_foe = 0, g_posture = 0, g_guarding = false, g_bashing = false, g_deflect = 0;
     }
     Hud h;
     if (g_link) {
-        const bool up = ld32(link + kFlags) & kGuard, zl = input::read().buttons & input::kZL;
-        static bool held = false;
-        if ((up && !g_guarding) || (zl && !held)) g_guard_since = now();  // the shield raised, or lock-on pressed again
-        g_guarding = up, held = zl;
+        const bool up = ld32(link + kFlags) & kGuard, bash = ld16(link + 0x305C) == 0x1E;
+        if (bash && !g_bashing) g_bash_since = now();  // a shield bash started
+        g_guarding = up, g_bashing = bash;
         if (now() - g_last > 45) g_posture = std::max(0.0f, g_posture - (up ? 0.5f : 0.25f));  // 15/s guarding, 7.5/s
         for (auto it = g_foes.begin(); it != g_foes.end();) {
             Foe& f = it->second;
@@ -143,14 +141,15 @@ void block(Cpu* c, uint32_t spl, uint32_t collider, bool breaker) {
         f_0206B164_orig(c);
     };
     st8(link + kBlocks, 0);
-    static const uint64_t kWindow[] = {6, 10, 3};  // steps: 0.2 s, 0.33 s, 0.1 s
-    const bool deflect = g_guarding && now() - g_guard_since <= kWindow[mods::builtin::choice("posture", "window")];
+    static const uint64_t kWindow[] = {9, 15, 5};  // steps: 0.3 s, 0.5 s, 0.15 s
+    const bool deflect = g_bash_since && now() - g_bash_since <= kWindow[mods::builtin::choice("posture", "window")];
     const bool huge = spl == 2 || spl == 7 || spl == 11 || spl == 14, large = spl == 1 || spl == 6 || spl == 10 || spl == 13;
     g_last = now();
     if (deflect) {
         const uint32_t attacker = collider ? guest_call(c, 0x028FF5B8, {collider + 0x9C}) : 0;
         g_posture = std::min(kMax - 1, g_posture + 4);
         g_deflect = now();
+        LOG("[posture] parry");
         hurt(attacker, breaker || huge ? 40 : 30);
         hitstop(3);
         guest_call(c, 0x02C146F8, {link + 0x2CDC, 0x4000B, 0x28});  // mZ2Link.startCollisionSE: a metal clang
