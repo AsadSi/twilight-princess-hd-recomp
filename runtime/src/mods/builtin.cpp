@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 
 #include "../gx2/gx2.h"
@@ -22,7 +23,10 @@
 #include "posture.h"
 #include "runtime.h"
 
-namespace interp { uint64_t logic_steps(); }
+namespace interp {
+uint64_t logic_steps();
+uint32_t fader();
+}  // namespace interp
 
 namespace mods::builtin {
 namespace {
@@ -41,9 +45,18 @@ const std::vector<Mod> kCatalogue = {
      {{"time", "Time", {"Stopped", "Morning (7:00)", "Noon", "Evening (18:30)", "Night (23:00)"}}}},
     {"size", "Link's size", "Link (and the wolf) drawn smaller or bigger; the world still sees him at his usual size.",
      {{"size", "Size", {"Tiny", "Small", "Big", "Giant"}}}},
+    {"big-head", "Big head", "Link's head drawn bigger, as in Ocarina of Time's Big Head Mode (not the wolf's).",
+     {{"size", "Size", {"Twice the size", "Three times"}}}},
     {"timer", "Timer", "A timer at the top of the screen, counting the game's time since the mod was switched on "
      "(switch it off and on to reset it).", {}},
     {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
+    {"quick-doors", "Quick doors and scenes", "Doors, and the fades between areas, play as fast as with the turbo key.", {}},
+    {"skip-cutscenes", "Fast-forward cutscenes", "Hold + in a cutscene (or any scene the game plays out) to run it as "
+     "fast as with the turbo key. One the game lets you skip still skips with a press of +.", {}},
+    {"direct-camera", "Direct camera", "The right stick turns the camera in proportion to how far it is tilted (the game's "
+     "turns at a third of full speed at half tilt), and either axis can be inverted.",
+     {{"speed", "Speed", {"Normal", "Fast", "Slow"}}, {"x", "Left and right", {"Normal", "Inverted"}},
+      {"y", "Up and down", {"Normal", "Inverted"}}}},
     {"quick-transform", "Quick transform", "Press G on the keyboard to change between Link and the wolf (it taps the "
      "GamePad screen's transform button, so it works where that button does).", {}},
     {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
@@ -72,7 +85,7 @@ const std::vector<Mod> kCatalogue = {
      {{"window", "Deflect window", {"Normal (0.2 s)", "Generous (0.33 s)", "Strict (0.1 s)"}}}},
 };
 
-constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0;
+constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0, kEvent = 0x1014A6B0;  // kEvent: dEvt_control_c
 
 std::mutex g_mutex;
 std::atomic<double> g_timer{-1};
@@ -91,6 +104,16 @@ bool save_state(const std::string& mod, const json::Value& v, std::string& error
     std::lock_guard guard(g_mutex);
     g_state[mod] = v;
     return true;
+}
+// whether the actor with process id `id` is a door: a knob door, a shutter, a boss door or the spiral door (HD's
+// process names are the decomp's + 1); found as fpcM_SearchByID does (fpcLyIt_AllJudge with fpcSch_JudgeByID)
+bool door(Cpu* c, uint32_t id) {
+    static const uint32_t slot = mem::host_alloc(4);
+    if (id == 0xFFFFFFFF) return false;
+    st32(slot, id);
+    const uint32_t actor = guest_call(c, 0x02ACE114, {0x02AD990C, slot});
+    const int name = actor ? ld16(actor + 8) : 0;
+    return name == 0xE9 || (name >= 0x227 && name <= 0x22C) || name == 0x22E;
 }
 }  // namespace
 
@@ -133,7 +156,7 @@ bool set_choice(const std::string& mod, const std::string& option, int index, st
     return save_state(mod, v, error);
 }
 
-void step() {
+void step(Cpu* c) {
     if (const uint64_t r = packages::revision(); r != g_revision) {  // a profile switched or saved
         g_revision = r;
         json::Value s = packages::builtin_state();
@@ -147,9 +170,20 @@ void step() {
     if (!on("timer")) timer_start = 0;
     else if (!timer_start) timer_start = interp::logic_steps() + 1;
     g_timer = timer_start ? (double)(interp::logic_steps() + 1 - timer_start) / 30 : -1;
-    bool keys[256];  // turbo: gx2's pacing off while T is held
+    // turbo, gx2's pacing off: while T is held; while + is held in an event; for doors and scene changes, while an event
+    // has a door among its two actors, Link walks through a door (daAlink_c::mProcID +0x305C, PROC_DOOR_OPEN 0xB0) or
+    // the screen is dark or fading: the display's JUTFader (scene changes; status +0, 1 clear), mDoGph_gInf_c::mFade
+    // (1012B3BE) or dDlst_list_c::mWipe (1011DAFC). The event: dEvt_control_c's mEventStatus (+0xE5), its actors'
+    // process ids mPt1 (+0xC4) and mPt2 (+0xC8)
+    bool keys[256];
     input::held_keys(keys);
-    gx2::set_turbo(on("turbo") && keys[kVK_ANSI_T]);
+    const bool event = ld8(kEvent + 0xE5) != 0;
+    const uint32_t now = ld32(kPlayer), fader = interp::fader();
+    bool fast = on("turbo") && keys[kVK_ANSI_T];
+    fast |= on("skip-cutscenes") && event && (input::read().buttons & input::kPlus);
+    fast |= on("quick-doors") && ((now && ld16(now + 0x305C) == 0xB0) || (fader && ld32(fader) != 1) || ld8(0x1012B3BE) ||
+                                  ld8(0x1011DAFC) || (event && (door(c, ld32(kEvent + 0xC4)) || door(c, ld32(kEvent + 0xC8)))));
+    gx2::set_turbo(fast);
     // quick transform: G taps the GamePad screen's transform button (top right, Link and the wolf) for a few steps
     static int tap = 0;  // steps left of the tap
     static bool g_key = false;
@@ -160,7 +194,6 @@ void step() {
     static uint32_t link = 0;
     static uint16_t life = 0, rupees = 0, oil = 0;
     static uint8_t ammo[5] = {};  // arrows, the three bomb bags, slingshot seeds
-    const uint32_t now = ld32(kPlayer);
     const bool fresh = now != link;
     link = now;
     if (!now) return;
@@ -260,4 +293,51 @@ extern "C" void hook_02A58584(Cpu* c) {
     const uint32_t processor = c->r[3];
     f_02A58584_orig(c);
     if (mods::builtin::on("fast-text")) st8(processor + 0xB2, 1);
+}
+
+// Direct camera: dCamera_c::updatePad (028D9360, r3 the camera) reads the right stick into mPadInfo.mCStick
+// (mLastPosX +0x1D8, mLastPosY +0x1DC; full tilt is 0.9 in HD). The chase camera's turn for x, measured in HD (degrees a
+// step, the yaw +0x2E): 0.1 at 0.15, 0.55 at 0.3, 1.65 at 0.52 (a third of full tilt's at half tilt), 3.1 at 0.72, 5.1 at
+// 0.9, 7.3 at 1.2, less beyond. x becomes the value whose turn is in proportion to the tilt.
+extern "C" void f_028D9360_orig(Cpu* c);
+extern "C" void hook_028D9360(Cpu* c) {
+    const uint32_t cam = c->r[3];
+    f_028D9360_orig(c);
+    using namespace mods::builtin;
+    if (!on("direct-camera")) return;
+    const double x = ldf32(cam + 0x1D8), ax = std::fabs(x), flip = choice("direct-camera", "x") ? -1 : 1;
+    double out = ax;
+    if (ax > 0.05) {
+        static const double kX[] = {0.05, 0.15, 0.297, 0.517, 0.715, 0.9, 1.2}, kTurn[] = {0, 0.11, 0.55, 1.65, 3.08, 5.14, 7.26};
+        static const double kMax[] = {5.14, 7.2, 3.0};  // Normal (full tilt as in the game), Fast, Slow
+        const double want = kMax[choice("direct-camera", "speed")] * std::min(1.0, (ax - 0.05) / 0.85);
+        int i = 0;
+        while (i < 5 && kTurn[i + 1] < want) i++;
+        out = kX[i] + (want - kTurn[i]) / (kTurn[i + 1] - kTurn[i]) * (kX[i + 1] - kX[i]);
+    }
+    stf32(cam + 0x1D8, std::copysign(out, x) * flip);
+    if (choice("direct-camera", "y")) stf32(cam + 0x1DC, -ldf32(cam + 0x1DC));
+}
+
+// Big head: daAlink_c::setItemMatrix (0205E1D8, r3 Link) runs after his body model's calc and places the face and hat
+// models (+0x658, +0x65C) on the head joint's matrix (4); that matrix (mpLinkModel +0x654: buffer +0x80, world
+// matrices +0x0C) is scaled first, so the face, hair and hat grow from the neck. Kept from scaling twice when it is
+// called again with no calc between.
+extern "C" void f_0205E1D8_orig(Cpu* c);
+extern "C" void hook_0205E1D8(Cpu* c) {
+    using namespace mods::builtin;
+    static float scaled[12];
+    const uint32_t model = ld32(c->r[3] + 0x654), buf = model ? ld32(model + 0x80) : 0, anm = buf ? ld32(buf + 0x0C) : 0;
+    if (on("big-head") && anm) {
+        float m[12];
+        for (int i = 0; i < 12; i++) m[i] = (float)ldf32(anm + 0xC0 + 4 * i);
+        if (memcmp(m, scaled, sizeof m) != 0) {
+            const float k = choice("big-head", "size") ? 3 : 2;
+            for (int r = 0; r < 3; r++)
+                for (int col = 0; col < 3; col++) m[r * 4 + col] *= k;
+            for (int i = 0; i < 12; i++) stf32(anm + 0xC0 + 4 * i, m[i]);
+            memcpy(scaled, m, sizeof m);
+        }
+    }
+    f_0205E1D8_orig(c);
 }

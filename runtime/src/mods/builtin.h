@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+struct Cpu;
+
 namespace mods::builtin {
 struct Option {
     std::string id, name;
@@ -18,6 +20,6 @@ bool on(const std::string& mod);
 int choice(const std::string& mod, const std::string& option);  // index into the option's choices
 bool set_on(const std::string& mod, bool on, std::string& error);
 bool set_choice(const std::string& mod, const std::string& option, int index, std::string& error);
-void step();  // main01's frame loop, once per logic step (interp.cpp)
+void step(Cpu* c);  // main01's frame loop, once per logic step (interp.cpp)
 double timer();  // the Timer mod's seconds, or -1 while it is off (any thread)
 }  // namespace mods::builtin

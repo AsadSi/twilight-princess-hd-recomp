@@ -51,3 +51,5 @@
 02A58584  # jmessage_tSequenceProcessor::do_begin: fast text
 @02941068  # after the mirror flag's store (Hero Mode): unmirrored Hero Mode
 @029481B0  # after the mirror flag's store (Hero Mode): unmirrored Hero Mode
+028D9360  # dCamera_c::updatePad: direct camera
+0205E1D8  # daAlink_c::setItemMatrix: big head

@@ -546,6 +546,10 @@ HOLD_SKIP(02A9D7F8)
 // scaled so the integer division lands there and the alpha stays below 256; HD's draw (02B9F63C, also called on
 // its own from 02005CF0) reckons (count + 1) / duration from the count. The fade had run at N+1 times its speed.
 static bool g_in_fader = false;
+static std::atomic<uint32_t> g_fader{0};  // the JUTFader controlled last (mods/builtin.cpp: quick scenes)
+namespace interp {
+uint32_t fader() { return g_fader.load(std::memory_order_relaxed); }
+}  // namespace interp
 static void scale_fader(uint32_t f, int ahead) {  // the caller reckons the alpha from count' + 1, as (count + ahead + t)
     using namespace interp;
     const uint32_t status = ld32(f), dur = ld16(f + 4), count = ld16(f + 6);
@@ -556,6 +560,7 @@ static void scale_fader(uint32_t f, int ahead) {  // the caller reckons the alph
 }
 extern "C" void f_02B9F530_orig(Cpu* c);
 extern "C" void hook_02B9F530(Cpu* c) {
+    g_fader.store(c->r[3], std::memory_order_relaxed);
     if (!g_hold) return f_02B9F530_orig(c);
     const uint32_t f = c->r[3];
     static const uint32_t at[] = {0x00, 0x04, 0x08, 0x1C, 0x20};
@@ -623,5 +628,5 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     amiibo::service();
     aspect::service(c);
     mods::update_aiming();
-    mods::builtin::step();
+    mods::builtin::step(c);
 }
