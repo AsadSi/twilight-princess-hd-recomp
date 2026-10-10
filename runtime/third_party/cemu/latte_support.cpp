@@ -54,7 +54,11 @@ uint8 LatteMRT::GetActiveColorBufferMask(const LatteDecompilerShader* pixelShade
 		uint32 colorBufferHeight = pitchHeight / colorBufferPitch;
 		uint32 colorBufferWidth = colorBufferPitch;
 
-		if ((colorBufferWidth < (sint32)scissorAccessWidth) || (colorBufferHeight < (sint32)scissorAccessHeight))
+		// recomp: only the height. Wider than 16:9, TP HD's field map renders its province layer into a corner of the
+		// TV buffer with a scissor as wide as the wider 2D screen (2690 at 32:9, buffer 1920): drawn clipped to the
+		// buffer (the draw clamps the scissor), the map window keeps its layer instead of losing it
+		(void)colorBufferWidth;
+		if (colorBufferHeight < (sint32)scissorAccessHeight)
 		{
             // log this?
 			colorBufferMask &= ~(1<<i);
