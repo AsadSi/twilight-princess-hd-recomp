@@ -17,6 +17,7 @@
 #include "../input.h"
 #include "../platform/keycodes.h"
 #include "boss_rush.h"
+#include "horror.h"
 #include "mod_json.h"
 #include "packages.h"
 #include "photo.h"
@@ -93,6 +94,16 @@ const std::vector<Mod> kCatalogue = {
      "posture instead. Blows, parries and shield bashes fill an enemy's posture; once it breaks, the next blow is a "
      "deathblow. Posture drains when the fighting pauses.",
      {{"window", "Parry window", {"Normal (0.3 s)", "Generous (0.5 s)", "Strict (0.15 s)"}}}},
+    {"horror", "Horror events",
+     "Now and then, during normal play: a night in Hyrule Field turns into a Blood Night, with hordes until dawn; "
+     "a giant Shadow Beast follows Link from area to area for a while; at dusk, twilight creeps over the field, bringing Shadow "
+     "Keese and Shadow Beasts; stand still too long at night or in a dungeon and a shadow rises behind Link. During an "
+     "event the screen tints, the music is turned down and a heartbeat sounds when something is near. Never in a boss "
+     "room, and the shadow never twice in a row.",
+     {{"often", "How often", {"Now and then", "Rare", "Often", "Always (to try them out)"}},
+      {"blood", "Blood Night", kOnOff}, {"stalker", "Stalker", {"Giant Shadow Beast", "Shadow Beast", "Off"}},
+      {"creep", "Twilight creep", kOnOff},
+      {"shadow", "Shadow behind Link", kOnOff}}},
 };
 
 constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0, kEvent = 0x1014A6B0;  // kEvent: dEvt_control_c
@@ -197,6 +208,7 @@ void step(Cpu* c) {
     posture::step();
     photo::step();
     boss_rush::step();
+    horror::step(c);
     static uint64_t timer_start = 0;  // logic step + 1 when the timer was switched on
     if (!on("timer")) timer_start = 0;
     else if (!timer_start) timer_start = interp::logic_steps() + 1;

@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "mods/horror.h"
 #include "mods/photo.h"
 #include "runtime.h"
 
@@ -71,16 +72,18 @@ float lod_bias() {
 }  // namespace look
 
 extern "C" void f_02AEA3E4_orig(Cpu* c);
-extern "C" void hook_02AEA3E4(Cpu* c) {  // bloom_c::draw(bloom_c*)
+extern "C" void hook_02AEA3E4(Cpu* c) {  // bloom_c::draw(bloom_c*): the strength, and the horror mod's tint (its mono colour, +0x04)
     const int b = look::bloom();
-    if (b == look::kBloomOriginal) return f_02AEA3E4_orig(c);
+    const mods::horror::Tint tint = mods::horror::tint();
+    if (b == look::kBloomOriginal && !tint.a) return f_02AEA3E4_orig(c);
     const uint32_t bloom = c->r[3];
-    const uint8_t enable = ld8(bloom + 0x08), ratio = ld8(bloom + 0x0C);
+    uint8_t saved[9];
+    memcpy(saved, mem::ptr(bloom + 0x04), sizeof saved);
+    if (tint.a) st8(bloom + 0x04, tint.r), st8(bloom + 0x05, tint.g), st8(bloom + 0x06, tint.b), st8(bloom + 0x07, tint.a);
     if (b == look::kBloomOff) st8(bloom + 0x08, 0);
-    else st8(bloom + 0x0C, ratio / 2);
+    else if (b == look::kBloomReduced) st8(bloom + 0x0C, saved[8] / 2);
     f_02AEA3E4_orig(c);
-    st8(bloom + 0x08, enable);
-    st8(bloom + 0x0C, ratio);
+    memcpy(mem::ptr(bloom + 0x04), saved, sizeof saved);
 }
 
 extern "C" void f_02A31164_orig(Cpu* c);
