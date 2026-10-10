@@ -462,13 +462,20 @@ extern "C" void hook_02B17008(Cpu* c) {
 // painter, so a pane's own matrix (+0x48) and alpha (+0xAA) are the step before on a logic pass, which records them,
 // and the new step on the hold passes after it, which draw between the two. A pane that moved far (another pane at
 // the same address, a jump) draws as it is.
+// a pane's alpha, which its draw uses: a J2DTextBox's (HD's vtable 100AB64C at +0xF4) is its letters' color's (the
+// object at +0x130, alpha +0xF), which J2DTextBox::rewriteAlpha (02B483E0) copies over the pane's own in the draw
+static uint32_t alpha_at(uint32_t pane) {
+    const uint32_t text = ld32(pane + 0xF4) == 0x100AB64C ? ld32(pane + 0x130) : 0;
+    return text ? text + 0xF : pane + 0xAA;
+}
+
 void interp::blend_pane(uint32_t pane, std::vector<std::pair<uint32_t, uint32_t>>& saved) {
     if (!g_on) return;
     if (!g_hold) {
         PanePrev& p = g_panes[pane];
         p.pass = g_records;
         read_words(pane + 0x48, 12, p.m);
-        p.alpha = ld8(pane + 0xAA);
+        p.alpha = ld8(alpha_at(pane));
         return;
     }
     const auto it = g_panes.find(pane);
@@ -484,9 +491,10 @@ void interp::blend_pane(uint32_t pane, std::vector<std::pair<uint32_t, uint32_t>
             saved.push_back({a, ld32(a)});
             stf32(a, lerp(bf(p.m[i]), bf(cur[i]), t));
         }
-    if (const uint8_t alpha = ld8(pane + 0xAA); alpha != p.alpha) {
+    if (const uint32_t at = alpha_at(pane); ld8(at) != p.alpha) {
         saved.push_back({pane + 0xA8, ld32(pane + 0xA8)});
-        st8(pane + 0xAA, (uint8_t)std::lround(lerp(p.alpha, alpha, t)));
+        if (at != pane + 0xAA) saved.push_back({at & ~3u, ld32(at & ~3u)});
+        st8(at, (uint8_t)std::lround(lerp(p.alpha, ld8(at), t)));
     }
 }
 
