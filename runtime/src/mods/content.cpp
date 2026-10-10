@@ -28,6 +28,7 @@ std::multimap<std::string,std::string> game_names(){
 }
 }
 void set_game_root(const fs::path& game){game_root=game;}
+const fs::path& installed_game(){return game_root;}
 void import_legacy(const fs::path& stage,const std::string& source_name){
     std::vector<fs::path> candidates;
     for(const auto& e:fs::recursive_directory_iterator(stage)){
@@ -98,7 +99,40 @@ Files index(const fs::path& directory){
     }
     require(!out.empty(),"Content mod contains no files");return out;
 }
-void activate(Files files){require(!present.load(),"Content overrides already activated");active=std::move(files);present.store(!active.empty(),std::memory_order_release);}
+namespace {
+// TP HD reads a content file only as far as the size its lists give: content/FileSizeList.txt (path, size) and
+// DecompressedSizeList.txt (compressed size, size, ratio, "./DVDRoot/" and the path without ".gz"), every string
+// ending in 0. With files replaced, the lists are written into `cache` with the replacements' sizes (a .gz's own size
+// from its trailer) and served in their place.
+void patch_size_lists(Files& files,const fs::path& cache){
+    if(files.empty()||cache.empty()||game_root.empty())return;
+    std::error_code ec;
+    const auto size=[&](const std::string& path){auto n=fs::file_size(path,ec);return ec?std::string():std::to_string(n);};
+    const auto gz_size=[&](const std::string& path){std::ifstream in(path,std::ios::binary);unsigned char b[4]={};in.seekg(-4,std::ios::end);
+        return in.read((char*)b,4)?std::to_string(b[0]|b[1]<<8|b[2]<<16|(uint32_t)b[3]<<24):std::string();};
+    for(const std::string name:{"FileSizeList.txt","DecompressedSizeList.txt"}){
+        std::ifstream in(game_root/"content"/name,std::ios::binary);if(!in)continue;
+        std::vector<std::string> f;for(std::string field;std::getline(in,field,'\0');)f.push_back(field);
+        bool changed=false;
+        const auto set=[&](std::string& field,const std::string& v){if(!v.empty()&&v!=field)field=v,changed=true;};
+        if(name=="FileSizeList.txt"){
+            for(size_t i=0;i+1<f.size();i+=2)if(auto it=files.find(lower(f[i]));it!=files.end())set(f[i+1],size(it->second));
+        }else{
+            for(size_t i=0;i+3<f.size();i+=4){
+                if(!f[i+3].starts_with("./DVDRoot/"))continue;
+                const auto path=lower(f[i+3].substr(10));
+                if(auto it=files.find(path+".gz");it!=files.end())set(f[i],size(it->second)),set(f[i+1],gz_size(it->second));
+                else if(auto raw=files.find(path);raw!=files.end())set(f[i],size(raw->second)),set(f[i+1],size(raw->second));
+            }
+        }
+        if(!changed)continue;
+        fs::create_directories(cache,ec);
+        std::ofstream out(cache/name,std::ios::binary);for(const auto& field:f)out<<field<<'\0';
+        if(out)files[lower(name)]=(cache/name).string();
+    }
+}
+}
+void activate(Files files,const fs::path& cache){require(!present.load(),"Content overrides already activated");patch_size_lists(files,cache);active=std::move(files);present.store(!active.empty(),std::memory_order_release);}
 std::string replacement(const std::string& guest,const std::string& mode){
     if(!present.load(std::memory_order_acquire))return {};
     if(mode!="r"&&mode!="rb")return {}; // never redirect writers or update handles
