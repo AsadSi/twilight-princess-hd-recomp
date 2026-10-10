@@ -49,7 +49,7 @@ for SHOT in "$@"; do
   if [[ $SHOT == v* ]]; then CLIPS_AT+=("$SHOT"); else DUMPS+="${DUMPS:+,}$(perl -e "print int($SHOT * $FPS + $ORIGIN)")"; fi
 done
 
-pkill -TERM -x wwhd 2>/dev/null && sleep 2
+pkill -TERM -f "$ROOT/.*wwhd " 2>/dev/null && sleep 2  # this checkout's builds only (other projects run their own wwhd)
 BEFORE=$(ls ~/Library/Logs/DiagnosticReports/ | grep -c '^wwhd')
 cd "$OUT"
 # a state loads only if this boot's threads wait where the saved ones did, which depends on timing: boot again
