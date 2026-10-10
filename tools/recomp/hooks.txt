@@ -11,6 +11,8 @@
 028E13CC  # camera_draw
 02B5CF50  # J3DModel::viewCalc
 02B5C544  # J3DModel::calcMaterial
+02B5C2DC  # J3DModel::entry: material animations of some models
+02B5D320  # J3DModelData::simpleCalcMaterial: material animations of models drawn by particle emitters
 02B58040  # J3DMaterialAnm::calc
 02B17008  # JPAEmitterManager::draw
 02AC08B4  # dScnPly_Draw

@@ -233,18 +233,20 @@ void draw_wide(Cpu* c, uint32_t pane, uint32_t ctx, uint32_t parent, Saved& save
 
 extern "C" void hook_02B34334(Cpu* c) {
     const uint32_t pane = c->r[3], ctx = c->r[4], parent = parent_of(pane);
-    if (!parent) {  // a screen's root
-        if (ld32(ctx + 0xB8) != 0x100AA998) return f_02B34334_orig(c);  // not a J2DOrthoGraph
-        const int outer = g_screen;
-        g_screen = screen_of(c->r[1]);
-        if (g_screen != kGamePad) g_tv_screens[pane] = g_screen;
-        f_02B34334_orig(c);
-        g_screen = outer;
-        return;
-    }
     Saved saved;
-    interp::blend_pane(pane, saved);  // between the last two steps on hold passes (interp.cpp)
-    draw_wide(c, pane, ctx, parent, saved);
+    interp::blend_pane(pane, saved);  // between the last two steps on hold passes (interp.cpp); a root's alpha fades whole screens
+    if (!parent) {  // a screen's root
+        if (ld32(ctx + 0xB8) != 0x100AA998) f_02B34334_orig(c);  // not a J2DOrthoGraph
+        else {
+            const int outer = g_screen;
+            g_screen = screen_of(c->r[1]);
+            if (g_screen != kGamePad) g_tv_screens[pane] = g_screen;
+            f_02B34334_orig(c);
+            g_screen = outer;
+        }
+    } else {
+        draw_wide(c, pane, ctx, parent, saved);
+    }
     for (auto it = saved.rbegin(); it != saved.rend(); ++it) st32(it->first, it->second);
 }
 

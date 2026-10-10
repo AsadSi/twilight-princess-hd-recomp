@@ -95,11 +95,12 @@ static float pass_t() { return g_on ? float(g_phase + 1) / float(g_n + 1) : 1.0f
 static bool record_pass() { return g_hold && g_phase == g_n; }
 
 // ---------------------------------------------------------------- camera
-// view_class: fovy +0xD0, eye +0xD8, center +0xE4, up +0xF0, bank (s16) +0xFC
+// view_class: fovy +0xD0, eye +0xD8, center +0xE4, up +0xF0, bank (s16) +0xFC; the camera process's cutscene bars
+// (dCamera_c::mTrimHeight, eased toward their size in the camera's execute, CalcTrimSize) +0xB68
 namespace {
-constexpr uint32_t kFovy = 0xD0, kEye = 0xD8, kCenter = 0xE4, kUp = 0xF0, kBank = 0xFC;
+constexpr uint32_t kFovy = 0xD0, kEye = 0xD8, kCenter = 0xE4, kUp = 0xF0, kBank = 0xFC, kTrim = 0xB68;
 struct Cam {
-    float eye[3], center[3], up[3], fovy;
+    float eye[3], center[3], up[3], fovy, trim;
     int16_t bank;
 };
 Cam read_cam(uint32_t v) {
@@ -110,6 +111,7 @@ Cam read_cam(uint32_t v) {
         s.up[i] = (float)ldf32(v + kUp + 4 * i);
     }
     s.fovy = (float)ldf32(v + kFovy);
+    s.trim = (float)ldf32(v + kTrim);
     s.bank = (int16_t)ld16(v + kBank);
     return s;
 }
@@ -183,6 +185,7 @@ struct ModelPrev {
     uint32_t anm = 0, wev = 0, n = 0, w = 0;
     std::vector<uint32_t> m;      // the guest words (big-endian floats) of the world, then the envelope matrices
     std::vector<uint32_t> exact;  // the step's own, while the blended ones wait for the painter
+    std::vector<uint32_t> mid;    // the blended ones
     uint64_t held = ~0ull;        // the pass that left it blended
 };
 std::unordered_map<uint32_t, ModelPrev> g_models;
@@ -201,14 +204,17 @@ uint32_t fb(float f) {
     memcpy(&w, &f, 4);
     return __builtin_bswap32(w);
 }
-// matrices blended from a to b at t into guest memory at `at`; false when a matrix moved too far (a teleport)
-bool blend_into(uint32_t at, const uint32_t* a, const uint32_t* b, uint32_t mats, float t) {
-    for (uint32_t k = 0; k < mats; k++)
-        for (int j : {3, 7, 11})
-            if (std::fabs(bf(a[k * 12 + j]) - bf(b[k * 12 + j])) > 300) return false;
+// whether a model's root joint (the first matrix) moved too far in a step: a teleport. Only the root: a big model's
+// limbs can swing further than that in a step (Stallord's skull, 464 units), and they blend.
+bool teleported(const uint32_t* a, const uint32_t* b) {
+    for (int j : {3, 7, 11})
+        if (std::fabs(bf(a[j]) - bf(b[j])) > 300) return true;
+    return false;
+}
+// matrices blended from a to b at t into guest memory at `at`
+void blend_into(uint32_t at, const uint32_t* a, const uint32_t* b, uint32_t mats, float t) {
     uint32_t* g = (uint32_t*)mem::ptr(at);
     for (uint32_t i = 0; i < mats * 12; i++) g[i] = fb(lerp(bf(a[i]), bf(b[i]), t));
-    return true;
 }
 
 // JPABaseParticle: position +0x00 (global, set by the particle calc), age +0x80; a JPANode holds it at +0x08
@@ -262,8 +268,10 @@ extern "C" void hook_028E13CC(Cpu* c) {
     Cam mid;
     const bool blended = blend_cam(p, p.s, cur, pass_t(), mid);
     if (blended) write_cam(v, mid);
+    stf32(v + kTrim, lerp(p.s.trim, cur.trim, pass_t()));  // the bars slide in and out between steps, cut or not
     f_028E13CC_orig(c);
     if (blended) write_cam(v, cur);
+    stf32(v + kTrim, cur.trim);
 }
 
 // J3DModel::viewCalc(J3DModel*)
@@ -285,24 +293,24 @@ extern "C" void hook_02B5CF50(Cpu* c) {
         if (w) read_words(wev, w * 12, p.m.data() + n * 12);
         return;
     }
-    // blended: only from the step's "before" (the last record pass, counted once it ended), with the same matrices;
-    // a model drawn again in the pass has its blend already
-    if (p.pass + 1 != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w || p.held == g_passes)
-        return f_02B5CF50_orig(c);
-    p.exact.resize((n + w) * 12);
-    read_words(anm, n * 12, p.exact.data());
-    if (w) read_words(wev, w * 12, p.exact.data() + n * 12);
+    // blended: only from the step's "before" (the last record pass, counted once it ended), with the same matrices
+    if (p.pass + 1 != g_records || p.anm != anm || p.wev != wev || p.n != n || p.w != w) return f_02B5CF50_orig(c);
+    std::vector<uint32_t> cur((n + w) * 12);
+    read_words(anm, n * 12, cur.data());
+    if (w) read_words(wev, w * 12, cur.data() + n * 12);
+    // drawn again in the pass: as it is while it still has its blend; calculated again since (Stallord calculates
+    // and draws his 12 times a step, the skull settling each time), the new matrices are the step's own
+    if (p.held == g_passes && cur == p.mid) return f_02B5CF50_orig(c);
+    p.exact = std::move(cur);
+    if (teleported(p.m.data(), p.exact.data())) return f_02B5CF50_orig(c);  // draw the step exactly
     const float t = pass_t();
-    bool blended = blend_into(anm, p.m.data(), p.exact.data(), n, t);
-    if (blended && w && !blend_into(wev, p.m.data() + n * 12, p.exact.data() + n * 12, w, t)) blended = false;
-    if (!blended) {  // a teleport: draw the step exactly
-        memcpy(mem::ptr(anm), p.exact.data(), n * 48);
-        if (w) memcpy(mem::ptr(wev), p.exact.data() + n * 12, w * 48);
-        return f_02B5CF50_orig(c);
-    }
+    blend_into(anm, p.m.data(), p.exact.data(), n, t);
+    if (w) blend_into(wev, p.m.data() + n * 12, p.exact.data() + n * 12, w, t);
+    p.mid.resize((n + w) * 12);
+    read_words(anm, n * 12, p.mid.data());
+    if (w) read_words(wev, w * 12, p.mid.data() + n * 12);
     f_02B5CF50_orig(c);
-    p.held = g_passes;
-    g_held.push_back(model);
+    if (p.held != g_passes) p.held = g_passes, g_held.push_back(model);
 }
 
 // Skinned models are drawn from their world and envelope matrices by the painter at the start of the next pass, so
@@ -319,13 +327,21 @@ static void restore_models() {
     if (g_models.size() > 4096) g_models.clear();  // models are freed with their actors: drop old records
 }
 
-// J3DModel::calcMaterial(J3DModel*), in the draw: it calls each animated material's J3DMaterialAnm::calc (below)
-extern "C" void f_02B5C544_orig(Cpu* c);
-extern "C" void hook_02B5C544(Cpu* c) {
-    interp::g_calc_model = c->r[3];
-    f_02B5C544_orig(c);
-    interp::g_calc_model = 0;
-}
+// What calls each animated material's J3DMaterialAnm::calc (below), with the model (or, for static models, the
+// model data) it is for: J3DModel::calcMaterial(J3DModel*) in the draw, J3DModel::entry(J3DModel*), and
+// J3DModelData::simpleCalcMaterial(J3DModelData*, u16, Mtx) for models drawn by particle emitters (02AA28C0: Stallord's
+// rocks and debris). Without the last two, their animations were evaluated as they are, at 30 Hz.
+#define CALC_MODEL(a)                                \
+    extern "C" void f_##a##_orig(Cpu* c);            \
+    extern "C" void hook_##a(Cpu* c) {               \
+        const uint32_t outer = interp::g_calc_model; \
+        interp::g_calc_model = c->r[3];              \
+        f_##a##_orig(c);                             \
+        interp::g_calc_model = outer;                \
+    }
+CALC_MODEL(02B5C544)
+CALC_MODEL(02B5C2DC)
+CALC_MODEL(02B5D320)
 
 // J3DMaterialAnm::calc(material anm, material): texture scrolls (SRT), texture patterns, material and TEV colors at
 // their animations' frames, which the actors set in their draw from frame counters that execute advances. The
