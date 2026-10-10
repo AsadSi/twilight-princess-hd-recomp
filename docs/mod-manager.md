@@ -47,6 +47,8 @@ switches them off. They take effect on the next logic step, with no restart (`ru
   on to reset it).
 - Turbo key: while T is held the game runs unpaced, as fast as the Mac renders it (Uncapped's pacing, without the
   hold passes of frame interpolation).
+- Quick transform: G on the keyboard changes between Link and the wolf by tapping the GamePad screen's transform
+  button, so it works wherever that button does.
 - Moon jump: Link rises while the left stick is held in (L3).
 - Boss rush: every dungeon boss in story order. Start the boss rush (under its name) warps to Diababa; leaving a
   boss's room after the fight goes on to the next, and a game over to the same one; it ends with Ganondorf's throne

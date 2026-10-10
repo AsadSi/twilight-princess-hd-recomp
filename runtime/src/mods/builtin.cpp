@@ -44,6 +44,8 @@ const std::vector<Mod> kCatalogue = {
     {"timer", "Timer", "A timer at the top of the screen, counting the game's time since the mod was switched on "
      "(switch it off and on to reset it).", {}},
     {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
+    {"quick-transform", "Quick transform", "Press G on the keyboard to change between Link and the wolf (it taps the "
+     "GamePad screen's transform button, so it works where that button does).", {}},
     {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
     {"boss-rush", "Boss rush",
      "Every dungeon boss in story order: Start warps to the first, and leaving a boss's room after the fight goes on to "
@@ -148,6 +150,12 @@ void step() {
     bool keys[256];  // turbo: gx2's pacing off while T is held
     input::held_keys(keys);
     gx2::set_turbo(on("turbo") && keys[kVK_ANSI_T]);
+    // quick transform: G taps the GamePad screen's transform button (top right, Link and the wolf) for a few steps
+    static int tap = 0;  // steps left of the tap
+    static bool g_key = false;
+    if (on("quick-transform") && keys[kVK_ANSI_G] && !g_key) tap = 4, input::set_touch(true, 0.875f, 0.063f);
+    else if (tap && !--tap) input::set_touch(false, 0.875f, 0.063f);
+    g_key = keys[kVK_ANSI_G];
     // what the save held after the last step, while the same Link was in play
     static uint32_t link = 0;
     static uint16_t life = 0, rupees = 0, oil = 0;
