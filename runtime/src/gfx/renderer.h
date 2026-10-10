@@ -48,7 +48,7 @@ struct Backend {
     // any thread
     uint64_t (*frame_count)();
     void (*request_tv_dump)(const std::string& path, int frames_ahead);
-    void (*request_capture)();     // P / F12: capture the next frame
+    void (*request_capture)();     // ⌘P / F12: capture the next frame
     void (*shutdown)();            // orderly exit (main thread): write renderer caches
     // graphics options (Graphics menu, hotkeys)
     float (*res_scale)();          // requested internal resolution factor

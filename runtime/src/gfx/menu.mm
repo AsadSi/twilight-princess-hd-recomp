@@ -366,9 +366,11 @@ void install_menu(NSWindow* tv) {
     add(g, @"120 fps: frame interpolation", @selector(toggleInterpFps:), @"", 120);
     add(g, @"240 fps: frame interpolation", @selector(toggleInterpFps:), @"", 240);
     [g addItem:[NSMenuItem separatorItem]];
-    add(g, @"Capture frame for debugging (P)", @selector(capture:), @"P").toolTip =
-        render::active() == render::Api::Vulkan ? @"Shortcut in game: P. Vulkan: the TV, GamePad and window pictures (the draw log is Metal only)"
-                                                 : @"Shortcut in game: P";
+    NSMenuItem* capture = add(g, @"Capture frame for debugging", @selector(capture:), @"");
+    capture.keyEquivalent = @"p";  // ⌘P (a plain P in play was too easy to hit); F12 in game too
+    capture.toolTip = render::active() == render::Api::Vulkan
+                          ? @"Shortcut: ⌘P, or F12 in game. Vulkan: the TV, GamePad and window pictures (the draw log is Metal only)"
+                          : @"Shortcut: ⌘P, or F12 in game";
     add(g, @"Record 3 s of sound activity (9)", @selector(recordSound:), @"9");
     gfxItem.submenu = g;
 
@@ -444,7 +446,7 @@ bool menu_hotkey(uint16_t code) {
     case kVK_ANSI_6: interp::toggle_fps(60); break;
     case kVK_ANSI_8: if (render::feature_available(render::kFeatureFXAA)) render::set_fxaa(!render::fxaa()); break;
     case kVK_ANSI_R: cycle_res(); break;
-    case kVK_ANSI_P: case kVK_F12: render::request_capture(); return true;
+    case kVK_F12: render::request_capture(); return true;  // and ⌘P, the menu item's shortcut
     case kVK_F1: case kVK_F2: case kVK_F3: case kVK_F4: case kVK_F5: {
         int slot = code == kVK_F1 ? 1 : code == kVK_F2 ? 2 : code == kVK_F3 ? 3 : code == kVK_F4 ? 4 : 5;
         if ([NSEvent modifierFlags] & NSEventModifierFlagShift) ss::request_save(slot);

@@ -137,7 +137,7 @@ App shortcuts in the game window:
 | 8 | edge smoothing (FXAA) |
 | Cmd+F | full screen |
 | Cmd+G | show / hide the GamePad screen |
-| P or F12 | capture a frame for debugging (to `captures/`) |
+| ⌘P or F12 | capture a frame for debugging (to `captures/`) |
 | 9 | record 3 s of sound activity for debugging (to `captures/`) |
 
 ### Settings overlay

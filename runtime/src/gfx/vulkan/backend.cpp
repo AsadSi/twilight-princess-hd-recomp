@@ -1303,7 +1303,7 @@ static void frame_dumps(uint64_t frame) {
     if (getenv("WWHD_DUMP_PRESENT"))
       request_present_dump("frame_" + std::to_string(frame) + "_present.png");
   }
-  // P / F12 (Graphics menu): the pictures of this frame in captures/<time>/ (WWHD_CAPTURE=<frame>
+  // ⌘P / F12 (Graphics menu): the pictures of this frame in captures/<time>/ (WWHD_CAPTURE=<frame>
   // scripts it when WWHD_CAPTURE_PATH is not used); the Metal renderer also writes a draw log
   static const uint64_t scripted = getenv("WWHD_CAPTURE") && !getenv("WWHD_CAPTURE_PATH")
                                        ? strtoull(getenv("WWHD_CAPTURE"), nullptr, 10) : ~0ull;

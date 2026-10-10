@@ -140,7 +140,10 @@ static void start_test_keys() {
         if (k == "F1") { pr.code = kVK_F1; pr.chars = [NSString stringWithFormat:@"%C", (unichar)NSF1FunctionKey]; pr.flags |= NSEventModifierFlagFunction; }
         else if (k == "Comma") { pr.code = kVK_ANSI_Comma; pr.chars = @","; }
         else if (k == "Escape") { pr.code = kVK_Escape; pr.chars = @"\x1b"; }
-        else if (int c = input_map::key_from_id(k); c != input_map::kNoKey) pr.code = (uint16_t)c;  // controls.json key names
+        else if (int c = input_map::key_from_id(k); c != input_map::kNoKey) {  // controls.json key names
+            pr.code = (uint16_t)c;
+            if (k.size() == 1) pr.chars = [@(k.c_str()) lowercaseString];  // a letter: what menu key equivalents match
+        }
         else { LOG("[input] WWHD_TEST_POST_KEYS: unknown key %s", k.c_str()); continue; }
         presses->push_back(pr);
     }

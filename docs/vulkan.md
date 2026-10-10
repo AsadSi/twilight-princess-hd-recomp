@@ -53,7 +53,7 @@ filter), and `gfx/vulkan/present.cpp` draws it. The TV window title starts with 
 | Save states (menu, Shift+F1..F5 / F1..F5) | yes | yes (a state loads with either renderer) |
 | Controls window, keyboard, game controllers, mod packages | yes | yes |
 | Frame dumps `WWHD_DUMP_FRAMES`, `WWHD_DUMP_PRESENT` | yes | yes |
-| Capture frame (P) | pictures + draw log | pictures only (no draw log) |
+| Capture frame (⌘P) | pictures + draw log | pictures only (no draw log) |
 | Shader head start (`--warm-shaders`) | yes | no (Vulkan keeps its own SPIR-V / pipeline caches) |
 
 Other builds: `-DWWHD_RENDERER=METAL` (Metal only, no Vulkan dependencies) and
