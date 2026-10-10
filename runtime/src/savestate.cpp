@@ -257,8 +257,14 @@ uint64_t game_id() {
     return id;
 }
 
-// current stage name for slot labels: TP HD's stage data is not mapped yet
-std::string stage_name() { return ""; }
+// current stage (dComIfG_play_c's start stage name, 8 chars); empty before the game has one
+std::string stage_name() {
+    const char* p = (const char*)mem::ptr(0x1014A5E8);
+    const size_t n = strnlen(p, 8);
+    for (size_t i = 0; i < n; i++)
+        if (p[i] < 0x20 || p[i] > 0x7E) return "";
+    return std::string(p, n);
+}
 
 // ---------------------------------------------------------------- memory
 void capture_memory(Writer& w) {

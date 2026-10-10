@@ -11,9 +11,9 @@ namespace quitprompt {
 // the save state slot "Save State and Quit" writes (Save States menu, Shift+F1)
 constexpr int kSaveSlot = 1;
 
-// a save file is being played: not before the game's first stage (boot), the title screen ("sea_T")
-// or the file select ("Name"). Only then can quitting lose progress, so only then the prompt asks.
-inline bool gameplay_stage(const std::string& stage) { return !stage.empty() && stage != "sea_T" && stage != "Name"; }
+// a save file is being played: not before the game's first stage (boot), nor on the title screen and file select
+// ("F_SP102"). Only then can quitting lose progress, so only then the prompt asks.
+inline bool gameplay_stage(const std::string& stage) { return !stage.empty() && stage != "F_SP102"; }
 
 using Env = const char* (*)(const char*);
 inline bool env_on(const char* v) { return v && *v && strcmp(v, "0") != 0; }

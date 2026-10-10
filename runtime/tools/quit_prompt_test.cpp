@@ -25,13 +25,12 @@ static const char* fake_env(const char* name) {
 int main() {
     using namespace quitprompt;
 
-    // gameplay: a stage other than boot (none), the title screen and the file select
+    // gameplay: a stage other than boot (none) and the title screen with the file select
     CHECK(!gameplay_stage(""));
-    CHECK(!gameplay_stage("sea_T"));
-    CHECK(!gameplay_stage("Name"));
-    CHECK(gameplay_stage("sea"));
-    CHECK(gameplay_stage("LinkRM"));
-    CHECK(gameplay_stage("M_NewD2"));
+    CHECK(!gameplay_stage("F_SP102"));
+    CHECK(gameplay_stage("F_SP103"));
+    CHECK(gameplay_stage("R_SP01"));
+    CHECK(gameplay_stage("D_MN05"));
 
     // environment: a normal start asks; every test / headless variable keeps quitting at once
     g_env.clear();
