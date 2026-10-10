@@ -310,6 +310,14 @@ extern "C" void hook_02B5CF50(Cpu* c) {
     const uint32_t anm = buf ? ld32(buf + 0x0C) : 0, wev = buf ? ld32(buf + 0x10) : 0;
     if (!anm || n == 0 || n > 512 || w > 1024 || (w && !wev)) return f_02B5CF50_orig(c);
     ModelPrev& p = g_models[model];
+    // drawn before fpcDt_Handler's restore (the Collection screen's Link, drawn each pass) and still as the last pass
+    // blended it: the step's own first, or each hold pass took the blend for the step and drew it again
+    if (p.held + 1 == g_passes && p.anm == anm && p.wev == wev && p.n == n && p.w == w && p.mid.size() == (n + w) * 12 &&
+        p.exact.size() == p.mid.size() && !memcmp(mem::ptr(anm), p.mid.data(), n * 48) &&
+        (!w || !memcmp(mem::ptr(wev), p.mid.data() + n * 12, w * 48))) {
+        memcpy(mem::ptr(anm), p.exact.data(), n * 48);
+        if (w) memcpy(mem::ptr(wev), p.exact.data() + n * 12, w * 48);
+    }
     if (record_pass()) {
         f_02B5CF50_orig(c);
         p.pass = g_records;
