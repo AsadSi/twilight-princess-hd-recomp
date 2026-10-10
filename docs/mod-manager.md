@@ -49,6 +49,17 @@ switches them off. They take effect on the next logic step, with no restart (`ru
   hold passes of frame interpolation).
 - Quick transform: G on the keyboard changes between Link and the wolf by tapping the GamePad screen's transform
   button, so it works wherever that button does.
+- Quick doors and scenes: doors and the fades between areas play at turbo speed (while an event has a door among its
+  actors, Link walks through a door, or the screen is dark or fading).
+- Fast-forward cutscenes: + held in a cutscene, or any scene the game plays out, runs it at turbo speed; one the game
+  lets you skip still skips.
+- Autosave: the Quest Log in play is saved 3 s into each new area (no event, the screen clear), the way the Save menu
+  saves it; a notice says so.
+- Direct camera: the right stick turns the camera in proportion to its tilt (the game turns it at a third of full
+  speed at half tilt); Normal keeps full tilt's speed, Fast and Slow change it; either axis can be inverted.
+- Tunic colours: Link's tunic and cap in red, blue, purple, yellow, black or white, from the next start (the clothes'
+  texture pack is recoloured once into the mod manager's `Cache` folder; a content mod that replaces it wins).
+- Big head: Link's head (face, hair and cap) twice or three times its size; not the wolf's.
 - Moon jump: Link rises while the left stick is held in (L3).
 - Boss rush: every dungeon boss in story order. Start the boss rush (under its name) warps to Diababa; leaving a
   boss's room after the fight goes on to the next, and a game over to the same one; it ends with Ganondorf's throne
@@ -282,7 +293,9 @@ model or UI archive has been visually tested.
 FS opens, path stats and read-only savestate handle reopens consult the immutable
 case-insensitive map. Writes, saves, code and meta paths use the original
 resolver. Missing paths fall through unchanged. Directory enumeration retains
-original names but reports replacement sizes for replaced entries: this adapter
+original names but reports replacement sizes for replaced entries. TP HD also reads every file only as far as the
+size its own lists give (`content/FileSizeList.txt` and `DecompressedSizeList.txt`), so with files replaced those
+lists are served with the replacements' sizes, written to the mod manager's `Cache` folder. This adapter
 targets replacement of existing resources, not discovery of new files or
 deletion/hiding. Conflicting enabled packages are rejected, rather than silently
 choosing a load order. Content packages currently cannot declare runtime options
