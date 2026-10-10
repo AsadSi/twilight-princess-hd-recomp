@@ -6,7 +6,8 @@
 # 40, 70, 100 and 130 s ("alt" counts the groups whose frames alternate, as in qasaves.sh).
 # Output in build/audit/bosses/ (OUT=<dir>): <boss>_<t>.png, <boss>.log, summary.tsv (boss, stage, alive, crash, unimplemented, alt)
 # and sheet.png. BOSSES overrides the list ("name=save,stage,point,room,layer ...": save = ZTP number or Hero<nn>).
-# FIGHT=1 plays routes/bossfight.txt instead (lock on and attack on purpose) and takes a shot every 10 s.
+# FIGHT=1 plays routes/bossfight.txt instead (lock on and attack on purpose) and takes a shot every 10 s; ROUTE=<name>
+# plays routes/<name>.txt. darknuts is the Cave of Ordeals floor with three (the Temple of Time's is beaten in ZTP66).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); OUT=${OUT:-$ROOT/build/audit/bosses}; mkdir -p "$OUT"
 FILTER=${1:-.}
@@ -14,11 +15,11 @@ BOSSES=${BOSSES:-"diababa=ZTP14,D_MN05A,0,50,0 fyrus=ZTP26,D_MN04A,0,50,0 morphe
   blizzeta=ZTP62,D_MN11A,0,50,0 armogohma=ZTP66,D_MN06A,0,50,0 argorok=ZTP75,D_MN07A,0,50,0 zant=ZTP80,D_MN08D,0,50,-1
   ganon_throne=ZTP90,D_MN09A,0,50,0 ganon_pig=ZTP90,D_MN09A,0,50,1 ganon_final=ZTP90,D_MN09B,0,0,0 ganon_horse=ZTP90,D_MN09,0,13,0
   ook=ZTP14,D_MN05B,1,51,0 dangoro=ZTP26,D_MN04B,0,51,0 toad=ZTP41,D_MN01B,0,51,0 deathsword=ZTP54,D_MN10B,0,51,0
-  darkhammer=ZTP62,D_MN11B,0,51,0 darknut=ZTP66,D_MN06B,0,51,0 aeralfos=ZTP75,D_MN07B,0,51,0
+  darkhammer=ZTP62,D_MN11B,0,51,0 darknuts=ZTP90,D_SB01,0,38,3 aeralfos=ZTP75,D_MN07B,0,51,0
   phantom1=ZTP80,D_MN08B,0,51,-1 phantom2=ZTP80,D_MN08C,0,52,-1"}
 WARP=71  # game second of the warp: the menus have loaded the save by about 66 s
-ROUTE=bossplay; SINGLES=(15 25 55 85 115 145)
-[ "${FIGHT:-0}" = 1 ] && ROUTE=bossfight SINGLES=($(seq 20 10 160))
+ROUTE=${ROUTE:-bossplay}; SINGLES=(15 25 55 85 115 145)
+[ "${FIGHT:-0}" = 1 ] && SINGLES=($(seq 20 10 160)) && [ $ROUTE = bossplay ] && ROUTE=bossfight
 SHOTS=(); for T in "${SINGLES[@]}"; do SHOTS+=("$((WARP + T))"); done; GROUPS_AT=(40 70 100 130)
 for T in "${GROUPS_AT[@]}"; do for I in 0 1 2 3; do SHOTS+=("$(perl -e "printf '%.4f', $WARP + $T + ($I + 0.25) / 60")"); done; done
 printf 'boss\tstage\talive\tcrash\tunimpl\talt\n' > "$OUT/summary.tsv"

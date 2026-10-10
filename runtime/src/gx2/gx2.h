@@ -24,6 +24,9 @@ LatteFetchShader* build_fetch_shader(uint32_t program);  // from our encoded fet
 // Not saved.
 bool uncapped();
 void set_uncapped(bool on);
+// Turbo (the built-in mod "turbo", while its key is held): unpaced as with Uncapped, not shown as a debug state.
+bool turbo();
+void set_turbo(bool on);
 }  // namespace gx2
 
 // The renderer backend (Metal). All calls come from the thread executing GX2

@@ -575,7 +575,10 @@ void gx2::set_uncapped(bool on) {
     g_uncapped = on ? 1 : 0;
     LOG("[gx2] uncapped %s", on ? "on (debug: no frame limit, no vsync; the game runs faster than real time)" : "off");
 }
-static bool uncapped_benchmark() { return gx2::uncapped(); }
+static std::atomic<bool> g_turbo{false};
+bool gx2::turbo() { return g_turbo.load(std::memory_order_relaxed); }
+void gx2::set_turbo(bool on) { g_turbo.store(on, std::memory_order_relaxed); }
+static bool uncapped_benchmark() { return gx2::uncapped() || gx2::turbo(); }
 
 static void update_flips() {  // g_flip_mutex held
     uint64_t now = vsync_index();

@@ -23,6 +23,7 @@
 
 #include "amiibo.h"
 #include "aspect.h"
+#include "gx2/gx2.h"
 #include "interp.h"
 #include "mods/builtin.h"
 #include "mods/mods.h"
@@ -256,7 +257,7 @@ void f_02B5CF50_orig(Cpu* c);
 
 // camera_draw(camera_process_class*). The view's aspect comes from the game's screen aspect (1012B374, aspect.cpp)
 // each draw: the camera copies it only when it is made (028D7578), so a changed aspect reaches the 3D view at once.
-extern "C" void hook_028E13CC(Cpu* c) {
+static void draw_camera(Cpu* c) {
     using namespace interp;
     const uint32_t v = c->r[3];
     st32(v + 0xD4, ld32(0x1012B374));
@@ -277,6 +278,13 @@ extern "C" void hook_028E13CC(Cpu* c) {
     f_028E13CC_orig(c);
     if (blended) write_cam(v, cur);
     stf32(v + kTrim, cur.trim);
+}
+extern "C" void hook_028E13CC(Cpu* c) {  // the built-in mod "no-bars" draws with no trim, the cutscene bars' height
+    const uint32_t v = c->r[3] + interp::kTrim, trim = ld32(v);
+    if (!mods::builtin::on("no-bars")) return draw_camera(c);
+    st32(v, 0);
+    draw_camera(c);
+    st32(v, trim);
 }
 
 // J3DModel::viewCalc(J3DModel*)
@@ -590,7 +598,7 @@ extern "C" void site_02AF0EDC(Cpu* c) {
     else st8(0x1012B3C3, g_wide_zoom);
     // the next pass of the step (after the logic pass: hold pass 1; after hold pass N: the next logic pass); a
     // change of rate starts over with a logic pass
-    const int n = g_on ? frames_per_step() - 1 : 0;
+    const int n = g_on && !gx2::turbo() ? frames_per_step() - 1 : 0;  // turbo: logic passes only
     g_phase = n > 0 && n == g_n && g_phase < g_n ? g_phase + 1 : 0;
     g_n = n;
     g_hold = g_phase > 0;

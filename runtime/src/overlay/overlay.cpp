@@ -35,12 +35,14 @@ namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
 #include "../input_map.h"
 #include "../mods/builtin.h"
 #include "../mods/packages.h"
+#include "../mods/posture.h"
 #include "../motion/motion.h"
 #include "../platform/keycodes.h"
 #include "../rumble.h"
 #include "../interp.h"
 #include "../runtime.h"
 #include "../savestate.h"
+#include "../warp.h"
 #include "../render_prof.h"
 #include "../build_info.h"
 #include "../report_header.h"
@@ -889,6 +891,38 @@ void package_controls() {
     native_confirm_dialog(confirm, error);
 }
 
+// The Warp menu mod: an area, then one of its places as the map select lists them (stage, room, entrance, story layer)
+void warp_controls() {
+    static int area = 0, place = 0;
+    const auto& groups = warp::groups();
+    if (groups.empty()) return ImGui::TextDisabled("The map select's data was not found in the game files.");
+    area = std::clamp(area, 0, (int)groups.size() - 1);
+    if (ImGui::BeginCombo("Area", groups[area].name.c_str())) {
+        for (int i = 0; i < (int)groups.size(); i++)
+            if (ImGui::Selectable(groups[i].name.c_str(), i == area)) area = i, place = 0;
+        ImGui::EndCombo();
+    }
+    const auto& places = groups[area].places;
+    place = std::clamp(place, 0, (int)places.size() - 1);
+    const auto label = [](const warp::Place& p) {
+        char s[96];
+        snprintf(s, sizeof s, "%s, room %d, entrance %d%s", p.stage.c_str(), p.room, p.point,
+                 p.layer < 0 ? "" : (", layer " + std::to_string(p.layer)).c_str());
+        return std::string(s);
+    };
+    if (ImGui::BeginCombo("Place", label(places[place]).c_str())) {
+        for (int i = 0; i < (int)places.size(); i++) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(label(places[i]).c_str(), i == place)) place = i;
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::BeginDisabled(!ld32(0x1014B5B0));  // no Link: not playing a file
+    if (ImGui::Button("Warp")) warp::go(places[place]);
+    ImGui::EndDisabled();
+}
+
 // Built-in mods (mods/builtin.h): a switch each, and their options, kept in the active profile
 void builtin_controls() {
     static std::string error;
@@ -896,8 +930,9 @@ void builtin_controls() {
     for (const auto& mod : mods::builtin::catalogue()) {
         ImGui::PushID(mod.id.c_str());
         bool on = mods::builtin::on(mod.id);
-        if (ImGui::Checkbox("##builtin_on", &on)) mods::builtin::set_on(mod.id, on, error);
+        const bool turned_on = ImGui::Checkbox("##builtin_on", &on) && mods::builtin::set_on(mod.id, on, error) && on;
         ImGui::SameLine();
+        if (mod.id == "warp" && on) ImGui::SetNextItemOpen(true, turned_on ? ImGuiCond_Always : ImGuiCond_Once);  // its list
         if (ImGui::TreeNode("details", "%s", mod.name.c_str())) {
             ImGui::TextWrapped("%s", mod.description.c_str());
             for (const auto& option : mod.options) {
@@ -908,6 +943,7 @@ void builtin_controls() {
                     ImGui::EndCombo();
                 }
             }
+            if (mod.id == "warp" && on) warp_controls();
             ImGui::TreePop();
         }
         ImGui::PopID();
@@ -1345,6 +1381,40 @@ void perf_window(bool menu_open) {
     (void)menu_open;
 }
 
+// The posture mod's bars, Sekiro's way: filling from the middle out, yellow turning red as they fill. Link's sits
+// above the bottom edge and flashes white at a deflect; the enemy fought last has its bar near the top, with a red
+// mark while a deathblow is open. The Boss health bar mod's bar sits above that.
+void posture_bars(const mods::posture::Hud& h, ImVec2 size) {
+    ImDrawList* d = ImGui::GetBackgroundDrawList();
+    const float x = size.x / 2, w = std::min(size.x * 0.36f, 520.0f);
+    auto bar = [&](float y, float w, float fill, float alpha) {
+        if (alpha <= 0) return;
+        const auto col = [&](int r, int g, int b, float a) { return IM_COL32(r, g, b, (int)(255 * a * alpha)); };
+        const float f = std::clamp(fill, 0.0f, 1.0f), half = w / 2 * f;
+        d->AddRectFilled({x - w / 2 - 2, y - 7}, {x + w / 2 + 2, y + 7}, col(12, 10, 8, 0.75f), 2);
+        if (half > 0)
+            d->AddRectFilled({x - half, y - 5}, {x + half, y + 5},
+                             col(232 - (int)(3 * f), 197 - (int)(136 * f), 71 - (int)(33 * f), 1), 1);
+        d->AddLine({x, y - 9}, {x, y + 9}, col(240, 230, 210, 0.9f), 1.5f);
+    };
+    bar(size.y * 0.86f, w, h.link, std::max(h.link_alpha, h.deflect));
+    if (h.deflect > 0) {  // a deflect: the bar flashes white from the middle out
+        const float y = size.y * 0.86f, half = w / 2 * (1.2f - h.deflect * 0.6f);
+        d->AddRectFilled({x - half, y - 7}, {x + half, y + 7}, IM_COL32(255, 250, 235, (int)(220 * h.deflect)), 2);
+    }
+    const float y = size.y * 0.1f;
+    bar(y, w * 0.8f, h.foe, h.foe_alpha);
+    if (h.boss_alpha > 0) {  // the Boss health bar mod: above, from the left
+        const float by = size.y * 0.065f, bw = w * 0.8f;
+        d->AddRectFilled({x - bw / 2 - 2, by - 5}, {x + bw / 2 + 2, by + 5}, IM_COL32(12, 10, 8, 190), 2);
+        d->AddRectFilled({x - bw / 2, by - 3}, {x - bw / 2 + bw * h.boss, by + 3}, IM_COL32(178, 32, 27, 255), 1);
+    }
+    if (h.foe_broken) {
+        d->AddCircleFilled({x, y - 22}, 10, IM_COL32(205, 22, 18, 255));
+        d->AddCircle({x, y - 22}, 11, IM_COL32(40, 0, 0, 220), 0, 2);
+    }
+}
+
 void settings_window() {
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 ds = io.DisplaySize;
@@ -1516,8 +1586,10 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     // save state notices (saved, refused during a cutscene, loaded into another Quest Log) show over the
     // game for a few seconds while the menu is closed (the window title is not visible everywhere)
     const std::string toast = open ? std::string() : ss::last_message();
+    const mods::posture::Hud bars = mods::posture::hud();
+    const bool posture = !open && (bars.link_alpha > 0 || bars.foe_alpha > 0 || bars.deflect > 0 || bars.boss_alpha > 0);
     U.linearized = false;
-    if (!open && !perf && toast.empty()) {
+    if (!open && !perf && toast.empty() && !posture) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -1559,6 +1631,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     apply_capture();
     feed_gamepad(io, open && U.cap_action < 0);
     ImGui::NewFrame();
+    if (posture) posture_bars(bars, io.DisplaySize);
     if (open) settings_window();
     if (perf) perf_window(open);
     if (!toast.empty()) {

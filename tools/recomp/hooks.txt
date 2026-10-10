@@ -42,3 +42,12 @@
 02A9D6E4  # particle calc 3D
 02A9D41C  # particle calc 2D
 02AD5B3C  # fopScnM_ChangeReq
+# posture combat (mods/posture.cpp)
+0206B164  # daAlink_c::procGuardSlipInit: a blow on Link's shield
+0206AA24  # daAlink_c::procGuardBreakInit: a guard-breaking blow
+02903E80  # cc_at_check: an enemy hit
+02903934  # def_se_set: an enemy's guard took a blow
+# built-in mods (mods/builtin.cpp)
+02A58584  # jmessage_tSequenceProcessor::do_begin: fast text
+@02941068  # after the mirror flag's store (Hero Mode): unmirrored Hero Mode
+@029481B0  # after the mirror flag's store (Hero Mode): unmirrored Hero Mode

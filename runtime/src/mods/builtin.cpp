@@ -11,8 +11,12 @@
 #include <cmath>
 #include <mutex>
 
+#include "../gx2/gx2.h"
+#include "../input.h"
+#include "../platform/keycodes.h"
 #include "mod_json.h"
 #include "packages.h"
+#include "posture.h"
 #include "runtime.h"
 
 namespace mods::builtin {
@@ -27,6 +31,26 @@ const std::vector<Mod> kCatalogue = {
      {{"rate", "Damage taken", {"x2", "x4", "One hit kills", "x0.5", "None"}}}},
     {"rupees", "Rupee multiplier", "Rupees Link picks up or is given count more (up to what the wallet holds).",
      {{"rate", "Rupees", {"x2", "x3", "x5", "x10"}}}},
+    {"fast-text", "Fast text", "Each page of a message shows at once instead of letter by letter.", {}},
+    {"time", "Time of day", "Stops the clock, or keeps it at an hour of your choice (where time passes at all).",
+     {{"time", "Time", {"Stopped", "Morning (7:00)", "Noon", "Evening (18:30)", "Night (23:00)"}}}},
+    {"size", "Link's size", "Link (and the wolf) drawn smaller or bigger; the world still sees him at his usual size.",
+     {{"size", "Size", {"Tiny", "Small", "Big", "Giant"}}}},
+    {"turbo", "Turbo key", "Hold T on the keyboard to run the game as fast as this Mac can (text, travel, cutscenes).", {}},
+    {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
+    {"warp", "Warp menu",
+     "Lists the game's places here (the developers' map select) to warp to. Warping skips the story's order and "
+     "can leave a file stuck: save first.",
+     {}},
+    {"unmirror", "Unmirrored Hero Mode", "Hero Mode keeps the world as in Normal Mode instead of mirroring it.", {}},
+    {"no-bars", "No cutscene bars", "Cutscenes fill the screen, without the black bars above and below.", {}},
+    {"boss-health", "Boss health bar", "A boss's (or mini-boss's) health shows at the top once Link has hurt it.", {}},
+    {"posture", "Posture combat",
+     "Sekiro's posture on TP's sword fighting. Blocking with the shield fills Link's posture and a full bar breaks his "
+     "guard; a block just after the shield goes up (lock on right before the hit) is a deflect, which fills the "
+     "attacker's posture instead. Blows, deflects and shield bashes fill an enemy's posture; once it breaks, the next "
+     "blow is a deathblow. Posture drains when the fighting pauses.",
+     {{"window", "Deflect window", {"Normal (0.2 s)", "Generous (0.33 s)", "Strict (0.1 s)"}}}},
 };
 
 constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0;
@@ -95,6 +119,10 @@ void step() {
         std::lock_guard guard(g_mutex);
         g_state = std::move(s);
     }
+    posture::step();
+    bool keys[256];  // turbo: gx2's pacing off while T is held
+    input::held_keys(keys);
+    gx2::set_turbo(on("turbo") && keys[kVK_ANSI_T]);
     // what the save held after the last step, while the same Link was in play
     static uint32_t link = 0;
     static uint16_t life = 0, rupees = 0, oil = 0;
@@ -132,5 +160,56 @@ void step() {
         st16(kSave + 0x06, (uint16_t)std::min<int>(rupees + (money - rupees) * kRate[choice("rupees", "rate")], wallet));
     }
     rupees = u16(0x06);
+
+    // moon jump: Link's current.pos.y (+0x4D4) lifted 60 at first, past where the ground pulls him back so that the
+    // game lets him fall, then 25 a step with speed.y (+0x4FC) kept from falling
+    static bool lifting = false;
+    const bool lift = on("moon-jump") && (input::read().buttons & input::kStickL);
+    if (lift) {
+        stf32(now + 0x4D4, ldf32(now + 0x4D4) + (lifting ? 25 : 60));
+        stf32(now + 0x4FC, std::max(0.0, ldf32(now + 0x4FC)));
+    }
+    lifting = lift;
+
+    // Link's size: his model's (daAlink_c::mpLinkModel, +0x654) base scale (J3DModel +0x14), put back to 1 when off
+    static bool sized = false;
+    const uint32_t model = ld32(now + 0x654);
+    if (model && (on("size") || sized)) {
+        static const double kSize[] = {0.35, 0.65, 1.4, 2.0};
+        sized = on("size");
+        for (int i = 0; i < 3; i++) stf32(model + 0x14 + 4 * i, sized ? kSize[choice("size", "size")] : 1);
+    }
+
+    // the time of day, status B's float at +0x34 in degrees (15 an hour from midnight), which the environment reads,
+    // advances and writes back each step (dScnKy_env_light_c::setDaytime)
+    static double held = -1;  // where the stopped clock stands
+    if (!on("time") || fresh) held = -1;
+    if (const int c = choice("time", "time"); on("time") && c > 0) {
+        static const double kHour[] = {0, 7, 12, 18.5, 23};
+        stf32(kSave + 0x34, kHour[c] * 15);
+        held = -1;
+    } else if (on("time")) {
+        if (held < 0) held = ldf32(kSave + 0x34);
+        stf32(kSave + 0x34, held);
+    }
 }
 }  // namespace mods::builtin
+
+// Unmirrored Hero Mode, as Cemu's Disable Mirroring pack does it: 1012667D is 1 for the world drawn as is, and the two
+// places that set it store 0 for Hero Mode (02941064 from r31, 029481AC from whether 1014551F is clear); the byte is
+// set back to 1 right after each.
+extern "C" void site_02941068(Cpu*) {
+    if (mods::builtin::on("unmirror")) st8(0x1012667D, 1);
+}
+extern "C" void site_029481B0(Cpu*) {
+    if (mods::builtin::on("unmirror")) st8(0x1012667D, 1);
+}
+
+// Fast text: a message starts as if with the instant tag (MSGTAG_INSTANT sets field_0xb2, at +0xB2 in HD too), so each
+// page shows at once, as after pressing A. jmessage_tSequenceProcessor::do_begin (02A58584, r3 the processor).
+extern "C" void f_02A58584_orig(Cpu* c);
+extern "C" void hook_02A58584(Cpu* c) {
+    const uint32_t processor = c->r[3];
+    f_02A58584_orig(c);
+    if (mods::builtin::on("fast-text")) st8(processor + 0xB2, 1);
+}

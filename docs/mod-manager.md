@@ -40,8 +40,28 @@ switches them off. They take effect on the next logic step, with no restart (`ru
   can be left out).
 - Damage multiplier: Link takes x2, x4, x0.5 or no damage, or dies from one hit.
 - Rupee multiplier: rupees picked up or given count x2, x3, x5 or x10, up to what the wallet holds.
+- Fast text: each page of a message shows at once, as after pressing A.
+- Time of day: stops the clock, or holds it at 7:00, noon, 18:30 or 23:00, where time passes at all (not in twilight).
+- Link's size: Link and the wolf drawn tiny, small, big or giant (only the picture; the world still sees his size).
+- Turbo key: while T is held the game runs unpaced, as fast as the Mac renders it (Uncapped's pacing, without the
+  hold passes of frame interpolation).
+- Moon jump: Link rises while the left stick is held in (L3).
+- Warp menu: lists the developers' map select places (by area; stage, room, entrance and story layer) under its
+  name, with a Warp button. Warping ignores the story's order and can leave a file stuck.
+- Unmirrored Hero Mode: Hero Mode keeps Normal Mode's world (as Cemu's Disable Mirroring pack does), with its double
+  damage.
+- No cutscene bars: cutscenes fill the screen.
+- Boss health bar: a boss's or mini-boss's health, at the top once Link has hurt it.
+- Posture combat: Sekiro's posture on top of TP's sword fighting (`runtime/src/mods/posture.cpp`). Every blow Link
+  takes on his shield fills his posture bar (above the bottom edge), guard-breaking blows too; a full bar is the
+  game's guard break. A blow that lands within the deflect window (0.2 s, or 0.33 s or 0.1 s) of raising the shield
+  (locking on) is a deflect: Link barely loses posture and steps back less, and the attacker takes posture instead.
+  Link's blows, shield bashes and blows an enemy blocks fill the enemy's bar (near the top, for the enemy fought
+  last); a full bar staggers it and marks it red for 5 s, and the next blow that hurts it is a deathblow (a boss
+  takes triple damage instead). Bars drain once the fighting pauses, an enemy's slower the more it is hurt.
 
-They change the live save data after each step (what changed, not fixed values), so the game's own rules still apply.
+The cheats change the live save data after each step (what changed, not fixed values), so the game's own rules
+still apply.
 
 The Installed packages section accepts a local folder or `.wwhdmod` ZIP. Choose
 it with the file/folder picker, then press Install package. Installed packages
