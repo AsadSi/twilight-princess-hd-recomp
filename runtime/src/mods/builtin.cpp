@@ -64,7 +64,11 @@ const std::vector<Mod> kCatalogue = {
       {"y", "Up and down", {"Normal", "Inverted"}}}},
     {"quick-transform", "Quick transform", "Press G on the keyboard to change between Link and the wolf (it taps the "
      "GamePad screen's transform button, so it works where that button does).", {}},
+    {"mouse-camera", "Mouse camera", "Hold the right mouse button on the game window and move the mouse to turn the "
+     "camera.", {}},
     {"moon-jump", "Moon jump", "Link rises into the air while the left stick is held in (L3).", {}},
+    {"fast-moves", "Faster rolls and climbing", "Link rolls, and climbs ladders and vine walls, half again as fast.", {}},
+    {"great-spin", "Great spin", "Link's spin attack is always the great spin, at any health and before it is learned.", {}},
     {"boss-rush", "Boss rush",
      "Every dungeon boss in story order: Start warps to the first, and leaving a boss's room after the fight goes on to "
      "the next (a game over, to the same one). Play it on a file that has the items for them.",
@@ -91,6 +95,8 @@ const std::vector<Mod> kCatalogue = {
 };
 
 constexpr uint32_t kSave = 0x10145348, kPlayer = 0x1014B5B0, kEvent = 0x1014A6B0;  // kEvent: dEvt_control_c
+constexpr float kFaster = 1.5f;  // faster rolls and climbing (the hooks at the end)
+std::atomic<float> g_mouse_dx{0}, g_mouse_dy{0};  // mouse camera: pixels moved with the right button held, not yet used
 
 std::mutex g_mutex;
 std::atomic<double> g_timer{-1};
@@ -137,6 +143,11 @@ void autosave(Cpu* c) {
 }  // namespace
 
 const std::vector<Mod>& catalogue() { return kCatalogue; }
+void mouse_look(float dx, float dy) {
+    if (!on("mouse-camera")) return;
+    g_mouse_dx.fetch_add(dx);
+    g_mouse_dy.fetch_add(dy);
+}
 double timer() { return g_timer.load(std::memory_order_relaxed); }
 
 bool on(const std::string& mod) {
@@ -325,25 +336,34 @@ extern "C" void hook_02A58584(Cpu* c) {
 // Direct camera: dCamera_c::updatePad (028D9360, r3 the camera) reads the right stick into mPadInfo.mCStick
 // (mLastPosX +0x1D8, mLastPosY +0x1DC; full tilt is 0.9 in HD). The chase camera's turn for x, measured in HD (degrees a
 // step, the yaw +0x2E): 0.1 at 0.15, 0.55 at 0.3, 1.65 at 0.52 (a third of full tilt's at half tilt), 3.1 at 0.72, 5.1 at
-// 0.9, 7.3 at 1.2, less beyond. x becomes the value whose turn is in proportion to the tilt.
+// 0.9, 7.3 at 1.2, less beyond. x becomes the value whose turn is in proportion to the tilt. The mouse camera turns it
+// by the mouse's movement since the last step (0.25 degrees a pixel, up to the camera's fastest) the same way.
+namespace {
+double tilt_for(double degrees) {  // the x (>= 0) that turns the chase camera that many degrees a step
+    static const double kX[] = {0.05, 0.15, 0.297, 0.517, 0.715, 0.9, 1.2}, kTurn[] = {0, 0.11, 0.55, 1.65, 3.08, 5.14, 7.26};
+    degrees = std::clamp(degrees, 0.0, kTurn[6]);
+    int i = 0;
+    while (i < 5 && kTurn[i + 1] < degrees) i++;
+    return kX[i] + (degrees - kTurn[i]) / (kTurn[i + 1] - kTurn[i]) * (kX[i + 1] - kX[i]);
+}
+}  // namespace
 extern "C" void f_028D9360_orig(Cpu* c);
 extern "C" void hook_028D9360(Cpu* c) {
     const uint32_t cam = c->r[3];
     f_028D9360_orig(c);
     using namespace mods::builtin;
-    if (!on("direct-camera")) return;
-    const double x = ldf32(cam + 0x1D8), ax = std::fabs(x), flip = choice("direct-camera", "x") ? -1 : 1;
-    double out = ax;
-    if (ax > 0.05) {
-        static const double kX[] = {0.05, 0.15, 0.297, 0.517, 0.715, 0.9, 1.2}, kTurn[] = {0, 0.11, 0.55, 1.65, 3.08, 5.14, 7.26};
+    if (on("direct-camera")) {
+        const double x = ldf32(cam + 0x1D8), ax = std::fabs(x), flip = choice("direct-camera", "x") ? -1 : 1;
         static const double kMax[] = {5.14, 7.2, 3.0};  // Normal (full tilt as in the game), Fast, Slow
-        const double want = kMax[choice("direct-camera", "speed")] * std::min(1.0, (ax - 0.05) / 0.85);
-        int i = 0;
-        while (i < 5 && kTurn[i + 1] < want) i++;
-        out = kX[i] + (want - kTurn[i]) / (kTurn[i + 1] - kTurn[i]) * (kX[i + 1] - kX[i]);
+        const double out = ax > 0.05 ? tilt_for(kMax[choice("direct-camera", "speed")] * std::min(1.0, (ax - 0.05) / 0.85)) : ax;
+        stf32(cam + 0x1D8, std::copysign(out, x) * flip);
+        if (choice("direct-camera", "y")) stf32(cam + 0x1DC, -ldf32(cam + 0x1DC));
     }
-    stf32(cam + 0x1D8, std::copysign(out, x) * flip);
-    if (choice("direct-camera", "y")) stf32(cam + 0x1DC, -ldf32(cam + 0x1DC));
+    const float dx = g_mouse_dx.exchange(0), dy = g_mouse_dy.exchange(0);
+    if (on("mouse-camera") && (dx || dy)) {  // right is the stick's right (x below 0), up its up
+        if (dx) stf32(cam + 0x1D8, -std::copysign(tilt_for(std::fabs(dx) * 0.25), dx));
+        if (dy) stf32(cam + 0x1DC, std::clamp(-dy * 0.05f, -1.0f, 1.0f));
+    }
 }
 
 // Big head: daAlink_c::setItemMatrix (0205E1D8, r3 Link) runs after his body model's calc and places the face and hat
@@ -367,4 +387,37 @@ extern "C" void hook_0205E1D8(Cpu* c) {
         }
     }
     f_0205E1D8_orig(c);
+}
+
+// Faster rolls and climbing: the animations Link starts (daAlink_c::setSingleAnime 0201F128: r3 Link, f1 the rate) in a
+// roll (mProcID +0x305C, 0x0E), on a ladder (0x67-0x6B) or a vine wall (0x80-0x85), and the rate ladders and vine walls
+// set each step for the stick (setWaterInAnmRate 0202BA48), run 1.5x; the roll's speed too (mNormalSpeed +0x3458, set by
+// procFrontRollInit 0204D094 and kept until the roll can be cancelled), so it covers the same ground.
+static bool fast_proc(Cpu* c) {
+    const int proc = ld16(c->r[3] + 0x305C);
+    return mods::builtin::on("fast-moves") && (proc == 0x0E || (proc >= 0x67 && proc <= 0x6B) || (proc >= 0x80 && proc <= 0x85));
+}
+extern "C" void f_0201F128_orig(Cpu* c);
+extern "C" void hook_0201F128(Cpu* c) {
+    if (fast_proc(c)) c->f[1].ps0 *= mods::builtin::kFaster;
+    f_0201F128_orig(c);
+}
+extern "C" void f_0202BA48_orig(Cpu* c);
+extern "C" void hook_0202BA48(Cpu* c) {
+    if (fast_proc(c)) c->f[1].ps0 *= mods::builtin::kFaster;
+    f_0202BA48_orig(c);
+}
+extern "C" void f_0204D094_orig(Cpu* c);
+extern "C" void hook_0204D094(Cpu* c) {
+    const uint32_t link = c->r[3];
+    f_0204D094_orig(c);
+    if (mods::builtin::on("fast-moves") && c->r[3]) stf32(link + 0x3458, ldf32(link + 0x3458) * mods::builtin::kFaster);
+}
+
+// Great spin: daAlink_c::checkCutLargeTurnState (0203ABD0, asked by the spin's start and the camera) holds the great
+// spin back until it is learned (an event flag) and while Link's life is short of full; with the mod it says yes.
+extern "C" void f_0203ABD0_orig(Cpu* c);
+extern "C" void hook_0203ABD0(Cpu* c) {
+    if (mods::builtin::on("great-spin")) c->r[3] = 1;
+    else f_0203ABD0_orig(c);
 }

@@ -24,6 +24,7 @@ namespace overlay { bool key(int,bool,bool,int){return false;} bool is_open(){re
  bool captures(){return false;}
  bool mouse_move(float,float){return false;} bool mouse_button(int,bool){return false;} bool mouse_wheel(float,float){return false;} }
 namespace hostui { void graphics_changed(){} }
+namespace mods::builtin { void mouse_look(float,float){} }
 // The runtime reads the C runtime's environment (getenv). On Windows SDL_setenv_unsafe only
 // changes the Win32 environment block, which the CRT copy does not see.
 static void set_env(const char* name,const char* value){

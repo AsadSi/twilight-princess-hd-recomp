@@ -22,4 +22,5 @@ bool set_on(const std::string& mod, bool on, std::string& error);
 bool set_choice(const std::string& mod, const std::string& option, int index, std::string& error);
 void step(Cpu* c);  // main01's frame loop, once per logic step (interp.cpp)
 double timer();  // the Timer mod's seconds, or -1 while it is off (any thread)
+void mouse_look(float dx, float dy);  // the game window's mouse moved with the right button held (any thread)
 }  // namespace mods::builtin

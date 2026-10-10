@@ -17,6 +17,7 @@
 #include "renderer.h"
 #include "../runtime.h"
 #include "../savestate.h"
+#include "../mods/builtin.h"
 #include "../motion/motion.h"
 #include "../overlay/overlay.h"
 
@@ -263,6 +264,7 @@ static void install_mouse_gyro() {
     NSEventMask mask = NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged;
     [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent*(NSEvent* e) {
         if (overlay::captures() || (e.window != tv_window() && !g_gyro_capture)) return e;
+        if (e.type == NSEventTypeRightMouseDragged) mods::builtin::mouse_look((float)e.deltaX, (float)e.deltaY);  // the mouse camera
         motion::mouse_motion((float)e.deltaX, (float)e.deltaY);  // deltaY > 0: down
         return motion::mouse_drives_gyro() ? nil : e;
     }];

@@ -4,6 +4,7 @@
 #include "mouse_sdl.h"
 #include "../input.h"
 #include "../input_map.h"
+#include "../mods/builtin.h"
 #include "../motion/motion.h"
 #include "../rumble.h"
 #include "../runtime.h"
@@ -165,6 +166,7 @@ static bool overlay_event(const SDL_Event& event){
  }
  case SDL_EVENT_MOUSE_MOTION:{
   if(event.motion.windowID!=tv)return false;
+  if((event.motion.state&SDL_BUTTON_RMASK)&&!overlay::captures())mods::builtin::mouse_look(event.motion.xrel,event.motion.yrel);  // the mouse camera
   int w=1,h=1;SDL_GetWindowSize(g_prompt_window,&w,&h);
   return overlay::mouse_move(event.motion.x/std::max(1,w),event.motion.y/std::max(1,h));
  }

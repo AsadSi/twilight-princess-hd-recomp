@@ -53,3 +53,7 @@
 @029481B0  # after the mirror flag's store (Hero Mode): unmirrored Hero Mode
 028D9360  # dCamera_c::updatePad: direct camera
 0205E1D8  # daAlink_c::setItemMatrix: big head
+0201F128  # daAlink_c::setSingleAnime: faster rolls and climbing
+0202BA48  # daAlink_c::setWaterInAnmRate: faster climbing (each step's rate)
+0204D094  # daAlink_c::procFrontRollInit: faster rolls (Link's speed)
+0203ABD0  # daAlink_c::checkCutLargeTurnState: great spin
