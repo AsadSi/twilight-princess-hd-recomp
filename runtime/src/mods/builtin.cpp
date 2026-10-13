@@ -22,6 +22,7 @@
 #include "packages.h"
 #include "photo.h"
 #include "posture.h"
+#include "sfx_record.h"
 #include "runtime.h"
 #include "../savestate.h"
 
@@ -209,6 +210,7 @@ void step(Cpu* c) {
     photo::step();
     boss_rush::step();
     horror::step(c);
+    sfx_record::step(c);
     static uint64_t timer_start = 0;  // logic step + 1 when the timer was switched on
     if (!on("timer")) timer_start = 0;
     else if (!timer_start) timer_start = interp::logic_steps() + 1;

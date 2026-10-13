@@ -13,4 +13,6 @@ int target_frames();                            // latency the producer should a
 void stats(uint64_t& underrun, uint64_t& dropped);  // frames of silence inserted / frames discarded
 void flush();                                   // drop what is queued (a save state was loaded)
 
+uint32_t dump_frames();                         // frames written to WWHD_AUDIO_DUMP so far
+
 }  // namespace audio

@@ -167,6 +167,8 @@ void push(const int16_t* stereo, int frames) {
     g_write.store(w + frames, std::memory_order_release);
 }
 
+uint32_t dump_frames() { return g_dump_frames; }
+
 int buffered_frames() {
     if (!g_unit) return kTarget;
     return (int)(g_write.load(std::memory_order_acquire) - g_read.load(std::memory_order_acquire));
