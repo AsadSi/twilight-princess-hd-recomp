@@ -10,6 +10,9 @@ whose recompiler, Cafe OS layer, Metal renderer, setup and settings overlay it r
 unofficial fan project, not affiliated with or endorsed by Nintendo. It is a work in progress; see the
 issues for what works and what is open.
 
+
+Credits for the original project and everything this builds on: [CREDITS.md](CREDITS.md).
+
 ## You need your own copy
 
 This repository contains no game code, no game assets and no keys. You need your own, legally
