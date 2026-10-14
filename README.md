@@ -7,8 +7,8 @@ with Metal. There is no emulator at run time.
 
 It is a fork of [ZeldaWWHDRecomp](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp) (Wind Waker HD),
 whose recompiler, Cafe OS layer, Metal renderer, setup and settings overlay it reuses. It is an
-unofficial, private fan project, not affiliated with or endorsed by Nintendo. What works and what is
-open is tracked in [docs/brief.md](docs/brief.md).
+unofficial fan project, not affiliated with or endorsed by Nintendo. It is a work in progress; see the
+issues for what works and what is open.
 
 ## You need your own copy
 
