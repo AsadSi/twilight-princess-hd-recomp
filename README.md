@@ -13,6 +13,12 @@ issues for what works and what is open.
 
 Credits for the original project and everything this builds on: [CREDITS.md](CREDITS.md).
 
+| | |
+|---|---|
+| ![Link in a water cave at night](docs/images/water-cave.png) | ![Link raising his sword](docs/images/sword-raised.png) |
+
+*Screenshots from the game running in this port; the game and its artwork belong to Nintendo.*
+
 ## You need your own copy
 
 This repository contains no game code, no game assets and no keys. You need your own, legally
@@ -290,3 +296,9 @@ The code of this project is licensed under the Mozilla Public License 2.0 (see `
 ZeldaWWHDRecomp is. Vendored third-party code keeps its own license. "The Legend of Zelda",
 "Twilight Princess" and "Wii U" are trademarks of Nintendo, used here only to describe what this
 software works with; the game itself is Nintendo's property and is not included.
+
+## More projects
+
+- [Wind Waker HD: native port + mods](https://github.com/AsadSi/wwhd-recomp-mods): spooky sea events, Tetra's ship, online co-op
+- [Ocarina of Time: Recompiled](https://github.com/AsadSi/ocarina-of-time-recomp): native port with mods (unofficial fork)
+- [Fixframe](https://github.com/AsadSi/fixframe-debugger): live render debugger for emulators and ports
