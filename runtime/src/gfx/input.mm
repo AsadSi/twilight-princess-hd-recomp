@@ -6,6 +6,8 @@
 // X = L-stick click, V = R-stick click; controllers use button positions (Xbox "A" = Wii U B).
 #import <AppKit/AppKit.h>
 #import <GameController/GameController.h>
+#import <IOKit/hid/IOHIDManager.h>
+#import <GameController/GCSyntheticDeviceKeys.h>
 #import <QuartzCore/QuartzCore.h>  // CACurrentMediaTime
 #include <Carbon/Carbon.h>  // kVK_* key codes
 
@@ -51,6 +53,60 @@ static PadState keyboard_state(bool use_host) {
     return input_map::keyboard_state(input_map::current(), keys);
 }
 
+
+// Third-party ("paralelo") Pro Controllers whose left stick GameController reports as zero. The
+// controller's 0x30 input report carries both sticks (12-bit, bytes 6-8 left, 9-11 right); it is read
+// passively (nonexclusive IOHIDManager, no output reports) and used for a stick only while
+// GameController's value for it stays at zero and the raw stick has shown real movement.
+// TPHD_PRO_RAW_STICKS=0 turns it off.
+namespace {
+struct RawStick { int x = 2048, y = 2048; bool valid = false, confirmed = false; double at = 0, since = 0; };
+RawStick g_raw_l, g_raw_r;
+uint8_t g_hid_buf[512];
+IOHIDManagerRef g_hid;
+float raw_axis(int v) { int d = v - 2048; return d / (d < 0 ? 2048.0f : 2047.0f); }
+void hid_report(void*, IOReturn res, void*, IOHIDReportType type, uint32_t id, uint8_t* r, CFIndex len) {
+    if (res != kIOReturnSuccess || type != kIOHIDReportTypeInput || id != 0x30 || len < 12 || r[0] != 0x30) return;
+    double t = CACurrentMediaTime();
+    auto feed = [&](RawStick& s, const uint8_t* b) {
+        s.x = b[0] | (b[1] & 15) << 8; s.y = (b[1] >> 4) | b[2] << 4; s.valid = true; s.at = t;
+    };
+    feed(g_raw_l, r + 6); feed(g_raw_r, r + 9);
+}
+void hid_found(void*, IOReturn res, void*, IOHIDDeviceRef d) {
+    if (res != kIOReturnSuccess || IOHIDDeviceGetProperty(d, CFSTR(kIOHIDGCSyntheticDeviceKey)) == kCFBooleanTrue) return;
+    IOHIDDeviceRegisterInputReportCallback(d, g_hid_buf, sizeof g_hid_buf, hid_report, nullptr);
+}
+void hid_removed(void*, IOReturn, void*, IOHIDDeviceRef d) {
+    IOHIDDeviceRegisterInputReportCallback(d, g_hid_buf, sizeof g_hid_buf, nullptr, nullptr);
+    g_raw_l = RawStick(); g_raw_r = RawStick();
+}
+void hid_start() {
+    const char* e = getenv("TPHD_PRO_RAW_STICKS"); if (e && !atoi(e)) return;
+    g_hid = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone); if (!g_hid) return;
+    IOHIDManagerSetDeviceMatching(g_hid, (__bridge CFDictionaryRef)@{@kIOHIDVendorIDKey: @0x057E, @kIOHIDProductIDKey: @0x2009});
+    IOHIDManagerRegisterDeviceMatchingCallback(g_hid, hid_found, nullptr);
+    IOHIDManagerRegisterDeviceRemovalCallback(g_hid, hid_removed, nullptr);
+    IOHIDManagerScheduleWithRunLoop(g_hid, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+    if (IOHIDManagerOpen(g_hid, kIOHIDOptionsTypeNone) != kIOReturnSuccess) {
+        IOHIDManagerUnscheduleFromRunLoop(g_hid, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+        CFRelease(g_hid); g_hid = nullptr;
+    }
+}
+// the raw stick in place of GameController's, when it is the zero-only one
+bool raw_stick(RawStick& s, float nx, float ny, float* x, float* y) {
+    double t = CACurrentMediaTime();
+    if (!s.valid || t - s.at > 0.25) { s.since = 0; return false; }
+    if (std::fabs(nx) > 0.0001f || std::fabs(ny) > 0.0001f) { s.confirmed = false; s.since = 0; return false; }
+    *x = raw_axis(s.x); *y = raw_axis(s.y);
+    if (!s.confirmed) {
+        if (std::fmax(std::fabs(*x), std::fabs(*y)) > 0.3f) { if (!s.since) s.since = t; if (t - s.since >= 0.08) s.confirmed = true; }
+        else s.since = 0;
+    }
+    return s.confirmed;
+}
+}  // namespace
+
 // every mappable controller input, 0..1, the strongest over all connected controllers
 void controller_values(float* v) {
     using namespace input_map;
@@ -70,6 +126,10 @@ void controller_values(float* v) {
         b(g.dpad.up, kPadDUp); b(g.dpad.down, kPadDDown); b(g.dpad.left, kPadDLeft); b(g.dpad.right, kPadDRight);
         auto stick = [&](GCControllerDirectionPad* d, int up, int down, int left, int right) {
             float x = d.xAxis.value, y = d.yAxis.value;
+            if (RawStick* rs = d == g.leftThumbstick ? &g_raw_l : d == g.rightThumbstick ? &g_raw_r : nullptr) {
+                float rx, ry;
+                if (raw_stick(*rs, x, y, &rx, &ry)) { x = rx; y = ry; }
+            }
             put(right, std::max(x, 0.f)); put(left, std::max(-x, 0.f));
             put(up, std::max(y, 0.f)); put(down, std::max(-y, 0.f));
         };
@@ -307,6 +367,7 @@ void init() {
         memset(g_keys, 0, sizeof(g_keys));
     }];
     [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
+    hid_start();  // raw Pro Controller sticks (see raw_stick)
     // GameController values are polled on the main thread
     [NSTimer scheduledTimerWithTimeInterval:1.0 / 240 repeats:YES block:^(NSTimer*) {
         float v[input_map::kPadCount];
