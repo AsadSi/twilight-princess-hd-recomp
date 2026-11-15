@@ -37,8 +37,44 @@ HLE(padscore, KPADEnableDPD) {}
 HLE(padscore, KPADDisableDPD) {}
 HLE(padscore, KPADEnableMpls) {}
 HLE(padscore, KPADDisableMpls) {}
-// -> the previous callback; connections are never reported (the Pro Controller is there or not)
-HLE(padscore, KPADSetConnectCallback) { ret(c, 0); }
+// The connect callback (wut: KPADConnectCallback KPADSetConnectCallback(KPADChan chan,
+// KPADConnectCallback callback); the callback is void (*)(WPADChan chan, WPADError status) with
+// WPAD_ERROR_NONE = 0 on connect and WPAD_ERROR_NO_CONTROLLER = -1 on disconnect). The Pro
+// Controller is there from the start, so a registration queues the "connected" event, delivered by
+// service_connect() on the game thread (VPADRead / KPADReadEx), never from this HLE itself.
+namespace {
+uint32_t g_connect_cb[4] = {0, 0, 0, 0};
+bool g_connect_pending = false;
+}  // namespace
+
+namespace padscore_hle {
+void service_connect(Cpu* c) {
+    if (!g_connect_pending) return;
+    static bool busy = false;  // the callback may itself read the pads: never re-enter
+    if (busy) return;
+    busy = true;
+    g_connect_pending = false;
+    const uint32_t cb = g_connect_cb[0];
+    if (cb && connected(0)) {
+        LOG("[pad] KPAD connect callback %08X: channel 0 connected", cb);
+        guest_call(c, cb, {0u, (uint32_t)kWpadErrNone});
+    }
+    busy = false;
+}
+}  // namespace padscore_hle
+
+HLE(padscore, KPADSetConnectCallback) {
+    // (chan, callback) -> the previous callback, 0 when none was registered
+    const uint32_t chan = arg(c, 0), cb = arg(c, 1);
+    uint32_t prev = 0;
+    if (chan < 4) {
+        prev = g_connect_cb[chan];
+        g_connect_cb[chan] = cb;
+        if (cb && connected(chan)) g_connect_pending = true;
+    }
+    LOG("[pad] KPADSetConnectCallback(%u, %08X) -> %08X", chan, cb, prev);
+    ret(c, prev);
+}
 HLE(padscore, KPADGetMplsWorkSize) { ret(c, 0x5FE0); }
 HLE(padscore, KPADSetMplsWorkarea) {}
 HLE(padscore, WPADEnableURCC) {}
@@ -71,6 +107,7 @@ HLE(padscore, WPADProbe) {
 HLE(padscore, KPADReadEx) {
     // (chan, KPADStatus* buf, count, int32* err) -> samples written
     uint32_t chan = arg(c, 0), st = arg(c, 1), count = arg(c, 2), err = arg(c, 3);
+    padscore_hle::service_connect(c);  // a queued "connected" event goes out here too
     TRACE("[pad] KPADReadEx(%u, %08X, %u) connected=%d", chan, st, count, connected(chan));
     if (!connected(chan) || !st || (int32_t)count <= 0) {
         if (err) st32(err, (uint32_t)(connected(chan) ? kKpadErrNone : kKpadErrNoController));
@@ -81,13 +118,14 @@ HLE(padscore, KPADReadEx) {
     input::PadState p = crashrec::read(1);  // crash recovery records/replays it
     motion::right_stick(p.rx, p.ry);  // the Pro Controller's stick decides gyro use too (motion.h)
     uint32_t hold = pro_buttons(p.buttons);
+    const uint32_t trig = hold & ~last, release = last & ~hold;
     memset(mem::ptr(st), 0, 0xF0);
     st8(st + 0x5C, kDevURCC);     // devType
     st8(st + 0x5D, 0);            // wpadErr
     st8(st + 0x5F, kFormatURCC);  // data_format
     st32(st + 0x60, hold);                // ex_status.uc.hold
-    st32(st + 0x64, hold & ~last);        // trig
-    st32(st + 0x68, last & ~hold);        // release
+    st32(st + 0x64, trig);                // trig
+    st32(st + 0x68, release);             // release
     last = hold;
     stf32(st + 0x6C, p.lx); stf32(st + 0x70, p.ly);  // lstick
     stf32(st + 0x74, p.rx); stf32(st + 0x78, p.ry);  // rstick

@@ -64,8 +64,13 @@ class Recompiler:
         # "@ADDR": instruction-level hook; site_ADDR(c) runs just before the instruction at ADDR
         # (also when ADDR is reached by a branch), so it can adjust what that instruction uses
         self.sites = set()
-        for hp in [os.path.join(here, "hooks.txt")] + sorted(glob.glob(os.path.join(here, "hooks_*.txt"))):
-            if not os.path.exists(hp):
+        # WWHD_HOOKS=<file>: use exactly that hook list instead of hooks.txt + hooks_*.txt (a build
+        # for another region whose code sits at other addresses, e.g. the JP port's hooks_jp.txt)
+        env_hooks = os.environ.get("WWHD_HOOKS")
+        lists = [env_hooks] if env_hooks else ([os.path.join(here, "hooks.txt")] +
+                                               sorted(glob.glob(os.path.join(here, "hooks_*.txt"))))
+        for hp in lists:
+            if not hp or not os.path.exists(hp):
                 continue
             for line in open(hp):
                 line = line.split("#")[0].strip()
