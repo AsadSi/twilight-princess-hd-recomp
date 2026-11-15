@@ -1,4 +1,6 @@
 // Libraries the game uses for system integration and online features.
+
+#include "hle/padscore.h"
 // Online services (Miiverse, SpotPass, accounts) report "unavailable".
 #include "../crashrec.h"
 #include "../runtime.h"
@@ -87,6 +89,7 @@ HLE(vpad, VPADSetGyroZeroPlayParam) {}
 HLE(vpad, VPADRead) {
     // (chan, VPADStatus* buf, count, int32* error) -> samples written
     uint32_t chan = arg(c, 0), st = arg(c, 1), count = arg(c, 2), err = arg(c, 3);
+    padscore_hle::service_connect(c);  // KPAD's connect event rides on the frame's pad read
     // debug: WWHD_TRACE_VPAD=n logs the guest call chain of the first n reads
     static int trace = getenv("WWHD_TRACE_VPAD") ? atoi(getenv("WWHD_TRACE_VPAD")) : 0;
     if (trace > 0) {
