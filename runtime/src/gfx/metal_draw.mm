@@ -761,6 +761,7 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
         d.vertexDescriptor = vd;
     }
     uint32_t blendMask = (regs[REGADDR::CB_COLOR_CONTROL] >> 8) & 0xFF;
+    uint32_t rop = (regs[REGADDR::CB_COLOR_CONTROL] >> 16) & 0xFF;
     uint32_t targetMask = regs[REGADDR::CB_TARGET_MASK];
     for (int i = 0; i < 8; i++) {
         if (!tf.color[i]) continue;
@@ -786,6 +787,16 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
                 ca.sourceAlphaBlendFactor = ca.sourceRGBBlendFactor;
                 ca.destinationAlphaBlendFactor = ca.destinationRGBBlendFactor;
             }
+        } else if ((rop == 0xEE || rop == 0x88) && cfmt[i].kind == FormatInfo::FLOAT) {
+            // Metal has no logic operations. OR and AND become max and min, the same for values that are all
+            // on or all off: the game draws its real-time shadow casters into one texture with OR, each caster
+            // in its own colour, so overlapping silhouettes keep each other's channels. Drawn as a copy, a caster
+            // drawn later wiped the earlier ones where they overlapped, and shadows got a lit second silhouette
+            // cut out of them (a goat's at Link's feet in Ordon Ranch).
+            ca.blendingEnabled = YES;
+            ca.rgbBlendOperation = ca.alphaBlendOperation = rop == 0xEE ? MTLBlendOperationMax : MTLBlendOperationMin;
+            ca.sourceRGBBlendFactor = ca.destinationRGBBlendFactor = MTLBlendFactorOne;
+            ca.sourceAlphaBlendFactor = ca.destinationAlphaBlendFactor = MTLBlendFactorOne;
         }
     }
     if (tf.depth) {
