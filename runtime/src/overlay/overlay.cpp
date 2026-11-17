@@ -59,6 +59,16 @@ double now_s() { return std::chrono::duration<double>(clock::now().time_since_ep
 
 std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
+// The menus select and go back with the controller buttons the player's mapping gives the Wii U's A and B (Controls
+// tab), as the game does: the default mapping's A is the right button, so the menus select with it too. A or B
+// bound to nothing (or to the same input): the bottom and right buttons.
+int menu_button(int action, int fallback) {
+    const input_map::Mapping m = input_map::current();
+    const int p = m.pad[action], other = m.pad[action == input_map::kA ? input_map::kB : input_map::kA];
+    return p > input_map::kPadNone && p != other ? p : fallback;
+}
+int select_button() { return menu_button(input_map::kA, input_map::kPadA); }
+int back_button() { return menu_button(input_map::kB, input_map::kPadB); }
 std::atomic<float> g_density{1.0f};
 std::atomic<bool> g_wait_release{false};  // just closed: the game sees no buttons until all are released
 const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ignore the user's input
@@ -362,8 +372,9 @@ void read_controller() {
 void feed_gamepad(ImGuiIO& io, bool enabled) {
     using namespace input_map;
     auto key = [&](ImGuiKey k, int p) { io.AddKeyAnalogEvent(k, enabled && U.values[p] > 0.5f, enabled ? U.values[p] : 0.0f); };
-    key(ImGuiKey_GamepadFaceDown, kPadA);
-    key(ImGuiKey_GamepadFaceRight, kPadB);
+    // the menus select with FaceDown and go back with FaceRight: the mapping's A and B
+    key(ImGuiKey_GamepadFaceDown, select_button());
+    key(ImGuiKey_GamepadFaceRight, back_button());
     key(ImGuiKey_GamepadFaceLeft, kPadX);
     key(ImGuiKey_GamepadFaceUp, kPadY);
     key(ImGuiKey_GamepadDpadUp, kPadDUp);
@@ -762,7 +773,7 @@ void native_confirm_dialog(NativeConfirm& c, std::string& error) {
         ImGui::SameLine();
         answered = ImGui::Button("Cancel", ImVec2(120, 0)) || accept;
         ImGui::SetItemDefaultFocus();  // keyboard and controller start on Cancel
-        if (controller_pressed(input_map::kPadB)) { answered = true; accept = false; g_pad_b_used = true; }
+        if (controller_pressed(back_button())) { answered = true; accept = false; g_pad_b_used = true; }
     }
     if (accept) {
         bool ok = true;
@@ -1475,9 +1486,9 @@ void settings_window() {
         }
     }
     ImGui::End();
-    // B (not while choosing an input or in a list) or the close button closes the menu
+    // back (the mapping's B; not while choosing an input or in a list) or the close button closes the menu
     if (!open) set_open(false);
-    if (U.cap_action < 0 && controller_pressed(input_map::kPadB) && !g_pad_b_used && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
+    if (U.cap_action < 0 && controller_pressed(back_button()) && !g_pad_b_used && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
         set_open(false);
     g_pad_b_used = false;
 }
