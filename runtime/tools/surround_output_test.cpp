@@ -79,16 +79,19 @@ int main(int argc, char **argv) {
     cpu.r[3] = 1;
     hle_impl_sndcore2_AXGetDeviceMode(&cpu);
     assert(ld32(0x800) == 0);
-    // Full snapshots cache the game's mixer mode. Reject a cross-mode restore before
-    // it can silently make a surround session emit stereo (normal/portable saves work).
+    // Full snapshots hold the game's mixer, which is always 5.1 now. States saved while it mixed stereo
+    // (mode byte 2, or none in the oldest) load too: the load sets the game's mode back to surround.
     ss::Writer snapshot;
     ax_ss_save(snapshot);
+    assert(snapshot.b.back() == 6);
     std::string why;
     assert(ax_ss_check(ss::Reader(snapshot.b.data(), snapshot.b.size()), why));
     snapshot.b.back() = 2;
+    assert(ax_ss_check(ss::Reader(snapshot.b.data(), snapshot.b.size()), why));
+    snapshot.b.back() = 4;
     assert(!ax_ss_check(ss::Reader(snapshot.b.data(), snapshot.b.size()), why));
     snapshot.b.pop_back();
-    assert(!ax_ss_check(ss::Reader(snapshot.b.data(), snapshot.b.size()), why));
+    assert(ax_ss_check(ss::Reader(snapshot.b.data(), snapshot.b.size()), why));
     init_buffers();
     g_upsample_stage[0] = atoi(argv[2]);
     g_upsample_stage[1] = atoi(argv[2]);

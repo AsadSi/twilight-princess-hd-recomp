@@ -488,11 +488,16 @@ void output_frame(Cpu* c) {
 
     const int channels = audio::channels();
     int32_t tv_lr[kTvChannels][kSamples48], drc_lr[2][kSamples48], lr[2][kSamples48];
-    final_mix_lr(G.tv48, n_tv, g_post_hist[0], tv_lr, channels);
+    // the game always mixes 5.1 (AXGetDeviceMode); stereo speakers get it folded down
+    final_mix_lr(G.tv48, n_tv, g_post_hist[0], tv_lr, kTvChannels);
     final_mix_lr(G.drc48, n_drc, g_post_hist[1], drc_lr);
     int16_t pcm[kSamples48 * kTvChannels];
     if (channels == 2) {
-        // Preserve the original stereo path, including its rounding and fader rules.
+        for (int i = 0; i < kSamples48; ++i) {
+            int32_t ax[kTvChannels];
+            for (int ch = 0; ch < kTvChannels; ++ch) ax[ch] = tv_lr[ch][i];
+            audio::fold_to_stereo(ax, tv_lr[0][i], tv_lr[1][i]);
+        }
         g_output.mix(tv_lr[0], tv_lr[1], drc_lr[0], drc_lr[1], kSamples48, lr[0], lr[1]);
         for (int i = 0; i < kSamples48; ++i)
             for (int ch = 0; ch < 2; ++ch)
@@ -561,6 +566,16 @@ Voice* voice(uint32_t vpb) {
 
 // ---- save states: voices and the registered callbacks (the AX frame thread is idle meanwhile)
 #include "../savestate.h"
+
+// The game's speaker mode (0 mono, 1 stereo, 2 surround): asked for once at boot (AXGetDeviceMode, through
+// 02bea628) and kept twice, in the game's own copy (stored at 02ad9e44) and in its sound engine's (02b0b2b8), which
+// pans every sound by it. A full state restores both with the rest of game memory; a load sets them back to this
+// session's answer (always surround), so a state saved while the game mixed stereo mixes 5.1 again.
+constexpr uint32_t kGameSoundMode = 0x1012AFC0, kEngineSoundMode = 0x1012B728, kSoundModeSurround = 2;
+static void set_sound_mode_surround() {
+    for (uint32_t addr : {kGameSoundMode, kEngineSoundMode})
+        if (ld32(addr) <= kSoundModeSurround) st32(addr, kSoundModeSurround);  // (only over a mode: this game's layout)
+}
 void ax_ss_save(ss::Writer& w) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     w.u8(g_running);
@@ -576,7 +591,7 @@ void ax_ss_save(ss::Writer& w) {
     w.pod(G);
     w.u32((uint32_t)g_aux_frame);
     w.pod(g_drc);  // added later: states without it load with a silent GamePad mix
-    w.u8(audio::channels()); // cached guest mixer modes must match the host session
+    w.u8(kTvChannels); // the game's TV mixer (always 5.1 now; 2 in states saved on stereo speakers before that)
 }
 bool ax_ss_check(ss::Reader r, std::string& why) {
     bool running = r.u8();
@@ -598,11 +613,8 @@ bool ax_ss_check(ss::Reader r, std::string& why) {
         why = "invalid audio state";
         return false;
     }
-    if (saved_channels != audio::channels()) {
-        why = std::string("Full save state uses ") + (saved_channels == 6 ? "Surround 5.1" : "Stereo") +
-              " speakers. Restart with that setting, or load a normal save / portable state.";
-        return false;
-    }
+    // any speakers play either: the game mixes 5.1 (a stereo-era state is set back to it, set_sound_mode_surround)
+    // and the output folds it down for stereo
     return true;
 }
 void ax_ss_load(ss::Reader& r) {
@@ -623,7 +635,8 @@ void ax_ss_load(ss::Reader& r) {
     g_aux_frame = (int)r.u32() & 1;
     g_drc = DrcState{{}, {}, {}, {0x8000, 0x8000, 0x8000}};
     if (!r.at_end()) g_drc = r.pod<DrcState>();
-    if (!r.at_end()) r.u8(); // mode was validated before restoring guest memory
+    if (!r.at_end()) r.u8(); // the mixer mode it was saved with: set to this session's below
+    set_sound_mode_surround();
     memset(g_up_hist, 0, sizeof g_up_hist);
     memset(g_drc_up_hist, 0, sizeof g_drc_up_hist);
     memset(g_post_hist, 0, sizeof g_post_hist);
@@ -706,8 +719,11 @@ HLE(sndcore2, AXSetAuxReturnVolume) {
     ret(c, 0);
 }
 HLE(sndcore2, AXGetDeviceMode) {
-    audio::init(); // capability negotiation must precede the game's mode queries
-    const uint32_t mode = arg(c, 0) == 0 && audio::channels() == 6 ? 3 : 0; // AX_MODE_6CH / STEREO
+    audio::init(); // the output is open before the game's mixer starts
+    // the TV is always 5.1, whatever the speakers: output_frame folds it down for stereo. The game sets its mixer up
+    // from this answer once, and a full save state holds that mixer, so states play on any speakers.
+    constexpr uint32_t kAxModeStereo = 0, kAxMode6Ch = 3;
+    const uint32_t mode = arg(c, 0) == 0 ? kAxMode6Ch : kAxModeStereo;  // device 0 TV, 1 GamePad
     if (arg(c, 1))
         st32(arg(c, 1), mode);
     if (getenv("WWHD_AUDIO_MODE_TRACE"))
