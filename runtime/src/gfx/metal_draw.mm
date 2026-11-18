@@ -16,6 +16,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "render_prof.h"
 #include "gx2/gx2_cmd.h"
 #include "write_watch.h"
+#include "compile_notice.h"
 #include "metal.h"
 #include "runtime.h"
 #include "util/helpers/StringBuf.h"
@@ -655,6 +656,10 @@ static bool wait_compiled(const std::atomic<int>& st) {
     static double spent = 0;
     if (frame != R.frame) { frame = R.frame; spent = 0; }
     if (st.load(std::memory_order_acquire) != CS_PENDING) return st.load(std::memory_order_acquire) == CS_READY;
+    // the compile indicator (compile_notice.h) shows only what can be seen: a draw left out, or a wait of more than
+    // a few milliseconds. A pipeline whose GPU code Metal has cached is ready a moment after it is asked for, which
+    // isn't worth a sign.
+    constexpr double kNoticeMs = 6.0;
     if (g_draw_must_run) {
         double t0 = now_ms();
         {
@@ -662,6 +667,7 @@ static bool wait_compiled(const std::atomic<int>& st) {
             g_compile_cv.wait(lk, [&] { return st.load(std::memory_order_acquire) != CS_PENDING; });
         }
         double dt = now_ms() - t0;
+        if (dt >= kNoticeMs) compile_notice::note();
         spent += dt;
         g_must_run_waits++;
         g_must_run_wait_ms += dt;
@@ -670,15 +676,21 @@ static bool wait_compiled(const std::atomic<int>& st) {
             LOG("[gfx] frame %llu: waited %.0f ms for a compile (draw into a target not redrawn every frame)", (unsigned long long)R.frame, dt);
         return st.load(std::memory_order_acquire) == CS_READY;
     }
-    if (spent >= budgetMs) return false;
+    if (spent >= budgetMs) {
+        compile_notice::note();  // left out
+        return false;
+    }
     double t0 = now_ms();
     {
         std::unique_lock<std::mutex> lk(g_compile_mu);
         g_compile_cv.wait_for(lk, std::chrono::duration<double, std::milli>(budgetMs - spent),
                               [&] { return st.load(std::memory_order_acquire) != CS_PENDING; });
     }
-    spent += now_ms() - t0;
-    return st.load(std::memory_order_acquire) == CS_READY;
+    const double dt = now_ms() - t0;
+    spent += dt;
+    const bool ready = st.load(std::memory_order_acquire) == CS_READY;
+    if (!ready || dt >= kNoticeMs) compile_notice::note();
+    return ready;
 }
 
 // Render target formats a pipeline is built for (GX2 surface formats; 0 = no attachment)

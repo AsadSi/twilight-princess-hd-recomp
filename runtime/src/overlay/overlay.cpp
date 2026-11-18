@@ -27,6 +27,7 @@
 #include "../crashrec.h"
 #include "../game_languages.h"
 #include "../gfx/renderer.h"
+#include "../gfx/compile_notice.h"
 #ifdef WWHD_HAS_VULKAN
 #include "../gfx/vulkan/settings.h"
 namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
@@ -59,6 +60,8 @@ double now_s() { return std::chrono::duration<double>(clock::now().time_since_ep
 
 std::atomic<bool> g_open{false};
 std::atomic<bool> g_perf{false};
+// the compile indicator (compile_notice.h): on unless turned off in Settings > Graphics
+std::atomic<bool> g_compile_indicator{true};
 std::atomic<float> g_density{1.0f};
 std::atomic<bool> g_wait_release{false};  // just closed: the game sees no buttons until all are released
 const bool g_no_host = getenv("WWHD_NO_HOST_INPUT") != nullptr;  // test runs ignore the user's input
@@ -635,6 +638,12 @@ void tab_graphics() {
 #endif
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
+    if (check("Show when shaders are compiling", g_compile_indicator.load(), &v)) {
+        g_compile_indicator = v;
+        hostui::post([v] { hostui::set("compileIndicator", v ? "1" : "0"); });
+    }
+    help("A small \"Compiling shaders\" sign in the corner while the game waits for a shader, or leaves something out "
+         "for a moment because its shader isn't ready yet.");
     // the render-thread profiler's latest report (render_prof.h), for performance bug reports
     static double copiedAt = -10;
     if (ImGui::Button("Copy performance report")) {
@@ -1396,6 +1405,23 @@ void perf_window(bool menu_open) {
     (void)menu_open;
 }
 
+// "Compiling shaders" in the bottom-right corner: a turning arc and the words on a dark plate, fading out (alpha)
+void compile_indicator(ImVec2 size, double t, float alpha) {
+    ImDrawList* d = ImGui::GetBackgroundDrawList();
+    const char* text = "Compiling shaders";
+    const float fs = ImGui::GetFontSize(), r = fs * 0.42f, pad = fs * 0.45f;
+    const ImVec2 tw = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, text);
+    const float w = pad + r * 2 + pad * 0.8f + tw.x + pad, h = std::max(tw.y, r * 2) + pad * 1.2f;
+    const ImVec2 hi(size.x - fs * 1.2f, size.y - fs * 1.2f), lo(hi.x - w, hi.y - h);
+    const auto a = [&](int v) { return (int)(v * std::clamp(alpha, 0.0f, 1.0f)); };
+    d->AddRectFilled(lo, hi, IM_COL32(0, 0, 0, a(150)), h / 2);
+    const ImVec2 c(lo.x + pad + r, (lo.y + hi.y) / 2);
+    const float turn = (float)fmod(t * 5.0, 6.2831853);
+    d->PathArcTo(c, r, turn, turn + 4.4f, 24);
+    d->PathStroke(IM_COL32(255, 255, 255, a(230)), fs * 0.13f);
+    d->AddText(ImGui::GetFont(), fs, {c.x + r + pad * 0.8f, (lo.y + hi.y) / 2 - tw.y / 2}, IM_COL32(255, 255, 255, a(230)), text);
+}
+
 // The posture mod's bars, Sekiro's way: filling from the middle out, yellow turning red as they fill. Link's sits
 // above the bottom edge and flashes white at a deflect; the enemy fought last has its bar near the top, with a red
 // mark while a deathblow is open. The Boss health bar mod's bar sits above that.
@@ -1560,6 +1586,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         prefs_read = true;
         std::string v;
         if (hostui::get("perfOverlay", v)) g_perf = v == "1";
+        if (hostui::get("compileIndicator", v)) g_compile_indicator = v != "0";
         // the saved controller choice (WWHD_PRO_CONTROLLER wins); it also hides or shows the GamePad screen
         if (!getenv("WWHD_PRO_CONTROLLER") && hostui::get("proController", v))
             hostui::post([pro = v == "1"] { hostui::set_pro_controller(pro); });
@@ -1606,7 +1633,9 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     const bool posture = !quiet && (bars.link_alpha > 0 || bars.foe_alpha > 0 || bars.deflect > 0 || bars.boss_alpha > 0);
     const double timer = quiet ? -1 : mods::builtin::timer();
     U.linearized = false;
-    if (!open && !perf && toast.empty() && !posture && timer < 0) {
+    // the compile indicator: for half a second after the last draw that waited for a compile or was left out
+    const double compiling = g_compile_indicator.load(std::memory_order_relaxed) && !quiet ? compile_notice::since() : 1e9;
+    if (!open && !perf && toast.empty() && !posture && timer < 0 && compiling >= 0.5) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -1660,6 +1689,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         d->AddText(ImGui::GetFont(), size, {at.x + 1, at.y + 1}, IM_COL32(0, 0, 0, 200), s);
         d->AddText(ImGui::GetFont(), size, at, IM_COL32(255, 250, 235, 255), s);
     }
+    if (compiling < 0.5) compile_indicator(io.DisplaySize, t, 1.0f - (float)std::max(0.0, compiling - 0.25) / 0.25f);
     if (open) settings_window();
     if (perf) perf_window(open);
     if (!toast.empty()) {
