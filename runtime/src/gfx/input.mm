@@ -311,7 +311,30 @@ void init() {
     [NSTimer scheduledTimerWithTimeInterval:1.0 / 240 repeats:YES block:^(NSTimer*) {
         float v[input_map::kPadCount];
         controller_values(v);
-        PadState s = input_map::controller_state(input_map::current(), v);
+        // The Options button (View / Share; a PlayStation controller's Create) held half a second opens the
+        // settings overlay, and a press closes it (overlay.cpp read_controller, which reads the raw values); by
+        // default it is also the GamePad's −, which in Twilight Princess HD switches play to the GamePad screen.
+        // So the game gets it only as a short press: held back while down, and on a release before the half
+        // second (the overlay closed when it went down) a tap of a few frames. A hold that opens the settings, or
+        // a press that closes them, never reaches the game.
+        float game[input_map::kPadCount];
+        std::copy(v, v + input_map::kPadCount, game);
+        {
+            static double down_at = -1, tap_until = -1;
+            static bool for_overlay = false;
+            const double now = CACurrentMediaTime();
+            float& opt = game[input_map::kPadOptions];
+            if (opt > 0.5f) {
+                if (down_at < 0) down_at = now, for_overlay = overlay::is_open();
+                if (now - down_at >= 0.5) for_overlay = true;
+                opt = 0;
+            } else if (down_at >= 0) {
+                if (!for_overlay) tap_until = now + 0.12;  // a few game frames at 30 fps
+                down_at = -1;
+            }
+            if (now < tap_until) opt = 1;
+        }
+        PadState s = input_map::controller_state(input_map::current(), game);
         {
             std::lock_guard<std::mutex> lk(g_mu);
             g_pad = s;

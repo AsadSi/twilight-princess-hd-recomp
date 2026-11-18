@@ -4,7 +4,7 @@
 // resampled, run through its volume envelope and filters and mixed into the buses (main + 3 aux)
 // of two devices: the TV and the (first) GamePad, each with its own device mix per voice. The
 // game's aux effects (reverb...) and final-mix callbacks run on each device's result, which is
-// upsampled to 48 kHz and sent to the host as stereo: the TV, or in Off-TV Play (the game moves
+// upsampled to 48 kHz and sent to the host as stereo or discrete 5.1: the TV, or in Off-TV Play (the game moves
 // its sound to the GamePad) TV + GamePad (audio_output_mode.h).
 // Behaviour follows Cemu's snd_core (ax_mix.cpp, ax_ist.cpp, ax_aux.cpp).
 #include "../platform/host.h"
@@ -20,6 +20,7 @@
 
 #include "../audio_output_mode.h"
 #include "../audio_out.h"
+#include "../audio_channels.h"
 #include "../runtime.h"
 
 
@@ -311,7 +312,7 @@ float g_up_hist[kTvChannels] = {};
 uint32_t g_drc_aux[2][kAuxBuses] = {};
 int g_drc_aux_idle[kAuxBuses] = {};  // frames without GamePad aux input (the effect is skipped)
 float g_drc_up_hist[kDrcChannels] = {};
-float g_post_hist[2][2] = {};  // upsampling after the final mix: [device][L/R]
+float g_post_hist[2][kTvChannels] = {};  // upsampling after the final mix: [device][AX channel]
 
 void init_buffers() {
     for (auto& f : G.aux)
@@ -460,9 +461,9 @@ int final_mix_input(const int32_t (*in)[kSamples], int channels, uint32_t data, 
     return n;
 }
 
-// a device's front left/right after its final mix, at 48 kHz
-void final_mix_lr(uint32_t data, int n, float* hist, int32_t lr[2][kSamples48]) {
-    for (int ch = 0; ch < 2; ch++) {
+// A device's requested channels after its final mix, at 48 kHz.
+void final_mix_lr(uint32_t data, int n, float* hist, int32_t lr[][kSamples48], int channels = 2) {
+    for (int ch = 0; ch < channels; ch++) {
         if (n == kSamples48) {
             for (int i = 0; i < kSamples48; i++) lr[ch][i] = (int32_t)ld32(data + 4 * (ch * n + i));
         } else {
@@ -485,16 +486,36 @@ void output_frame(Cpu* c) {
     memset(mem::ptr(G.drc48 + 4 * kDrcChannels * n_drc), 0, 4 * kDrcChannels * n_drc);
     call_final_mix(c, 1, G.drc_param, G.drc_ptrs, G.drc48, kDrcChannels, 2, n_drc);
 
-    // stereo out at 48 kHz (both devices are in stereo mode: front left/right): the TV, plus the
-    // GamePad in Off-TV Play (audio_output_mode.h)
-    int32_t tv_lr[2][kSamples48], drc_lr[2][kSamples48], lr[2][kSamples48];
-    final_mix_lr(G.tv48, n_tv, g_post_hist[0], tv_lr);
+    const int channels = audio::channels();
+    int32_t tv_lr[kTvChannels][kSamples48], drc_lr[2][kSamples48], lr[2][kSamples48];
+    // the game always mixes 5.1 (AXGetDeviceMode); stereo speakers get it folded down
+    final_mix_lr(G.tv48, n_tv, g_post_hist[0], tv_lr, kTvChannels);
     final_mix_lr(G.drc48, n_drc, g_post_hist[1], drc_lr);
-    g_output.mix(tv_lr[0], tv_lr[1], drc_lr[0], drc_lr[1], kSamples48, lr[0], lr[1]);
-    int16_t pcm[kSamples48 * 2];
-    for (int i = 0; i < kSamples48; i++) {
-        pcm[i * 2] = (int16_t)std::clamp(lr[0][i], -32768, 32767);
-        pcm[i * 2 + 1] = (int16_t)std::clamp(lr[1][i], -32768, 32767);
+    int16_t pcm[kSamples48 * kTvChannels];
+    if (channels == 2) {
+        for (int i = 0; i < kSamples48; ++i) {
+            int32_t ax[kTvChannels];
+            for (int ch = 0; ch < kTvChannels; ++ch) ax[ch] = tv_lr[ch][i];
+            audio::fold_to_stereo(ax, tv_lr[0][i], tv_lr[1][i]);
+        }
+        g_output.mix(tv_lr[0], tv_lr[1], drc_lr[0], drc_lr[1], kSamples48, lr[0], lr[1]);
+        for (int i = 0; i < kSamples48; ++i)
+            for (int ch = 0; ch < 2; ++ch)
+                pcm[i * 2 + ch] = int16_t(std::clamp(lr[ch][i], -32768, 32767));
+    } else {
+        // the GamePad mix (Off-TV Play) on the front left/right, at the TV's level as in stereo
+        // (audio_output_mode.h); its first silent frame ends the switch back to the TV the same way
+        g_output.drc_sounds = false;
+        for (int i = 0; i < kSamples48; ++i) {
+            int32_t ax[kTvChannels];
+            for (int ch = 0; ch < kTvChannels; ++ch)
+                ax[ch] = tv_lr[ch][i];
+            g_output.drc_sounds |= (drc_lr[0][i] | drc_lr[1][i]) != 0;
+            for (int ch = 0; ch < kTvChannels; ++ch)
+                pcm[i * kTvChannels + ch] = audio::tv_sample(
+                    ax, ch, g_output.play_tv, ch < 2 ? int32_t(drc_lr[ch][i] * audio::OutputSelect::kDrcLevel) : 0,
+                    g_output.play_drc);
+        }
     }
     audio::push(pcm, kSamples48);
 }
@@ -545,6 +566,16 @@ Voice* voice(uint32_t vpb) {
 
 // ---- save states: voices and the registered callbacks (the AX frame thread is idle meanwhile)
 #include "../savestate.h"
+
+// The game's speaker mode (0 mono, 1 stereo, 2 surround): asked for once at boot (AXGetDeviceMode, through
+// 02bea628) and kept twice, in the game's own copy (stored at 02ad9e44) and in its sound engine's (02b0b2b8), which
+// pans every sound by it. A full state restores both with the rest of game memory; a load sets them back to this
+// session's answer (always surround), so a state saved while the game mixed stereo mixes 5.1 again.
+constexpr uint32_t kGameSoundMode = 0x1012AFC0, kEngineSoundMode = 0x1012B728, kSoundModeSurround = 2;
+static void set_sound_mode_surround() {
+    for (uint32_t addr : {kGameSoundMode, kEngineSoundMode})
+        if (ld32(addr) <= kSoundModeSurround) st32(addr, kSoundModeSurround);  // (only over a mode: this game's layout)
+}
 void ax_ss_save(ss::Writer& w) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
     w.u8(g_running);
@@ -560,13 +591,31 @@ void ax_ss_save(ss::Writer& w) {
     w.pod(G);
     w.u32((uint32_t)g_aux_frame);
     w.pod(g_drc);  // added later: states without it load with a silent GamePad mix
+    w.u8(kTvChannels); // the game's TV mixer (always 5.1 now; 2 in states saved on stereo speakers before that)
 }
 bool ax_ss_check(ss::Reader r, std::string& why) {
     bool running = r.u8();
     uint32_t base = r.u32();
     if (running && !g_running) { why = "audio is not initialized yet"; return false; }
     if (running && base != g_vpb_base) { why = "audio voices live elsewhere in this session"; return false; }
-    return r.ok;
+    uint32_t voices = r.u32();
+    if (voices > kMaxVoices) {
+        why = "invalid audio voice count";
+        return false;
+    }
+    r.bytes(nullptr, voices * sizeof(Voice) + sizeof(g_app_frame_cb) + sizeof(g_final_mix_cb) + sizeof(g_aux_cb) +
+                         sizeof(g_aux_user) + sizeof(g_aux_return) + sizeof(g_upsample_stage) + sizeof(G) +
+                         sizeof(uint32_t));
+    if (!r.at_end())
+        r.bytes(nullptr, sizeof(DrcState));
+    int saved_channels = r.at_end() ? 2 : r.u8(); // legacy full states were always stereo
+    if (!r.ok || !r.at_end() || (saved_channels != 2 && saved_channels != 6)) {
+        why = "invalid audio state";
+        return false;
+    }
+    // any speakers play either: the game mixes 5.1 (a stereo-era state is set back to it, set_sound_mode_surround)
+    // and the output folds it down for stereo
+    return true;
 }
 void ax_ss_load(ss::Reader& r) {
     std::lock_guard<std::mutex> lk(g_ax_mutex);
@@ -586,6 +635,8 @@ void ax_ss_load(ss::Reader& r) {
     g_aux_frame = (int)r.u32() & 1;
     g_drc = DrcState{{}, {}, {}, {0x8000, 0x8000, 0x8000}};
     if (!r.at_end()) g_drc = r.pod<DrcState>();
+    if (!r.at_end()) r.u8(); // the mixer mode it was saved with: set to this session's below
+    set_sound_mode_surround();
     memset(g_up_hist, 0, sizeof g_up_hist);
     memset(g_drc_up_hist, 0, sizeof g_drc_up_hist);
     memset(g_post_hist, 0, sizeof g_post_hist);
@@ -667,7 +718,18 @@ HLE(sndcore2, AXSetAuxReturnVolume) {
     }
     ret(c, 0);
 }
-HLE(sndcore2, AXGetDeviceMode) { if (arg(c, 1)) st32(arg(c, 1), 0); ret(c, 0); }  // stereo
+HLE(sndcore2, AXGetDeviceMode) {
+    audio::init(); // the output is open before the game's mixer starts
+    // the TV is always 5.1, whatever the speakers: output_frame folds it down for stereo. The game sets its mixer up
+    // from this answer once, and a full save state holds that mixer, so states play on any speakers.
+    constexpr uint32_t kAxModeStereo = 0, kAxMode6Ch = 3;
+    const uint32_t mode = arg(c, 0) == 0 ? kAxMode6Ch : kAxModeStereo;  // device 0 TV, 1 GamePad
+    if (arg(c, 1))
+        st32(arg(c, 1), mode);
+    if (getenv("WWHD_AUDIO_MODE_TRACE"))
+        LOG("[ax] device %u mode %u caller %08x", arg(c, 0), mode, c->lr);
+    ret(c, 0);
+}
 HLE(sndcore2, AXSetDeviceUpsampleStage) {
     if (arg(c, 0) < 3) g_upsample_stage[arg(c, 0)] = arg(c, 1);
     ret(c, 0);
